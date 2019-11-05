@@ -1,0 +1,24 @@
+python -m uxs.base.test_xc binance ob=ETH/BTC responses
+python -m uxs.base.test_xc binance ob=ETH/BTC -unsub 5 -resub 2 responses
+python -m uxs.base.test_xc binance ob=ETH/BTC,BTC/USDT -unsub 5 -resub 2
+python -m uxs.base.test_xc binance ob=ETH/BTC,BTC/USDT m -unsub 5 -resub 2
+python -m uxs.base.test_xc binance ticker=ETH/BTC,BTC/USDT -u -r -s
+python -m uxs.base.test_xc binance ticker=ETH/BTC,BTC/USDT m -u -r -s
+python -m uxs.base.test_xc binance order -c 4
+python -m uxs.base.test_xc binance order+
+python -m uxs.base.test_xc binance ticker=ETH/BTC,BTC/USDT m ob=ETH/BTC order+ -u -r -s
+python -m uxs.base.test_xc bittrex tickers -u -r -s
+python -m uxs.base.test_xc bittrex ob=ETH/BTC order -u -r -s
+python -m uxs.base.test_xc bittrex ob=ETH/BTC order -c
+python -m uxs.base.test_xc hitbtc ob responses
+python -m uxs.base.test_xc hitbtc ob=ETH/BTC,BTC/USDT -unsub 3 -resub 2
+python -m uxs.base.test_xc hitbtc tickers=ETH/BTC,BTC/USDT -unsub 3 -resub 2
+python -m uxs.base.test_xc hitbtc order+
+python -m uxs.base.test_xc hitbtc order+ETH/BTC,0.01,0.018501,buy
+python -m uxs.base.test_xc hitbtc order+ETH/BTC,0.01,0.01,sell
+python -m uxs.base.test_xc hitbtc ticker=ETH/BTC,XRP/USDT ob=XRP/USDT order+ -u -r -s
+python -m uxs.base.test_xc kucoin ticker=XRP/BTC ob order -unsub 6 -resub 2 -s
+python -m uxs.base.test_xc poloniex tickers -u -r -s
+python -m uxs.base.test_xc poloniex ob order -u -r -s
+
+python -m uxs.base.tools.ccxt
