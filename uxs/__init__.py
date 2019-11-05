@@ -1,3 +1,6 @@
+__version__ = '0.1.0'
+__author__ = 'binares'
+
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
 
 from uxs.base.ccxt import (get_name, get_exchange, init_exchange, 

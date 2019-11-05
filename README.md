@@ -1,2 +1,2 @@
-# uxs
-a universal crypto exchange websocket
+# UXS - Universal eXchange Socket
+A universal crypto exchange websocket

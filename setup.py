@@ -25,8 +25,7 @@ setup(
        'prj @ git+https://github.com/binares/prj.git',
        'fons @ git+https://github.com/binares/fons.git',
        'wsclient @ git+https://github.com/binares/wsclient.git',
-       #'fintls @ git+ssh://git@github.com/binares/fintls.git@patch-1',
-       'fintls @ git+https://github.com/binares/fintls.git@patch-1',
+       'fintls @ git+https://github.com/binares/fintls.git',
    ],
 )
 
