@@ -4,13 +4,15 @@ import time
 import sys
 
 DEFAULT_EXCHANGE = 'bittrex'
-DEFAULT_SHOW = ['ob']
+DEFAULT_DISPLAY = ['ob']
 
 import uxs
 from fons.aio import call_via_loop_afut, lrc
+from fons.argv import parse_argv
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
+oid = None
 
 async def _unsub(params, delay=0, merge=False):
     await asyncio.sleep(delay)
@@ -88,12 +90,12 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
     else: xs.subscribe_to_orderbook(symbols)
         
     def _print_ob_changes(changes, symbol=symbols[0]):
-        print('(d)ob  {}: {}'.format(symbol,changes))
+        print('(d)ob  {}: {}'.format(symbol, changes))
         
     def _print_last_n(symbol=symbols[0]):
         ob = xs.orderbooks.get(symbol,{})
-        print('(d)ob {} bid[:{}]: {}'.format(symbol,_print,ob.get('bid',[])[:_print]))
-        print('(d)ob {} ask[:{}]: {}'.format(symbol,_print,ob.get('ask',[])[:_print]))
+        print('(d)ob {} bids[:{}]: {}'.format(symbol, _print, ob.get('bids',[])[:_print]))
+        print('(d)ob {} asks[:{}]: {}'.format(symbol, _print, ob.get('asks',[])[:_print]))
     
     _symbols = symbols if not merge else [symbols]
     for symbol in _symbols:
@@ -106,7 +108,7 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
     else:
         while True:
             e = xs.events['orderbook'][symbols[0]]
-            (await e.wait()),e.clear()
+            (await e.wait()), e.clear()
             _print_last_n()
     #while True:
         #await _print_changed('orderbook','orderbooks',clear_first=True)
@@ -147,62 +149,80 @@ async def cancel_order(*args):
     r = await xs.cancel_order(oid, symbol)
     print('r_cancel ', r)
 
-async def _stop():
-    await asyncio.sleep(stop)
+async def _stop(wait_time):
+    await asyncio.sleep(wait_time)
     xs.stop()
     
-async def _restart():
-    await asyncio.sleep(stop+2)
+async def _restart(stop_wait_time):
+    await asyncio.sleep(stop_wait_time+2)
     await xs.start()   
         
         
-if __name__ == '__main__':
-    try: xc = sys.argv[1]
+def main():
+    global xs
+    fons.log.quick_logging(3)
+    
+    try: xc = sys.argv.pop(1)
     except IndexError:
         xc = DEFAULT_EXCHANGE
-
-    unsub = False
-    for param in '-u','-unsub':
-        try: i = sys.argv[2:].index(param)
-        except ValueError: continue
-        try: unsub = float(sys.argv[2+i+1])
-        except (ValueError,IndexError): unsub = 4
-    resub = False
-    for param in '-r','-resub':
-        try: i = sys.argv[2:].index(param)
-        except ValueError: continue
-        try: resub = unsub + float(sys.argv[2+i+1])
-        except (ValueError,IndexError):
-            resub = unsub + 2
-    stop = False
-    for param in '-s','-stop':
-        try: i = sys.argv[2:].index(param)
-        except ValueError: continue
-        try: stop = float(sys.argv[2+i+1])
-        except (ValueError,IndexError):
-            stop = max(resub + 2, unsub + 2, 10)
-    crash = False
-    for param in '-c','-crash':
-        try: i = sys.argv[2:].index(param)
-        except ValueError: continue
-        try: crash = float(sys.argv[2+i+1])
-        except (ValueError,IndexError):
-            crash = max(resub + 2, unsub + 2, 10)
     
-    show = sys.argv[2:]
-    if not show: show = DEFAULT_SHOW
-    
-    fons.log.quick_logging(3)
-    config = {'name':'{}Ws'.format(xc.capitalize()),}
-    config['channels'] = {'orderbook': {'delete_data_on_unsub': False}}
-    config['ob'] = {'assert_integrity': True}
-    if 'responses' in show:
-        config['connection_defaults'] = {'handle': lambda x: print(x)}
+    def _to_float(x):
+        try: return float(x)
+        except ValueError:
+            return None
         
-    xs = uxs.get_socket(xc, config)
+    def _split(x):
+        return x.split(',')
     
-    oid = None
+    activities = ['u','unsub','r','resub','s','stop','c','crash']
+    apply = dict.fromkeys(activities, _to_float)
+    apply.update(dict.fromkeys(['d','display','ticker','all_tickers','ob'], _split))
     
+    p = parse_argv(sys.argv[1:], apply)
+
+    unsub = p.which(['u','unsub'], False)
+    resub = p.which(['r','resub'], False)
+    stop = p.which(['s','stop'], False)
+    crash = p.which(['c','crash'], False)
+    
+    if unsub:
+        unsub = p.get(unsub) if p.get(unsub) is not None else 4
+    if resub:
+        resub = unsub + p.get(resub) if p.get(resub) is not None else unsub + 2
+    if stop:
+        stop = max(unsub, resub) + p.get(stop) if p.get(stop) is not None else max(resub + 2, unsub + 2, 10)
+    if crash:
+        crash = max(unsub, resub) + p.get(crash) if p.get(crash) is not None else max(resub + 2, unsub + 2, 10)
+    
+    display = p.which(['d','display'], None)
+    if display:
+        display = p.get(display)
+    else:
+        display = DEFAULT_DISPLAY
+    
+    config = {
+        'auth': 'TRADE',
+        'name':'{}Ws'.format(xc.capitalize()), 
+        'channels': {
+            'orderbook': {'delete_data_on_unsub': False}},
+        'ob': {'assert_integrity': True},
+    }
+
+    if 'responses' in display:
+        config['connection_defaults'] = {'handle': lambda x: print(x)}
+    
+    try:
+        xs = uxs.get_socket(xc, config)
+    except ValueError as e:
+        config['auth'] = 'NULL'
+        xs = uxs.get_socket(xc, config)
+    
+    #print(uxs.ExchangeSocket.obm)
+    #print(xs.__class__.obm)
+    print(xs.sub_to_orderbook)
+    print(xs.obm)
+    print(xs.__class__.apiKey)
+    print(xs.apiKey)
     print('has ("all_tickers"): {}'.format(xs.has_got('all_tickers')))
     print('has ("all_tickers","last"): {}'.format(xs.has_got('all_tickers','last')))
     print('has ("all_tickers",["last"]): {}'.format(xs.has_got('all_tickers',['last'])))
@@ -210,25 +230,30 @@ if __name__ == '__main__':
     print('has ("all_tickers",["last","high"]): {}'.format(xs.has_got('all_tickers',['last','high'])))
 
     coros = [xs.start()]
-    t_param, t_i = next(((x,i) for i,x in enumerate(show) if x.startswith('ticker') or x=='all_tickers'),('',None))
+    
+    t_param = p.which(['ticker','all_tickers'], '')
+    ob_param = p.which(['ob'], '')
+    o_param = next((x for x in p if x.startswith('order+') or x=='order'), '')
+    
     if t_param:
-        try: t_merge = show[t_i+1] == 'm'
-        except IndexError: t_merge = False
-        t_symbols = () if '=' not in t_param else tuple(t_param.split('=')[1].split(','))
+        t_index = p.indexes[t_param][0][0]
+        t_merge = (p.argv[t_index+1] == 'm')
+        t_symbols = p.get(t_param, ())
         coros += [fetch_tickers(t_symbols, sub=True, unsub=unsub, resub=resub, merge=t_merge)]
-    ob_param, ob_i = next(((x,i) for i,x in enumerate(show) if x=='ob' or x.startswith('ob=')),('',None))
+        
     if ob_param:
+        ob_index = p.indexes[ob_param][0][0]
+        ob_merge = (p.argv[ob_index+1] == 'm')
+        ob_symbols = p.get(ob_param, ('ETH/BTC',))
         #ob_print = 'changes'
-        ob_symbols = ('ETH/BTC',) if ob_param=='ob' else tuple(ob_param.split('=')[1].split(','))
         ob_print = 4
-        try: ob_merge = show[ob_i+1] == 'm'
-        except IndexError: ob_merge = False
         coros += [fetch_order_book(ob_symbols, ob_print, sub=True, unsub=unsub, resub=resub, merge=ob_merge)]
-    o_param, o_i = next(((x,i) for i,x in enumerate(show) if x.startswith('order+') or x=='order'),('',None))
+    
     if o_param:
         xs.subscribe_to_account()
         coros += [show_trades(), show_orders(), show_balances()] #show_books()
         if crash: coros += [_crash({'_': 'account'}, crash)]
+        
     if o_param.startswith('order+'):
         o_rest = o_param[len('order+'):]
         cancel = o_rest.startswith('-')
@@ -237,10 +262,15 @@ if __name__ == '__main__':
         logger2.debug('Scheduling order: {}'.format(o_args))
         coros += [place_order(*o_args)]
         if cancel: coros += [cancel_order(*o_args)]
+        
     if stop:
-        coros += [_stop(), _restart()]
+        coros += [_stop(stop), _restart(stop)]
         
     g = asyncio.gather(*coros)
     #asyncio.get_event_loop().run_forever()
     lrc(g)
+
+
+if __name__ == '__main__':
+    main()
         

@@ -143,22 +143,22 @@ class poloniex(ExchangeSocket):
         symbol = self.id_to_symbol(r[0])
         try: data = r[2]
         except IndexError: return
-        new_obs = {'symbol': symbol, 'bid': [], 'ask': []}
-        upd_obs = {'symbol': symbol, 'bid': [], 'ask': []}
+        new_obs = {'symbol': symbol, 'bids': [], 'asks': []}
+        upd_obs = {'symbol': symbol, 'bids': [], 'asks': []}
         methods = dict.fromkeys(('create','update'),False)
                 
         for item in data:
             if item[0] == 'i':
                 ob = item[1]
                 _symbol2_poloformat = ob['currencyPair']
-                new_obs['bid'] = [[float(rate),float(qty)] for rate,qty in ob['orderBook'][1].items()]
-                new_obs['ask'] = [[float(rate),float(qty)] for rate,qty in ob['orderBook'][0].items()]
+                new_obs['bids'] = [[float(rate),float(qty)] for rate,qty in ob['orderBook'][1].items()]
+                new_obs['asks'] = [[float(rate),float(qty)] for rate,qty in ob['orderBook'][0].items()]
                 methods['create'] = True
             elif item[0] == 'o':
-                type = 'bid' if item[1] == 1 else 'ask'
+                side = 'bids' if item[1] == 1 else 'asks'
                 rate = float(item[2])
                 qty = float(item[3])
-                upd_obs[type].append([rate,qty])
+                upd_obs[side].append([rate,qty])
                 methods['update'] = True
             elif item[0] == 't':
                 pass

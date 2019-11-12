@@ -171,8 +171,8 @@ class bittrex(ExchangeSocket):
         ts = ctime_ms()
         d = {
             'symbol': self.convert_symbol(r['M'],0),
-            'bid': [[x['R'],x['Q']] for x in r['Z']],
-            'ask': [[x['R'],x['Q']] for x in r['S']],
+            'bids': [[x['R'],x['Q']] for x in r['Z']],
+            'asks': [[x['R'],x['Q']] for x in r['S']],
             'timestamp': ts,
             'datetime': self.api.iso8601(ts),
             'nonce': r['N'],
@@ -198,11 +198,11 @@ class bittrex(ExchangeSocket):
          }"""
         d = {
             'symbol': self.convert_symbol(e['M'],0),
-            'bid': [],
-            'ask': [],
+            'bids': [],
+            'asks': [],
             'nonce': e['N'],
         }    
-        for name,key in zip(['bid','ask'],['Z','S']):
+        for name,key in zip(['bids','asks'],['Z','S']):
             try: branch_changes = e[key]
             except KeyError: continue
             d[name] = [[x['R'],x['Q']] for x in branch_changes]

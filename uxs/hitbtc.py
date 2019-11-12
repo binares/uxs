@@ -184,19 +184,19 @@ class hitbtc(ExchangeSocket):
         p = r['params']
         ob = {}
         ob['symbol'] = self.convert_symbol(p['symbol'],0)
-        ob['bid'] = decode(p['bid'])
-        ob['ask'] = decode(p['ask'])
+        ob['bids'] = decode(p['bid'])
+        ob['asks'] = decode(p['ask'])
         ob['nonce'] = p['sequence']
         return ob
     
     def _deal_with_BitcoinCashUSDT(self, ob):
-        try: bid0 = self.orderbooks['Bitcoin Cash/USDT']['bid'][0][0]
+        try: bid0 = self.orderbooks['Bitcoin Cash/USDT']['bids'][0][0]
         except IndexError: return ob
-        try: min_price = min(self.orderbooks['BCH/USDT']['ask'][0][0],
-                             self.orderbooks['BSV/USDT']['ask'][0][0]) * 1.03
+        try: min_price = min(self.orderbooks['BCH/USDT']['asks'][0][0],
+                             self.orderbooks['BSV/USDT']['asks'][0][0]) * 1.03
         except (KeyError,IndexError):
             min_price = bid0*0.95
-        ob['bid'] = [x for x in ob['bid'] if x[0]>min_price]
+        ob['bids'] = [x for x in ob['bid'] if x[0]>min_price]
         return ob
     
     def on_balance(self, r):
@@ -260,7 +260,7 @@ class hitbtc(ExchangeSocket):
             
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         #side: buy/sell
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         side = ['sell','buy'][direction]
         order_id = _nonce(32,uppers=False)        
         out = dict(params,**{

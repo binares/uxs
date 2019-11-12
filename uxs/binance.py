@@ -190,8 +190,8 @@ class binance(ExchangeSocket):
         update = {
             'symbol': self.convert_symbol(r['s'], 0),
             'timestamp': r['E'],
-            'bid': [[float(y) for y in x] for x in r['b']],
-            'ask': [[float(y) for y in x] for x in r['a']],
+            'bids': [[float(y) for y in x] for x in r['b']],
+            'asks': [[float(y) for y in x] for x in r['a']],
             'nonce': (r['U'],r['u']),
         }
         self.orderbook_maintainer.send_update(update)

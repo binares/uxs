@@ -87,7 +87,7 @@ class OrderbookMaintainer:
         ob = self.xs.orderbooks[symbol]
         cur_nonce = ob['nonce']
         updates = self.cache[symbol]['updates']
-        to_push = {'symbol': symbol, 'bid':[], 'ask':[]}
+        to_push = {'symbol': symbol, 'bids':[], 'asks':[]}
         
         start_from = next((len(updates)-i for i,u in enumerate(reversed(updates)) 
                            if self.resolve_nonce(u['nonce'])[1] <= cur_nonce), 0)
@@ -110,7 +110,7 @@ class OrderbookMaintainer:
                 if self._is_orderbook_reload_time(symbol):
                     logger.debug('{} - reloading orderbook {} due to unsynced nonce.'.format(self.xs.name, symbol))
                     self._schedule_orderbook_creation(symbol)
-            for side in ('bid','ask'):
+            for side in ('bids','asks'):
                 to_push[side] += u[side]
             cur_nonce = n1
         

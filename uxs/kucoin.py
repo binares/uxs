@@ -137,7 +137,7 @@ class kucoin(ExchangeSocket):
         ob = self.api.parse_order_book(data, timestamp, 'bids', 'asks', level - 2, level - 1)
         #with await self.locks['orderbook']:
         return {
-            'symbol': symbol, 'bid': ob['bids'], 'ask': ob['asks'],
+            'symbol': symbol, 'bids': ob['bids'], 'asks': ob['asks'],
             'timestamp': ob['timestamp'], 'datetime': ob['datetime'],
             'nonce': nonce,
         }  
@@ -164,13 +164,13 @@ class kucoin(ExchangeSocket):
         updates = []
         for cur_nonce in range(start, end+1):
             str_nonce = str(cur_nonce)
-            update = {'symbol': symbol, 'bid': [], 'ask': [], 'nonce': cur_nonce}
-            for side in ['bid','ask']:
-                try: changes = d['changes'][side+'s']
+            update = {'symbol': symbol, 'bids': [], 'asks': [], 'nonce': cur_nonce}
+            for side in ['bids','asks']:
+                try: changes = d['changes'][side]
                 except KeyError: continue
                 update[side] = [[float(rate),float(qnt)] for rate,qnt,nonce in changes
                                 if nonce==str_nonce]
-            if len(update['bid']) or len(update['ask']):
+            if len(update['bids']) or len(update['asks']):
                 updates.append(update)
         if len(updates):
             self.orderbook_maintainer.send_update(updates)
@@ -274,7 +274,7 @@ class kucoin(ExchangeSocket):
                 "KC-API-SIGN": signature,
                 "KC-API-TIMESTAMP": str(now),
                 "KC-API-KEY": self.apiKey,
-                "KC-API-PASSPHRASE": self.auth['password'],
+                "KC-API-PASSPHRASE": self.auth_info['password'],
                 "Content-Type": "application/json" # specifying content type or using json=data in request
             }
         #print('headers: {}'.format(headers))

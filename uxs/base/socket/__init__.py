@@ -9,12 +9,12 @@ import datetime
 dt = datetime.datetime
 td = datetime.timedelta
 
-from ..auth import get_auth2
+from ..auth import get_auth2, EXTRA_TOKEN_KEYWORDS
 from ..ccxt import get_exchange
 from .. import poll
 from .orderbook import OrderbookMaintainer
 from .errors import (ExchangeSocketError, ConnectionLimit)
-from fintls.basics import (get_fill_side, get_direction)
+from fintls.basics import (as_ob_fill_side, as_direction)
 from fintls.book import (get_stop_condition, create_orderbook, update_branch, assert_integrity)
 from wsclient import WSClient
 
@@ -45,7 +45,7 @@ class ExchangeSocket(WSClient):
     channel_defaults = {
         'cnx_params_converter': 'm$convert_cnx_params',
     }
-    #If 'is_private' is set to True, .auth() is called on the specific output to server
+    #If 'is_private' is set to True, .sign() is called on the specific output to server
     #if 'ubsub' is set to False, .remove_subscription raises ExchangeSocketError on that channel
     channels = {
         'account': {
@@ -122,13 +122,17 @@ class ExchangeSocket(WSClient):
     
     #The accepted age for retrieving stored markets,currencies,balances etc...
     api_attr_limits = {
-        'markets': 300,
-        #'currencies': 300,
+        'markets': None,
+        #'currencies': None,
         'balances': None,
     }
     __properties__ = \
         [['balance','balances'],
-         ['obm','orderbook_maintainer']]
+         ['obm','orderbook_maintainer'],
+         ['apiKey','api.apiKey'],
+         ['secret','api.secret'],
+         ['auth_info','api._auth_info'],
+         ['fetch_orderbook','fetch_order_book'],]
     
     __extend_attrs__ = WSClient.__extend_attrs__ + ['api_attr_limits','order','ob']
     __deepcopy_on_init__ = __extend_attrs__[:]
@@ -136,16 +140,10 @@ class ExchangeSocket(WSClient):
     
     def __init__(self, config={}):
         
-        super().__init__(config)
+        config = config.copy()
+        auth = _resolve_auth(self.exchange, config)
         
-        if getattr(self,'auth',None) is not None:
-            auth = self.auth
-        else:
-            auth = get_auth2(self.exchange)
-        #self._authenticated = False
-        self.apiKey = auth['apiKey']
-        self.secret = auth['secret']
-        self.auth = auth
+        super().__init__(config)
         
         self.api = get_exchange({
             'exchange':self.exchange,
@@ -154,8 +152,13 @@ class ExchangeSocket(WSClient):
                 'load_currencies':None,
                 'load_markets':None,
                 'profile': getattr(self,'profile',None),},
-            'id': auth['id'],
+            'auth': auth,
         })
+        
+        if getattr(self.api,'markets',None) is None:
+            self.api.markets =  {}
+        if getattr(self.api,'currencies',None) is None:
+            self.api.currencies = {}
         
         names = ['ticker','orderbook','market','balance','trade','order','empty','recv']
         #query_names = ['fetch_order_book','fetch_ticker','fetch_tickers','fetch_balance']
@@ -183,18 +186,23 @@ class ExchangeSocket(WSClient):
         #if not getattr(self.api,'markets',None):
         limit = self.api_attr_limits['markets']
         await self.api._set_markets(limit)
-        #self.api.markets = (await poll.get(self.api,'markets',limit))[0].data
-        #self.api.currencies = (await poll.get(self.api,'currencies',limit))[0].data
-        if len(self.balances) < 5: #info,free,used,total
-            self.balances = (await poll.get(self.api,'balances',self.api_attr_limits['balances']))[0].data #self.api.fetch_balance()
+        #self.api.markets = await poll.fetch(self.api,'markets',limit)
+        #self.api.currencies = await poll.fetch(self.api,'currencies',limit)
+        if len(self.balances) < 5 and self.apiKey: #info,free,used,total
+            self.balances = await poll.fetch(self.api,'balances',self.api_attr_limits['balances'])
+        self._init_events()
         self._init_api_attrs_done = True
     
     def _init_events(self):
-        for market in self.api.markets:
+        markets = self.api.markets if self.api.markets is not None else {}
+        currencies = self.api.markets if self.api.markets is not None else {}
+        
+        for market in markets:
             for x in ['ticker','orderbook']:
                 if market not in self.events[x]:
                     self.events[x][market] = asyncio.Event(loop=self.loop)
-        for cy in self.api.currencies:
+        
+        for cy in currencies:
             for x in ['balance']:
                 if cy not in self.events[x]:
                     self.events[x][cy] = asyncio.Event(loop=self.loop)
@@ -236,7 +244,7 @@ class ExchangeSocket(WSClient):
             self.orderbooks[symbol] = new = create_orderbook(ob)
             _set_event(ob_events, symbol)
             self.broadcast_event('orderbook',
-                                 (symbol, len(new['bid']), len(new['ask'])))
+                                 (symbol, len(new['bids']), len(new['asks'])))
             if self.ob['assert_integrity']:
                 assert_integrity(self.orderbooks[symbol])
         _set_event(ob_events, -1)
@@ -251,7 +259,7 @@ class ExchangeSocket(WSClient):
         for symbol_changes in data:
             symbol = symbol_changes['symbol']
             uniq_bid_changes,uniq_ask_changes = {},{}
-            for side,uniq_changes in zip(('bid','ask'),(uniq_bid_changes,uniq_ask_changes)):
+            for side,uniq_changes in zip(('bids','asks'),(uniq_bid_changes,uniq_ask_changes)):
                 branch = self.orderbooks[symbol][side]
                 for item in symbol_changes[side]:
                     p,sprev,snew = update_branch(item,branch,side)
@@ -262,14 +270,14 @@ class ExchangeSocket(WSClient):
                 self.orderbooks[symbol]['nonce'] = symbol_changes['nonce']
             _set_event(ob_events, symbol)
             self.broadcast_event('orderbook',
-                                 (symbol, len(symbol_changes['bid']), len(symbol_changes['ask'])))
+                                 (symbol, len(symbol_changes['bids']), len(symbol_changes['asks'])))
             if sends and (not only_if_not_subbed or not all_subbed and not is_subbed(symbol)):
                 self._update_ticker_from_ob(symbol,set_ticker_event)
                 
             callbacks = self.callbacks['orderbook'].get(symbol, [])
             cb_input = {'symbol': symbol,
-                        'bid': list(uniq_bid_changes.values()), 
-                        'ask': list(uniq_ask_changes.values()),}
+                        'bids': list(uniq_bid_changes.values()), 
+                        'asks': list(uniq_ask_changes.values()),}
             for cb in callbacks:
                 cb(cb_input)
             if self.ob['assert_integrity']:
@@ -281,7 +289,7 @@ class ExchangeSocket(WSClient):
         except KeyError: d = self.tickers[symbol] = self.api.ticker_entry(symbol)
         for side in ('bid','ask'):
             try: d.update(dict(zip([side,side+'Volume'],
-                                   self.orderbooks[symbol][side][0])))
+                                   self.orderbooks[symbol][side+'s'][0])))
             except IndexError: pass
         if set_event:
             try: e = self.events['ticker'][symbol]
@@ -601,7 +609,7 @@ class ExchangeSocket(WSClient):
                 'symbol': symbol})
             
     async def fetch_balance(self):
-        balances = (await poll.update(self.api,'balances'))[0].data
+        balances = await poll.fetch(self.api,'balances',0)
         self.update_balances(
             [(cy,y['free'],y['used']) for cy,y in balances.items()
              if cy not in ('free','used','total','info')])
@@ -613,22 +621,21 @@ class ExchangeSocket(WSClient):
            orderbook in correct format (i.e. doesn't include (correct!) nonce value under "nonce").
            Some exchanges may offer websocket method for retrieving the full orderbook."""
         #ob = await self.api.fetch_order_book(symbol)
-        ob = (await poll.update(self.api,('orderbook',symbol),limit))[0].data
+        if not limit: limit = [0]
+        ob = await poll.fetch(self.api,('orderbook',symbol),*limit)
         ob = _copy.deepcopy(ob)
-        ob['bid'] = ob.pop('bids')
-        ob['ask'] = ob.pop('asks')
         ob['nonce'] = ob.get('nonce')
         return ob
     
     async def fetch_tickers(self):
-        tickers = (await poll.update(self.api,'tickers'))[0].data
+        tickers = await poll.fetch(self.api,'tickers',0)
         tickers = _copy.deepcopy(tickers)
         self.update_tickers(
             [y for x,y in tickers.items() if x!='info'])
         return self.tickers
     
     async def fetch_ticker(self, symbol):
-        ticker = (await poll.update(self.api,('ticker',symbol)))[0].data
+        ticker = await poll.fetch(self.api,('ticker',symbol),0)
         ticker = _copy.deepcopy(ticker)
         self.update_tickers([ticker])
         return self.tickers[symbol]
@@ -639,7 +646,7 @@ class ExchangeSocket(WSClient):
             
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         amount = self.api.round_amount(symbol, amount)
-        direction = get_direction(side)
+        direction = as_direction(side)
         side = ['sell','buy'][direction]
         if price is not None:
             price = self.api.round_price(symbol, price, side)
@@ -699,8 +706,8 @@ class ExchangeSocket(WSClient):
             return bool(coa)
         
     def is_order_conflicting(self, symbol, side, price):
-        fill_side = get_fill_side(side)
-        sc = get_stop_condition(get_fill_side(side), closed=False)
+        fill_side = as_ob_fill_side(side)
+        sc = get_stop_condition(as_ob_fill_side(side), closed=False)
         return any(sc(price,o['rate']) for o in self.open_orders 
                         if o['symbol']==symbol and o['side']==fill_side)
     
@@ -771,8 +778,30 @@ class ExchangeSocket(WSClient):
             logger.error('{} - force reloading markets {}'.format(self.name, error_txt))
             self._last_markets_loaded_ts = time.time()
             asyncio.ensure_future(self.api._set_markets(limit=0), loop=self.loop)
-                
     
+
+
+def _resolve_auth(exchange, config):
+    auth = config.pop('auth',{})
+    if auth is None: auth = {}
+    elif isinstance(auth, str):
+        auth = {'id': auth}
+    token_kwds = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange, [])
+        
+    for k in token_kwds:
+        value = ''
+        if k in config:
+            value = config.pop(k)
+        if not auth.get(k):
+            auth[k] = value if value is not None else ''
+    
+    """if not auth['apiKey']:
+        relevant = {x:y for x,y in auth.items() if x not in token_kwds}
+        auth = get_auth2(**relevant)"""
+        
+    return auth
+
+
 def _set_event(events, id, via_loop=None, op='set'):
     if events is None: return
     try: event = events[id]
