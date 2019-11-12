@@ -1,37 +1,58 @@
-import prj,os
-P = prj.qs(__file__)
-
+import os
 import inspect
+import yaml
+from io import BytesIO
+from collections import defaultdict
 import datetime
 dt = datetime.datetime
 
-TOKEN_PATH = os.path.join(P.mdpath,'tokens\\crypto')
-EXTRA_PARAMS = {'kucoin': ['password']}
-_warned = {}
-_len = len
+from ._settings import get_setting, set as _set
 
-from fons.io import read_params
+from fons.crypto import password_encrypt, password_decrypt
+from fons.io import wait_filelock, SafeFileLock
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
+EXTRA_TOKEN_KEYWORDS = {
+    'kucoin': ['password'],
+}
+DELETE_DAMAGED_DESTINATION_FILE = True
+ALL_DESCRIPTORS = ['null','info','trade','withdraw','info-','trade-','withdraw-']
 
-def _verify_credentials(credentials, exchange, i):
-    must_have = ('apiKey','secret','withdraw','trade','info','active')
-    missing = tuple(x for x in must_have if x not in credentials)
+_password = None
+_warned = defaultdict(list)
+_len = len
+
+def _verify_exchange_entry(entry, exchange, i):
+    _update_entry_by_its_id(entry)
+    must_have = ('apiKey','secret')
+    missing = tuple(x for x in must_have if x not in entry)
     
     if exchange not in _warned:
         _warned[exchange] = []
         
     if len(missing):
-        _we = _warned.get(exchange, _warned.update({exchange:[]} or _warned[exchange]))
-        label = '\'{}\''.format(credentials['id']) if credentials.get('id') is not None else 'nr {}'.format(i)
+        _we = _warned[exchange]
+        label = "'{}'".format(entry['id']) if entry.get('id') else "#{}".format(i)
         if i not in _we:
-            logger.warning('Token {} of exchange \'{}\' missing the following params: {}'.format(label,exchange,missing))
+            logger.warning("Token {} of exchange '{}' missing the following params: {}".format(label, exchange, missing))
             _we.append(i)
             
         return False
     
     return True
+
+
+def _update_entry_by_its_id(credentials):
+    interpretation = _interpret_auth_id(credentials.get('id'))
+    #Do not overwrite already defined keywords
+    not_already_defined = {x:y for x,y in interpretation.items() if credentials.get(x) is None}
+    credentials.update(not_already_defined)
+    
+    if 'user' not in credentials:
+        credentials['user'] = None
+    
+    return credentials
 
 
 def _get_prev_frame():
@@ -44,53 +65,320 @@ def _get_prev_frame():
     return f
 
 
-def read_tokens():
-    return {e: [c for i,c in enumerate(creds_all) if _verify_credentials(c,e,i)]
-        for e,creds_all in read_params(TOKEN_PATH).items()}
+def _interpret_auth_id(id):
+    if id is None: id = ''
+    specs = id.lower().split('_')
+    by_rank = ['info','trade','withdraw']
+    
+    d = {}
+    
+    d['active'] = not any(x in specs for x in ('disabled','inactive'))
+    
+    rights = dict.fromkeys(by_rank, False)
+        
+    for rank in filter(lambda x: x in specs, ALL_DESCRIPTORS[1:]):
+        include_lower_ranks = True
+        
+        if rank.endswith('-'):
+            rank = rank[:-1]
+            include_lower_ranks = False
+        
+        if include_lower_ranks:
+            index = by_rank.index(rank)
+            changed = dict.fromkeys(by_rank[:index+1], True)
+        else:
+            changed = {rank: True}
+        
+        rights.update(changed) 
+      
+    return dict(d, **rights)
 
 
-def get_auth(exchange, info=True, trade=True, withdraw=False, id=None, user=None, active=True):
-    required = ['apiKey','secret'] + EXTRA_PARAMS.get(exchange.lower(),[])
-    auth2 = get_auth2(exchange, info, trade, withdraw, id, user, active)
+def _strip_id_from_descriptors(id):
+    if id is None: id= ''
+    return '_'.join([x for x in id.split('_') if x.lower() not in ALL_DESCRIPTORS])
+
+
+def read_tokens(password=None):
+    tokens_path = get_setting('TOKENS_PATH')
+    encrypted = get_setting('ENCRYPTED')
+    
+    if tokens_path is not None:
+        if not encrypted:
+            data = _read_ordinary(tokens_path)
+        else:
+            data = _read_encrypted(tokens_path, password)
+        tokens = {xc: [e for i,e in enumerate(entries) if _verify_exchange_entry(e,xc,i)]
+                  for xc,entries in data.items()}
+    else:
+        tokens = {}
+        
+    return tokens
+
+
+def _read_ordinary(tokens_path):
+    wait_filelock(tokens_path)
+    with open(tokens_path, encoding='utf-8') as f:
+        tokens = yaml.safe_load(f)
+        
+    return tokens
+
+
+def get_auth(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
+    required = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange.lower(),[])
+    auth2 = get_auth2(exchange, info, trade, withdraw, id, user, active, **kw)
+    
     return {x:y for x,y in auth2.items() if x in required}
     
     
-def get_auth2(exchange, info=True, trade=True, withdraw=False, id=None, user=None, active=True):
-    e_lower = exchange.lower()
+def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
     
-    if not any((info,trade,withdraw)):
-        return {'apiKey': '', 'secret': '', 'info': False, 'trade': False, 'withdraw': False, 
-                'id': '{}_public'.format(exchange), 'user': None, 'active': True}
+    requested = dict({'id': id, 'info': info, 'trade': trade, 'withdraw': withdraw,
+                      'active': active, 'user': user}, **kw)
     
+    _update_entry_by_its_id(requested)
+    
+    if _are_tokens_already_set(requested):
+        return _add_auth(exchange, requested)
+    
+    info, trade, withdraw = requested['info'], requested['trade'], requested['withdraw']
+    rights = {k:requested[k] for k in ['info','trade','withdraw']}
+    
+    if not any(rights.values()):
+        if not id:
+            id = '{}_NULL'.format(exchange)
+        #elif 'NULL' not in id.upper().split('_'):
+        #    id += '_NULL'
+            
+        return {'id': id, 'apiKey': '', 'secret': '',
+                'info': False, 'trade': False, 'withdraw': False, 
+                'user': None, 'active': True}
+    
+    xc_lower = exchange.lower()
     tokens = read_tokens()
 
-    if e_lower not in tokens:
-        raise ValueError('Exchange \'{}\' has no tokens associated with it.'.format(exchange))
+    if xc_lower not in tokens:
+        raise ValueError("Exchange '{}' has no tokens associated with it.".format(exchange))
     
-    e_creds = tokens[e_lower]
+    entries = tokens[xc_lower]
+    entries = [_update_entry_by_its_id(e) for e in entries]
     
-    _specs = {'info': info, 'trade': trade, 'withdraw': withdraw, 'user': user, 'id': id, 'active': active}
+    _specs = {k:requested[k] for k in ['info','trade','withdraw','user','active']}
     specs = {x:y for x,y in _specs.items() if y is not None}
-    ranks = ('withdraw','trade','info')
+    show_specs = dict(specs, id=id)
+    ranks_from_highest = ('withdraw','trade','info')
+    matches = entries
     
+    id_plain = _strip_id_from_descriptors(id)
+    if id_plain:
+        matches = [e for e in matches if _strip_id_from_descriptors(id)==id_plain]
+        
     #All matches (including those that have more rights than requested)
-    matches = [x for x in e_creds if all(x.get(y)==z for y,z in specs.items() if y not in ranks or z is not False)]
+    matches = [e for e in matches if all(e.get(k)==v for k,v in specs.items()
+                                         if k not in ranks_from_highest or v is not False)]
     
     #Of those, select the one with least rights
-    for rank in ranks:
-        disabled = [x for x in matches if x.get(rank) is False]
-        if len(disabled): matches = disabled
-        else: continue
+    for rank in ranks_from_highest:
+        negative = [e for e in matches if not e.get(rank)]
+        if len(negative):
+            matches = negative
     
-    required = ['apiKey','secret'] + EXTRA_PARAMS.get(exchange,[])
+    required = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange,[])
     
     if not len(matches):
-        raise ValueError('No {} token matched against these params: {}'.format(exchange, specs))
+        raise ValueError("No {} token matched against these params: {}".format(exchange, show_specs))
     elif any(x not in matches[0] for x in required):
-        raise TypeError('Token is missing one of these properties: {}'.format(required))
+        raise TypeError("Token is missing one of these properties: {}".format(required))
     
     f = _get_prev_frame()
-    logger.debug('Retrieved auth id \'{}\' (called from \'\\{}:{}\')'.format(
-        matches[0].get('id'), '\\'.join(f.f_code.co_filename.split('\\')[-3:]), f.f_code.co_name))
+    entry = matches[0]
     
-    return matches[0]
+    #Log the id of the matched entry and what function and module requested it
+    #(for potential security purposes)
+    logger.debug("Retrieved auth id '{}' (called from '\\{}:{}')".format(
+        entry.get('id'), '\\'.join(f.f_code.co_filename.split('\\')[-3:]), f.f_code.co_name))
+    
+    return entry
+
+
+def _are_tokens_already_set(kw):
+    if kw.get('apiKey'):
+        return True
+    else:
+        return False
+
+
+def _add_auth(exchange, kw):
+    required = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange.lower(),[])
+    kw.update({k:'' for k in required if not kw.get(k)})
+    return kw
+
+
+def _create_file_path(path, ending=''):
+    dir = os.path.dirname(path)
+    fn = os.path.basename(path)
+    path += ending
+    i = 2
+    
+    while os.path.exists(path):
+        new_fn = '{}{}({})'.format(fn,ending,i)
+        i += 1
+        path = os.path.join(dir, new_fn)
+        
+    return path
+
+
+def _undo_file_path_creation(path, ending=''):
+    """tokens_encrypted(2) -> tokens(2) | ending='encrypted'"""
+    if not ending:
+        return path
+    
+    dir = os.path.dirname(path)
+    fn = os.path.basename(path)
+    
+    if ending.lower() not in fn.lower():
+        return path
+    
+    loc = fn.lower().rfind(ending.lower())
+    end = loc + len(ending)
+    
+    after = fn[end:]
+
+    if after and (after[:1] != '(' or after[-1:] != ')' or not after[1:-1].isdigit()):
+        return path
+    
+    return os.path.join(dir, fn[:loc]+after)
+    
+
+def _fetch_password(password):
+    if password is None:
+        if _password is None:
+            raise ValueError("Password isn't specified, nor has been cached globally")
+        password = _password
+        
+    if not isinstance(password, str):
+        raise TypeError('Password must be string; got: {}'.format(type(password)))
+        
+    return password
+
+
+def _fetch_tokens_path():
+    tokens_path = get_setting('TOKENS_PATH')
+    if tokens_path is None:
+        raise ValueError("TOKENS_PATH isn't set")
+    
+    return tokens_path
+    
+
+def encrypt_tokens(password, destination_dir=None, make_permanent=True,  **kw):
+    """
+    Encrypts the file against the password. Output file will be named as 
+    "{original_name}_encrypted", and saved in the same directory, unless
+    destination_dir is specified. Original file will NOT be modified.
+    
+    :returns: the path to the new file (encrypted)
+    """
+    if not isinstance(password, str):
+        raise TypeError('Password must be string; got: {}'.format(type(password)))
+    
+    #To ensure that the file is not already encrypted, nor badly formatted
+    read_tokens()
+    
+    tokens_path = os.path.realpath(_fetch_tokens_path())
+    _pth = os.path.join(destination_dir, os.path.basename(tokens_path)) \
+            if destination_dir is not None else tokens_path
+    write_path = _create_file_path(_pth, '_encrypted')
+        
+    unknown = [x for x in kw if x not in ('iterations',)]
+    
+    if unknown:
+        raise ValueError('Got unknown kwarg(s): {}'.format(unknown))
+    
+    tokens = _read_ordinary(tokens_path)
+    
+    encrypted = password_encrypt(yaml.dump(tokens), password, **kw)
+    
+    #Remember the password in-app
+    cache_password(password) 
+    
+    with SafeFileLock(write_path):
+        with open(write_path, 'wb') as f:
+            f.write(encrypted)
+            
+    #Make sure that the file wasn't damaged in the process
+    if _read_encrypted(write_path) != tokens:
+        if DELETE_DAMAGED_DESTINATION_FILE:
+            os.remove(write_path)
+        raise OSError('The destination file was damaged in the process')
+        
+    if make_permanent:
+        _set({'TOKENS_PATH': write_path, 'ENCRYPTED': True}, True)
+        
+    return write_path
+
+
+def _read_encrypted(tokens_path, password=None):
+    password = _fetch_password(password)
+    
+    wait_filelock(tokens_path)
+    
+    with open(tokens_path,'rb') as f:
+        decrypted = password_decrypt(f.read(), password)
+    
+    with BytesIO(decrypted) as stream:
+        tokens = yaml.safe_load(stream)
+    
+    #Remember the password in-app 
+    cache_password(password)
+    
+    return tokens
+
+
+def decrypt_tokens(password=None, destination_dir=None, make_permanent=True):
+    """
+    Decrypts the file. Output file will be named as "{file_name}"
+    with its "_enrypted" ending stripped, and saved in the same directory,
+    unless destination_dir is specified. Original file will NOT be modified.
+    
+    :returns: the path to the new file (no encryption)
+    """
+    tokens_path = os.path.realpath(_fetch_tokens_path())
+    password = _fetch_password(password)
+    encrypted = get_setting('ENCRYPTED')
+    
+    if not encrypted:
+        raise ValueError('File "{}" is not encrypted.'.format(tokens_path))
+    
+    _pth = os.path.join(destination_dir, os.path.basename(tokens_path)) \
+            if destination_dir is not None else tokens_path
+    _pth = _undo_file_path_creation(_pth, '_encrypted')
+    new_path = _create_file_path(_pth, '')
+    
+    tokens = _read_encrypted(tokens_path, password)
+    
+    with SafeFileLock(new_path):
+        with open(new_path, 'w') as f:
+            yaml.dump(tokens, f)
+    
+    #Make sure that the file wasn't damaged in the process
+    if _read_ordinary(new_path) != tokens:
+        if DELETE_DAMAGED_DESTINATION_FILE:
+            os.remove(new_path)
+        raise OSError('The destination file was damaged in the process')
+        
+    #Remember the password in-app
+    cache_password(password)
+    
+    if make_permanent:
+        _set({'TOKENS_PATH': new_path, 'ENCRYPTED': False}, True)
+        
+    return new_path
+    
+
+def cache_password(password):
+    global _password
+    _password = password
+    
+    
+    
+    

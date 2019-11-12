@@ -1,18 +1,14 @@
-import prj
-P = prj.qs(__file__)
-
 import ccxt
 import ccxt.async_support
 import json
 import time
-import itertools
 import copy as _copy
 
-import fintls.basics
-from .auth import (get_auth, get_auth2, EXTRA_PARAMS)
+from .auth import (get_auth, get_auth2, EXTRA_TOKEN_KEYWORDS)
 
+import fintls.basics
 from fons.dict_ops import deep_update
-from fons.iter import flatten
+from fons.iter import flatten, unique
 import fons.math
 from fons.time import ctime_ms
 import fons.log
@@ -29,10 +25,13 @@ ccxt.async_support.hitbtc2.commonCurrencies = \
 ccxt.poloniex.nonce = lambda self: int(time.time()*pow(10,6))
 ccxt.async_support.poloniex.rateLimit = 100
 ccxt.async_support.poloniex.enableRateLimit = True
-SELL_DUST_TO = {'BTC': 0.001, 'ETH': 0.01, 'USDT': None,
+QUOTE_PREFERENCE_ORDER = \
+    ['BTC','ETH','USDT','USD','EUR','USDC','TUSD','SUSD','EURS','DAI','BNB','NEO']
+DUST_DEFINITIONS = {'BTC': 0.001, 'ETH': 0.01, 'USDT': None,
                 'USD': None, 'EUR': None, 'USDC': None,
                 'TUSD': None, 'SUSD': None, 'EURS': None,
                 'DAI': None, 'BNB': None, 'NEO': 0.5}
+MAX_SPREAD_HARD_LIMIT = 0.15
 DUST_SPREAD_LIMIT = 0.5
 RETURN_ASYNC_EXCHANGE = True
 FEE_FROM_TARGET = ['binance','poloniex']
@@ -54,39 +53,45 @@ _exchanges_async = {}
 
 
 class ccxtWrapper:
-    def __init__(self, config={}, load_currencies=1800, load_markets=1800, *, profile=None, auth=None):
+    """Wraps any ccxt exchange"""
+    _try = {'attempts': 2, 'sleep': 0.5}
+    
+    def __init__(self, config={}, load_currencies=None, load_markets=None, *, profile=None, auth=None):
         import uxs.base.poll as poll
         if config is None: config = {}
         else: config = config.copy()
         if auth is None: auth = {}
         if 'apiKey' in auth: config['apiKey'] = auth['apiKey']
         if 'secret' in auth: config['secret'] = auth['secret']
-        for param in flatten(EXTRA_PARAMS.values()):
+        for param in flatten(EXTRA_TOKEN_KEYWORDS.values()):
             if param in auth: config[param] = auth[param]
         
         super().__init__(config)
         xc = get_name(self)
         self._custom_name = xc
-        self._auth_id = auth.get('id')
+        self._token_kwds = ['apiKey', 'secret'] + EXTRA_TOKEN_KEYWORDS.get(xc, [])
+        self._auth_info = dict({x: getattr(self,x,'') for x in self._token_kwds},
+                               **{x:y for x,y in auth.items() if x not in self._token_kwds})
         self._profile_name = profile
         self.FEE_FROM_TARGET = self._custom_name in FEE_FROM_TARGET
         self.COST_LIMIT_WITH_FEE = self._custom_name in COST_LIMIT_WITH_FEE
-
         currencies = markets = None
-        if load_currencies is not False: #not in (None,False):
+        
+        if load_currencies is not False:
             try: currencies = poll.load(xc,'currencies',load_currencies,1)[0].data
-            except (IndexError,json.JSONDecodeError) as e: logger.error('{} - could not (init)load currencies.'.format(xc))
-        if load_markets is not False: #not in (None,False):
+            except (IndexError, json.JSONDecodeError) as e:
+                logger.error('{} - could not (init)load currencies.'.format(xc))
+                
+        if load_markets is not False:
             try: markets = poll.load(xc,'markets',load_markets,1)[0].data
-            except (IndexError,json.JSONDecodeError) as e: logger.error('{} - could not (init)load markets.'.format(xc))
+            except (IndexError, json.JSONDecodeError) as e:
+                logger.error('{} - could not (init)load markets.'.format(xc))
         
         if markets:
-            self.set_markets(markets,currencies)
+            self.set_markets(markets, currencies)
         self.cy_graph = self.load_cy_graph() if markets else None
-        self.sell_dust_to = None
-        self.dust_spread_limit = None
             
-            
+
     def repeatedTry(self, f, args=None, kw=None, attempts=None, sleep=None):
         if attempts is None: attempts = self._try['attempts']
         if sleep is None: sleep = self._try['sleep']
@@ -227,7 +232,7 @@ class ccxtWrapper:
            If balance provided and order size exceeds it, reduces the size.
            Set `full` to True to calculate cost and payout as well.
            `**kw`: ['method'] (`method=None` can only be given if as_type resolves to 'size')"""
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         side = ['sell','buy'][direction]
         if as_type is None:
             as_type = self._decode_as_type(direction, quotation)
@@ -381,7 +386,7 @@ class ccxtWrapper:
 
     def round_price(self, symbol, price, direction=None, limit=False):
         if direction is not None:
-            direction = fintls.basics.get_direction(direction)
+            direction = fintls.basics.as_direction(direction)
         method = 'round' if direction is None else ['up','down'][direction]
         inf = self.markets[symbol]
         p_round = self.round_entity(price, inf['precision']['price'], method)
@@ -407,7 +412,7 @@ class ccxtWrapper:
     
     def calc_cost_from_order_size(self, symbol, side, amount, price, takerOrMaker='taker',
                                   quotation='base', *, method='truncate', **kw):
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         fee_rate = self.markets[symbol][takerOrMaker]
         amount = self._prepare_order_size(symbol, direction, amount, price, quotation, True, method, **kw)
             
@@ -458,7 +463,7 @@ class ccxtWrapper:
     def calc_payout_from_order_size(self, symbol, side, amount, price, takerOrMaker='taker',
                                     quotation='base', fee=None, *, method='truncate', **kw):
         """The amount to be received in target currency"""
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         amount = self._prepare_order_size(symbol, direction, amount, price, quotation, True, method, **kw)
         
         if fee is not None:
@@ -474,7 +479,7 @@ class ccxtWrapper:
      
      
     def _calc_payout_with_given_fee(self, side, order_size, price, fee):
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         if direction:
             payout = order_size - fee if self.FEE_FROM_TARGET else order_size
         else:
@@ -531,7 +536,7 @@ class ccxtWrapper:
         
     @staticmethod
     def _decode_params(side, quotation):
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         quotation = fintls.basics.convert_quotation(quotation, direction)
         is_quote = (quotation=='quote')
         
@@ -540,7 +545,7 @@ class ccxtWrapper:
     
     @staticmethod
     def _decode_as_type(side, quotation):
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         quotation = fintls.basics.convert_quotation(quotation, direction)
         _map = {
             (1,'quote'): 'cost',
@@ -596,7 +601,7 @@ class ccxtWrapper:
     
     
     def get_fee_quotation(self, direction, as_str=True):
-        direction = fintls.basics.get_direction(direction)
+        direction = fintls.basics.as_direction(direction)
         quotation = 0 if not self.FEE_FROM_TARGET else direction
         if as_str:
             quotation = ['quote','base'][quotation]
@@ -649,29 +654,45 @@ class ccxtWrapper:
     
     
     def create_order(self, symbol, type, side, amount, price=None, params={}):
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         side = ['sell','buy'][direction]
         # mro example of kucoin:
         # (<class '__main__.kucoin'>, <class '__main__.asyncCCXTWrapper'>, 
         #  <class '__main__.ccxtWrapper'>, <class 'ccxt.async_support.kucoin.kucoin'>, ...)
+        #(super() is relative to current frame (ccxtWrapper), which is 
+        # ccxt.async_support.kucoin.kucoin)
         return super().create_order(symbol, type, side, amount, price, params)
         
         
     async def create_limited_market_order(self, symbol, side, amount, max_spread=0.1,
-                                          quotation='base', tickers=None, *, balance=None):
-        direction = fintls.basics.get_direction(side)
+                                          quotation='base', *, tickers=None, balance=None,
+                                          ignore_hard_limit=False):
+        """
+        Similar to market order, but the price will be limited to avoid overly large slippage.
+        Order price will be:
+            for buy order: highest_bid * (1+max_spread)
+            for sell_order: lowest_ask / (1+max_spread)
+        """
+        direction = fintls.basics.as_direction(side)
         side = ['sell','buy'][direction]
+        
+        if max_spread < 0:
+            raise ValueError("`max_spread` must be >= 0; got: {}".format(max_spread))
+        
+        elif max_spread > MAX_SPREAD_HARD_LIMIT and not ignore_hard_limit:
+            raise ValueError("`max_spread` exceeded its hard limit ({}); got: {}" \
+                             .format(MAX_SPREAD_HARD_LIMIT, max_spread))
         
         if tickers is None:
             import uxs.base.poll as poll
-            tickers = (await poll.get(self,'tickers',limit='15S'))[0].data
+            tickers = await poll.fetch(self,'tickers',limit=15)
             
         if side == 'buy':
-            bidask = tickers[symbol]['bid']
-            price = bidask*(1+max_spread)
+            highest_bid = tickers[symbol]['bid']
+            price = highest_bid*(1+max_spread)
         else:
-            bidask = tickers[symbol]['ask']
-            price = bidask*(1-max_spread)
+            lowest_ask = tickers[symbol]['ask']
+            price = lowest_ask/(1+max_spread)
             
         cy_graph = self.load_cy_graph()
         prices = {x:y['last'] for x,y in tickers.items()}
@@ -697,39 +718,59 @@ class ccxtWrapper:
         
         
     async def create_limited_market_buy_order(self, symbol, amount, max_spread=0.1,
-                                              quotation='base', tickers=None, *, balance=None):
+                                              quotation='base', *, tickers=None, 
+                                              balance=None, ignore_hard_limit=False):
         return await self.create_limited_market_order(
-            symbol, 'buy', amount, max_spread, quotation, tickers, balance=balance)
+            symbol, 'buy', amount, max_spread, quotation, tickers=tickers,
+            balance=balance, ignore_hard_limit=ignore_hard_limit)
     
     
     async def create_limited_market_sell_order(self, symbol, amount, max_spread=0.1,
-                                               quotation='base', tickers=None, *, balance=None):
+                                               quotation='base', *, tickers=None, 
+                                               balance=None, ignore_hard_limit=False):
         return await self.create_limited_market_order(
-            symbol, 'sell', amount, max_spread, quotation, tickers, balance=balance)
+            symbol, 'sell', amount, max_spread, quotation, tickers=tickers,
+            balance=balance, ignore_hard_limit=ignore_hard_limit)
         
         
-    async def sell_dust(self):
+    async def sell_dust(self, quote_order=None, dust_definitions=None, spread_limit=None):
+        """Sell small quantities to a quote currency"""
         import uxs.base.poll as poll
-        quotes = self.sell_dust_to if self.sell_dust_to is not None else SELL_DUST_TO
-        balances = (await poll.get(self,'balances','2S'))[0].data
-        tickers = (await poll.get(self,'tickers','10T'))[0].data
+        
+        if quote_order is None:
+            quote_order = QUOTE_PREFERENCE_ORDER
+            
+        if dust_definitions is None:
+            dust_definitions = DUST_DEFINITIONS
+            
+        if spread_limit is None:
+            spread_limit = DUST_SPREAD_LIMIT
+            
+        balances = await poll.fetch(self,'balances',0)
+        tickers = await poll.fetch(self,'tickers','2T')
         prices = {x:y['last'] for x,y in tickers.items()}
         cy_graph = self.load_cy_graph()
-        spread_limit = (self.dust_spread_limit if self.dust_spread_limit is not None 
-                        else DUST_SPREAD_LIMIT)
+
         sold = {}
+        
         print([(x,y) for x,y in balances['free'].items() if y])
+        
         for cy,free in balances['free'].items():
             #print(cy)
-            if cy in quotes: continue
-            try: market_quote = next(q for q in quotes if '/'.join([cy,q]) in self.markets)
-            except StopIteration: continue
+            if cy in quote_order:
+                continue
+            try:
+                market_quote = next(q for q in quote_order if '/'.join([cy,q]) in self.markets)
+            except StopIteration:
+                continue
+            
             symbol = '/'.join([cy,market_quote])
             #print(symbol)
-            begin_with = [[market_quote,quotes[market_quote]]]
+            q_order2 = [market_quote] + [q for q in quote_order if q!=market_quote]
             is_dust = True
             
-            for quote,dust_definition in itertools.chain(begin_with, quotes.items()):
+            for quote in q_order2:
+                dust_definition = dust_definitions.get(quote)
                 #print(dust_definition)
                 if dust_definition is None: continue
                 elif quote not in self.currencies: continue 
@@ -743,18 +784,26 @@ class ccxtWrapper:
                 continue
             
             #if free: print(symbol, free, spread_limit)
-            try: await self.create_limited_market_sell_order(symbol, free, spread_limit, tickers=tickers)
-            except ccxt.ExchangeError as exc: pass#logger.error(exc)
-            else: sold[cy] = self.round_amount(symbol, free)
+            try:
+                await self.create_limited_market_sell_order(symbol, free, spread_limit, tickers=tickers)
+            except ccxt.ExchangeError as exc:
+                pass#logger.error(exc)
+            else:
+                sold[cy] = self.round_amount(symbol, free)
             
         return sold
     
-    _try = {'attempts': 2, 'sleep': 0.5}
+    
+    def __del__(self):
+        d = _exchanges_async if isinstance(self, asyncCCXTWrapper) else _exchanges
+        if self in d:
+            del d[self]
+        super().__del__()
     
     
 class asyncCCXTWrapper(ccxtWrapper):
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
-        direction = fintls.basics.get_direction(side)
+        direction = fintls.basics.as_direction(side)
         side = ['sell','buy'][direction]
         # mro example of kucoin:
         # (<class '__main__.kucoin'>, <class '__main__.asyncCCXTWrapper'>, 
@@ -769,16 +818,20 @@ class _ccxtWrapper(ccxtWrapper, ccxt.Exchange):
 
 
 #_ccxtWrapper.
-def get_name(exc):
-    if isinstance(exc,str):
-        return exc.lower().replace('-','')
+def get_name(xc):
+    if isinstance(xc,str):
+        return xc.lower().replace('-','')
     
-    try: return exc._custom_name
-    except AttributeError:
-        spl = exc.name.lower().split()
-        num_loc = max(1, next((i for i,x in enumerate(spl) if any(y.isdigit() for y in x)),len(spl)))
-        #return '-'.join(spl[:num_loc])
-        return ''.join(spl[:num_loc]).replace('-','')
+    if isinstance(xc, ccxt.Exchange):
+        try: return xc._custom_name
+        except AttributeError:
+            spl = xc.name.lower().split()
+            num_loc = max(1, next((i for i,x in enumerate(spl) if any(y.isdigit() for y in x)),len(spl)))
+            #return '-'.join(spl[:num_loc])
+            return ''.join(spl[:num_loc]).replace('-','')
+    #ExchangeSocket object
+    else: 
+        return xc.exchange
     
     
 def init_exchange(exchange):
@@ -793,18 +846,18 @@ def init_exchange(exchange):
     for item in exchanges:
         e_obj = None
         if isinstance(item,dict):
-            e_given = item.get('exchange',item.get('xc',item.get('e')))
+            e_given = item.get('exchange', item.get('xc', item.get('e')))
             e = get_name(e_given)
-            kw = dict({'exchange':e},**{x:y for x,y in item.items() if x not in ('exchange','xc','e')})
+            D = dict({'exchange':e},**{x:y for x,y in item.items() if x not in ('exchange','xc','e')})
             if isinstance(e_given,ccxt.Exchange): e_obj = e_given
         else:
             e = get_name(item)
-            kw = {'exchange': e}
+            D = {'exchange': e}
             if isinstance(item,ccxt.Exchange): e_obj = item
             
         #if e in e_map: continue
         
-        asyn = kw.pop('async') if 'async' in kw else (
+        asyn = D.pop('async') if 'async' in D else (
             isinstance(e_obj, ccxt.async_support.Exchange) 
                 if e_obj is not None else RETURN_ASYNC_EXCHANGE)
         module = ccxt if not asyn else ccxt.async_support
@@ -818,25 +871,36 @@ def init_exchange(exchange):
            
         e_cls = cls_reg[e]
                     
-        try: get = kw.pop('get')
-        except KeyError: get = False
-        try: add = kw.pop('add')
-        except KeyError: add = True
-        try: eobj_args = kw.pop('args')
-        except KeyError: eobj_args = tuple()
-        try: eobj_kw = kw.pop('kwargs')
-        except KeyError: eobj_kw = {}
-        if eobj_args is None: eobj_args = tuple()
-        if eobj_kw is None: eobj_kw = {}
-        else: eobj_kw = {x:y for x,y in eobj_kw.items() if x!='auth'}
+        get = D.pop('get', False)
+        add = D.pop('add', True)
+        args = D.pop('args', ())
+        kwargs = D.pop('kwargs', {})
+        if args is None: args = ()
+        if kwargs is None: kwargs = {}
+
+        eobj_args = args
+        eobj_kw = {x:y for x,y in kwargs.items() if x!='auth'}
         
-        if len(kw) > 1 or not e_obj: auth = get_auth2(**kw)
-        else: auth = dict({'apiKey': e_obj.apiKey, 'secret': e_obj.secret, 'id': e_obj._auth_id},
-                          **{param: getattr(e_obj,param,None) for param in EXTRA_PARAMS.get(e,[])})
+        extra_token_keywords = EXTRA_TOKEN_KEYWORDS.get(e,[])
+        token_keywords = ['apiKey','secret'] + extra_token_keywords
+        
+        if len(D) > 1 or any(kwargs.get(x) for x in token_keywords+['auth']) or not e_obj:
+            auth_dict1 = kwargs.get('auth',{})
+            auth_dict2 = D.get('auth',{})
+            if isinstance(auth_dict1, str): auth_dict1 = {'id': auth_dict1}
+            if isinstance(auth_dict2, str): auth_dict2 = {'id': auth_dict2}
+            #Make it so that auth keywords can be put literally anywhere
+            auth_kw = {x:y for x,y in kwargs.items() if x in token_keywords}
+            auth_kw.update(auth_dict1)
+            auth_kw.update({x:y for x,y in D.items() if x!='auth'})
+            auth_kw.update(auth_dict2)
+            auth = get_auth2(**auth_kw)
+        else:
+            auth = e_obj._auth_info.copy()
         
         if e_obj is None: pass
         elif asyn and not isinstance(e_obj, ccxt.async_support.Exchange): e_obj = None 
-        elif not asyn and isinstance(e_obj,ccxt.async_support.Exchange): e_obj = None
+        elif not asyn and isinstance(e_obj, ccxt.async_support.Exchange): e_obj = None
         
         if e_obj and e_obj.apiKey != auth.get('apiKey'):
             e_obj = None
@@ -846,12 +910,14 @@ def init_exchange(exchange):
             except KeyError: pass
             
         if not e_obj or e_obj.apiKey != auth.get('apiKey'):
-            logger.debug('Initiating ccxt-exchange \'{}\' with auth_id \'{}\''.format(e,auth.get('id')))
-            e_obj = e_cls(*eobj_args,**eobj_kw,auth=auth)
+            logger.debug("Initiating ccxt-exchange '{}' with auth_id '{}'".format(e, auth.get('id')))
+            e_obj = e_cls(*eobj_args, **eobj_kw, auth=auth)
             #raise ValueError('Could not initiate exchange - {}'.format(e))
-        
+
+        if add:
+            deep_update(e_reg,{e: {e_obj.apiKey: e_obj}})
+            
         e_map.append(e_obj)
-        if add: deep_update(e_reg,{e: {e_obj.apiKey: e_obj}}) 
 
     return e_map if not singular else e_map[0] #next(iter(e_map.values()))
 
@@ -875,8 +941,8 @@ def get_exchange(exchange):
     e_list = [init_exchange(_normalize(e)) for e in exchanges]
         
     return e_list if not singular else e_list[0]
-    
-    
+
+
 def list_exchanges():
     exchanges = []
     for attr,v in vars(ccxt).items():

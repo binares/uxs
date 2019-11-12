@@ -1,46 +1,35 @@
-import prj,os
-P = prj.qs(__file__)
-
-import datetime
-dt = datetime.datetime
-td = datetime.timedelta
+import os
 #from dateutil.parser import parse as parsedate
 from collections import (namedtuple,deque)
 import itertools as it
-import filelock
 import json
 import yaml
 import asyncio
-import threading
 import copy as _copy
 import ccxt
+import datetime
+dt = datetime.datetime
+td = datetime.timedelta
 
 #from wrappers import (get_exchange,get_name)
 from .ccxt import (get_exchange, get_name)
+from ._settings import get_setting, get_cache_dir
 
+from fons.dict_ops import deep_get
 from fons.io import (DateTimeEncoder, SafeFileLock, wait_filelock)
-from fons.os import make_dirpath
+from fons.os import (make_dirpath, delete_empty_dirs)
 from fons.time import (dt_strp, dt_round_to_digit, freq_to_offset,
                        freq_to_td, pydt_from_ms, timestamp_ms)
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
-PATHS = {'dir': make_dirpath(P.dpath+'\\.cache','exchanges'),
-         'entries': P.dpath+'\\.cache\\exchanges\\__entries__',
-         'exchange': P.dpath+'\\.cache\\exchanges\\{exchange}\\{file}',
-         'lock': P.dpath+'\\.cache\\exchanges\\__entries__.lock',
-         'exchange_profiles': make_dirpath(P.dpath,'user','exchange-profiles'),}
 
 fnInf = namedtuple('fnInf','exchange type date file data')
 fnInf.__new__.__defaults__ = (None,)*len(fnInf._fields)
+
 prInf = namedtuple('prInf','profile exchange type start end file data')
 prInf.__new__.__defaults__ = (None,)*len(prInf._fields)
 
-_MP_LOCK_TIMEOUT = 2
-_MIN_LOAD_AGE = 0.1
-_MP_LOCK = filelock.FileLock(PATHS['lock'],timeout=_MP_LOCK_TIMEOUT)
-_GL_LOCK = threading.Lock()
-_MP_LOCK.release(True)
 
 _METHODS = {
     'markets': ('load_markets',tuple(),{'reload':True},[]),
@@ -93,7 +82,7 @@ def _assign_storage_deque(exchange, type, *args):
             pass
         elif value is not None:
             d[k] = value
-        
+
 def _get_storage_deque(exchange, type):
     _assign_storage_deque(exchange,type)
     t_type = _type_tuple(type)
@@ -102,15 +91,51 @@ def _get_storage_deque(exchange, type):
         d = d[k]
     deq = d
     return deq
+
+
+def _exchange_and_type_to_str(exchange, type):
+    if not isinstance(type, str):
+        type = tuple(type)[0]
+    
+    exchange0 = exchange
+    if not isinstance(exchange,str):
+        exchange0 = get_exchange(exchange)
+        exchange = get_name(exchange0)
+    
+    return exchange, type
+    
+
+def _fetch_exchange_specific(exchange, type, param, param_xc, **kw):
+    exchange, type = _exchange_and_type_to_str(exchange, type)
         
-async def set_markets(api, limit=15):
-    limit = _resolve_limit(limit)
+    enabled = get_setting(param)
+    enabled_for_xcs = get_setting(param_xc)
+    xc_specific = enabled_for_xcs.get(exchange) if enabled_for_xcs is not None else {}
+    
+    search = [xc_specific, enabled]
+    
+    return deep_get(search, type, **kw)
+
+    
+def is_caching_enabled(exchange, type):
+    #By default (if value is not speciefied or == None), the caching is not enabled
+    return _fetch_exchange_specific(exchange, type, 'enable_caching',
+                                    'enable_caching_for_exchanges', return2=False)
+
+
+def get_cache_expiry(exchange, type):
+    return _fetch_exchange_specific(exchange, type, 'cache_expiry',
+                                    'cache_expiry_for_exchanges', return2=0)
+    
+        
+async def set_markets(api, limit=None):
     exchange = get_name(api)
+    limit = _resolve_limit(exchange, 'markets', limit)
     markets = currencies = None
     try:
-        m0 = (await get(exchange,'markets',limit,1))[0]
-        l1 = _resolve_limit(limit)
-        l2 = _resolve_limit(m0.date)
+        m0 = (await fetch(exchange,'markets',limit,strip=False))[0]
+        l1 = limit
+        l2 = _resolve_limit(exchange, 'markets', m0.date)
         limit = min(l1,l2) if None not in (l1,l2) else \
                 next((x for x in (l1,l2) if x is not None),None)
         markets = _copy.deepcopy(m0.data)
@@ -121,85 +146,150 @@ async def set_markets(api, limit=15):
         if markets:
             logger.debug('{} - setting markets'.format(exchange))
             try: api.set_markets(markets,currencies)
-            except Exception as e2: logger.exception(e2)
+            except Exception as e2:
+                logger.exception(e2)
 
 
 async def get(exchange, type, limit=None, max=1,*,
               file=True, globals=True, empty_update=True,
               blocked='sleep', args=None, kwargs=None, loop=None,
-              attempts=2, raise_e=False):
-    """Tries to retrieve the latest data"""
+              cache=True, attempts=2, raise_e=False):
+    """
+    Tries to retrieve the latest data, by either
+      A) loading unexpired cache
+      B) ccxt api fetch if no unexpired cache was found
+    :param max: how many unexpired cache entries (of different time) are being loaded
+    :param blocked: what to do if in this very moment ccxt api fetch
+                    with the exact same (exchange, type) values is already being performed
+                    'sleep','ignore' or 'return' 
+                    ('return' returns empty list)
+    :param cache: if B was performed (update()), whether or not to cache the new data
+    For other params see fetch() docstring
+    """
+    exchange0 = exchange
+    exchange, _ = _exchange_and_type_to_str(exchange, type)
     type = _resolve_type(type)
-    limit = _resolve_limit(limit)
+    limit = _resolve_limit(exchange, type, limit)
+    
     if blocked is None: blocked = 'sleep'
-    elif blocked not in ('sleep','return'):
+    elif blocked not in ('sleep','ignore','return'):
         raise ValueError(blocked)
     
-    exchange0 = exchange
-    if not isinstance(exchange,str):
-        exchange0 = get_exchange(exchange)
-        exchange = get_name(exchange0)
-        
-    wait_for = _is_blocked(exchange,type)
-    if not wait_for: pass
-    elif blocked == 'sleep':
-        await asyncio.sleep(wait_for, loop=loop)
-    else: return []
+    if blocked != 'ignore':
+        wait_for = _is_blocked(exchange,type)
+        if not wait_for: pass
+        elif blocked == 'sleep':
+            await asyncio.sleep(wait_for, loop=loop)
+        else:
+            return []
     
     items = []
     
     if file:
-        items = load(exchange,type,limit,max,globals=globals)
+        items = load(exchange, type, limit, max, globals=globals)
     elif globals:
-        items = retrieve(exchange,type,limit,max)
+        items = retrieve(exchange, type, limit, max)
     
     
     if not items and empty_update:
-        items = await update(exchange0,type,args,kwargs,loop=loop,
-                             file=file,globals=globals,blocked=blocked,
-                             attempts=attempts,raise_e=raise_e)
+        items = await update(exchange0, type, args, kwargs, loop=loop,
+                             file=file, globals=globals, blocked=blocked,
+                             cache=cache, attempts=attempts, raise_e=raise_e)
         
     return items
+
+
+async def fetch(exchange, type, limit=None, *,
+                file=True, globals=True, empty_update=True,
+                args=None, kwargs=None, loop=None, strip=True, attempts=2):
+    """
+    Checks whether reading from storage if enabled for the method of the exchange,
+    if true proceeds with get(...), otherwise update()
+    :param exchange: str or api (ccxtWrapper instance)
+    :param type: str or (str, specification)
+            Examples:
+                'tickers'
+                ('ticker', 'ETH/BTC')
+                ('orderbook', 'BTC/USD')
+    :param args: args passed to ccxt api fetch
+    :param kwargs: kwargs passed to ccxt api fetch
+    :param attempts: retries for ccxt api fetch, should an error occur
+    
+    Only applies if caching is enabled:
+    :type limit: dt or timedelta-like (timedelta, seconds, freqstr)
+    :param limit: max age of the cached data. If None then default cache_expiry 
+                of exchange and type is used. -1 (< 0) for no age limit.
+    :param file: allow reading from cache files (unexpired)
+    :param globals: allow retrieving from global cache (unexpired)
+    :param empty_update: if no unexpired cache was found, force fetch new data (update())
+    """
+    type = _resolve_type(type)
+    
+    if not is_caching_enabled(exchange, type):
+        l = await update(exchange, type, args, kwargs, loop=loop,
+                         file=False, globals=False, cache=False,
+                         blocked='ignore', attempts=attempts, raise_e=True)
+    else:
+        l = await get(exchange, type, limit=limit, max=1,
+                      file=file, globals=globals, empty_update=empty_update,
+                      blocked='sleep', args=args, kwargs=kwargs, loop=loop,
+                      attempts=attempts, raise_e=True)
+    
+    if strip:
+        return l[0].data
+    else:
+        return l
     
 
 async def update(exchange, type, args=None, kwargs=None, *,
                  file=True, globals=True, loop=None, limit=None,
-                 blocked='sleep', attempts=2, raise_e=False):
+                 cache=True, blocked='sleep', attempts=2, raise_e=False):
+    """
+    Tries to retrieve the latest data, by either
+      A) [IF (exchange, type) is being blocked by parallel update(),
+          and blocked is not set to 'ignore']
+         loading unexpired cache
+      B) ccxt api fetch if no unexpired cache was found
+    Param explanations can be found in fetch() and get() docstrings
+    """
+    exchange0 = exchange
+    exchange, _ = _exchange_and_type_to_str(exchange, type)
     type = _resolve_type(type)
-    limit = _resolve_limit(limit)
+    limit = _resolve_limit(exchange, type, limit)
+    
     if blocked is None: blocked = 'sleep'
-    elif blocked not in ('sleep','return'):
+    elif blocked not in ('sleep','ignore','return'):
         raise ValueError(blocked)
     
     if args is None: args = tuple()
     if kwargs is None: kwargs = {}
     
-    exchange0 = exchange
-    exchange = get_name(exchange)
-    
     try: api = get_exchange(exchange0)
     except ValueError as e:
         if type in ('balances','balances-account'):
             raise e
-        config = {'exchange':exchange, 'info':False,'trade':False}
+        config = {'exchange': exchange, 'info': False, 'trade': False}
         logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
         api = get_exchange(config)
-        
-    wait_for = _is_blocked(exchange,type)
-    if not wait_for: pass
-    elif blocked == 'sleep':
-        await asyncio.sleep(wait_for,loop=loop)
-        if file:
-            return load(exchange,type,limit,1,globals=globals)
-        elif globals:
-            return retrieve(exchange,type,limit,1)
-        else: return []
-    else: return []
+    
+    if blocked != 'ignore': 
+        wait_for = _is_blocked(exchange, type)
+        if not wait_for: pass
+        elif blocked == 'sleep':
+            await asyncio.sleep(wait_for, loop=loop)
+            if file:
+                return load(exchange, type, limit, 1, globals=globals)
+            elif globals:
+                return retrieve(exchange, type, limit, 1)
+            #else:
+            #   return []
+        else:
+            return []
     
     inf = []
     
     type0 = _type0(type)
-    method_str,args2,kwargs2,kw_ids = _METHODS[type0]
+    method_str, args2, kwargs2, kw_ids = _METHODS[type0]
     #for symbol, the type must be in format (name,symbol)
     # and symbol must not be included in args/kwargs
     #kwargs2 = dict(kwargs2, **{x:type[i+1] for i,x in enumerate(kw_ids)})
@@ -216,23 +306,26 @@ async def update(exchange, type, args=None, kwargs=None, *,
     
     exc, i = None, 0
     while i < attempts:
-        _block(exchange,type,_BLOCK[type0])
+        #Only block if we later cache the results
+        # (we don't want parallel update() -s to wait for nothing)
+        if cache:
+            _block(exchange, type, _BLOCK[type0])
         try:
             data = await method(*args,**kwargs)
             #await api.close()
-            now = dt_round_to_digit(dt.utcnow(),6)
-            inf.append(create_new(exchange,type,now,data=data))
+            now = dt_round_to_digit(dt.utcnow(), 6)
+            inf.append(create_new(exchange, type, now, data=data))
             if is_market:
-                inf.append(create_new(exchange,'currencies',now,data=api.currencies))
+                inf.append(create_new(exchange, 'currencies', now, data=api.currencies))
         except Exception as e:
             exc = e
-            if isinstance(e,ccxt.NotSupported): 
+            if isinstance(e, ccxt.NotSupported): 
                 i = attempts-1
-            elif isinstance(e,KeyError) and type=='tickers' and not i:
+            elif isinstance(e, KeyError) and type=='tickers' and not i:
                 logger.debug('{} - fetch_tickers caused KeyError. Re-loading markets.'.format(exchange))
                 await set_markets(api)
             if i == attempts-1:
-                logger2.error('{} - error fetching {}: {}'.format(exchange,type,e))
+                logger2.error('{} - error fetching {}: {}'.format(exchange, type, e))
                 logger.exception(e)
         else: break
         i += 1
@@ -240,8 +333,9 @@ async def update(exchange, type, args=None, kwargs=None, *,
     if exc is not None and i == attempts-1 and raise_e:
         raise exc
     
-    globalise(inf)
-    save(inf)
+    if cache:
+        globalise(inf)
+        save(inf)
     
     if is_market and inf:
         inf = inf[:1]
@@ -251,7 +345,7 @@ async def update(exchange, type, args=None, kwargs=None, *,
 
 def globalise(items):
     for item in sorted(items, key=lambda x: x.date):
-        seq = _get_storage_deque(item.exchange,item.type)
+        seq = _get_storage_deque(item.exchange, item.type)
         pos = next((i for i,x in enumerate(seq) if item.date>=x.date), None)
         
         if pos is None:
@@ -267,107 +361,114 @@ def globalise(items):
         if pos != 0:
             maxlen = _MAXLENS[_type0(item.type)]
             new_l = (list(seq[:pos]) + [item] + list(seq[pos:]))[:maxlen]
-            _assign_storage_deque(item.exchange,item.type,deque(new_l, maxlen=maxlen))
+            _assign_storage_deque(item.exchange, item.type, deque(new_l, maxlen=maxlen))
         else: seq.appendleft(item)
 
           
 def save(items):
     for item in sorted(items, key=lambda x: x.date):
-        fn = item.file if item.file else encode_filename(item.exchange,item.type,item.date)
+        fn = item.file if item.file else encode_filename(item.exchange, item.type, item.date)
         
-        _dir = os.path.join(PATHS['dir'],item.exchange)
+        print(get_cache_dir(), item.exchange)
+        _dir = os.path.join(get_cache_dir(), item.exchange)
         if not os.path.exists(_dir):
             make_dirpath(_dir)
             
         path = _dir + '\\{}'.format(fn)
         
-        with SafeFileLock(path,0.01):
-            with open(path,'w',encoding='utf-8') as f:
-                json.dump(item.data,f,cls=DateTimeEncoder)
+        with SafeFileLock(path, 0.01):
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(item.data, f, cls=DateTimeEncoder)
         
-        p = probe(item.exchange,item.type,globals=False)
+        p = probe(item.exchange, item.type, globals=False)
         maxlen = _MAXLENS[_type0(item.type)]
         with_file = (x for x in reversed(p[maxlen:]) if x.file)
         for wf in with_file:
-            try: os.remove(os.path.join(_dir,wf.file))
+            try: os.remove(os.path.join(_dir, wf.file))
             except OSError: pass
 
 
 def retrieve(exchange, type, limit=None, max=5):
-    limit = _resolve_limit(limit)
+    limit = _resolve_limit(exchange, type, limit)
     d = storage
     for key in it.chain([exchange],_type_tuple(type)):
         try: d = d[key]
-        except KeyError: return []
+        except KeyError:
+            return []
     items = d
     
-    if limit: items = [x for x in items if x.date >= limit]
-    else: items = list(items)
-    if max is not None: items = items[:max]
+    if limit != -1:
+        items = [x for x in items if x.date >= limit]
+    else:
+        items = list(items)
+    
+    if max is not None:
+        items = items[:max]
     
     return items
 
 def retrieve_latest(exchange, type, limit=None):
-    return retrieve(exchange,type,limit,1)
+    return retrieve(exchange, type, limit, 1)
     
     
 def load(exchange, type, limit=None, max=5, globals=True):
-    limit = _resolve_limit(limit)
-    inf = probe(exchange,type,limit,max,globals=globals)
+    limit = _resolve_limit(exchange, type, limit)
+    inf = probe(exchange, type, limit, max, globals=globals)
     items = []
     for tpl in inf:
         if tpl.data is not None:
             items.append(tpl)
             continue
-        path = os.path.join(PATHS['dir'],exchange,tpl.file)
+        path = os.path.join(get_cache_dir(), exchange, tpl.file)
         wait_filelock(path)
         logger.debug('Reading: {}'.format(path))
-        with open(path,encoding='utf-8') as f:
-            item = fnInf(*tpl[:-1],json.load(f))
+        with open(path, encoding='utf-8') as f:
+            item = fnInf(*tpl[:-1], json.load(f))
         globalise([item])
         items.append(item)
         
     return items
 
 def load_latest(exchange, type, limit=None, globals=True):
-    return load(exchange,type,limit,1,globals)
+    return load(exchange, type, limit, 1, globals)
     
     
 def probe(exchange, type, limit=None, max=None, globals=True):
-    limit = _resolve_limit(limit)
+    limit = _resolve_limit(exchange, type, limit)
     type_str = _type_str(type)
-    begins = '[{}]_{}_'.format(exchange.lower(),type_str)
+    begins = '[{}]_{}_'.format(exchange.lower(), type_str)
     ends = '.json'
     _len = len(begins)
     _len_ends = len(ends)
     
-    _dir = os.path.join(PATHS['dir'],exchange)
+    _dir = os.path.join(get_cache_dir(), exchange)
     try: files = (x for x in reversed(os.listdir(_dir)) if x[:_len]==begins and x[_len:].isdigit())
     except FileNotFoundError:
         files = []
     
     _decoded = (decode_filename(x) for x in files)
-    decoded = list(x for x in _decoded if x.date >= limit) if limit is not None else list(_decoded)
+    decoded = list(x for x in _decoded if x.date >= limit) if limit!=-1 else list(_decoded)
     
     if globals: 
-        items = retrieve(exchange,type,limit,max)
+        items = retrieve(exchange, type, limit, max)
         items += [x for x in decoded if not any(x.date==y.date for y in items)]
         decoded = items
         
     decoded.sort(key=lambda x: x.date, reverse=True)
-    if max is not None: decoded = decoded[:max]
+    if max is not None:
+        decoded = decoded[:max]
             
     return decoded
-    
+
 def probe_latest(exchange, type, limit=None, globals=True):
-    return probe(exchange,type,limit,1,globals)
+    return probe(exchange, type, limit, 1, globals)
 
 
 #########################################################
 
 def encode_filename(exchange, type, date):
     type_str = _type_str(type)
-    return '[{}]_{}_{}'.format(exchange.lower(),type_str,timestamp_ms(date))
+    return '[{}]_{}_{}'.format(exchange.lower(), type_str, timestamp_ms(date))
 
 def decode_filename(fn):
     e0,e1 = fn.find('['),fn.find(']')
@@ -379,10 +480,10 @@ def decode_filename(fn):
     date = pydt_from_ms(int(datestr))
     if len(type) < 2:
         type = type[0]
-    return fnInf(e,type,date,fn)
+    return fnInf(e, type, date, fn)
 
 def _get_blocks(exchange, type=None):
-    _dir = make_dirpath(PATHS['dir'],exchange,'__block__')
+    _dir = make_dirpath(get_cache_dir(), exchange, '__block__')
     blocks = []
     for f in os.listdir(_dir):
         if not f.startswith('__'): continue
@@ -395,63 +496,75 @@ def _get_blocks(exchange, type=None):
     return blocks
 
 def _encode_block(exchange, type, until):
-    return '__{}'.format(encode_filename(exchange,type,until))
+    return '__{}'.format(encode_filename(exchange, type, until))
 
 def _decode_block(fn):
     return decode_filename(fn)
 
+
 def create_new(exchange, type, date=None, file=None, data=None):
-    if date is None: date = dt_round_to_digit(dt.utcnow(),6)
-    if file is None: file = encode_filename(exchange,type,date)
-    return fnInf(exchange,type,date,file,data)
+    if date is None:
+        date = dt_round_to_digit(dt.utcnow(),6)
+        
+    if file is None:
+        file = encode_filename(exchange, type, date)
+        
+    return fnInf(exchange, type, date, file, data)
 
 
 def _is_blocked(exchange, type):
-    _dir = os.path.join(PATHS['dir'],exchange)
-    blocks = _get_blocks(exchange,type)
+    blocks = _get_blocks(exchange, type)
     
     if len(blocks):
         now = dt.utcnow()
         remaining = (blocks[0].date - now).total_seconds()
-        return max(0,remaining)
+        return max(0, remaining)
     
     return 0
 
+
 def _block(exchange, type, until):
-    if not isinstance(until,dt):
+    if not isinstance(until, dt):
         until = dt.utcnow() + freq_to_td(until)
     #round to millisecond
     until = dt_round_to_digit(until,6)
     
-    _dir = os.path.join(PATHS['dir'],exchange,'__block__')
-    fn = _encode_block(exchange,type,until)
-    blocks = _get_blocks(exchange,type)
+    _dir = os.path.join(get_cache_dir(), exchange, '__block__')
+    fn = _encode_block(exchange, type, until)
+    blocks = _get_blocks(exchange, type)
     #print('{} {} blocks: {}'.format(exchange,type,blocks))
     
-    with open(os.path.join(_dir,fn),'w'):
+    with open(os.path.join(_dir,fn), 'w'):
         pass
     
     for b in (x for x in blocks if x.date < until):
         try: os.remove(os.path.join(_dir,b.file))
         except OSError: pass
-    
+
+
 def _release(exchange, types):
-    if isinstance(types,str): types = (types,)
+    if isinstance(types, str):
+        types = (types,)
+        
     types = [_resolve_type(t) for t in types]
-    _dir = os.path.join(PATHS['dir'],exchange,'__block__')
+    _dir = os.path.join(get_cache_dir(), exchange, '__block__')
     blocks = _get_blocks(exchange)
     blocks = [x for x in blocks if x.type in types]
     
     for b in blocks:
-        try: os.remove(os.path.join(_dir,b.file))
+        try: os.remove(os.path.join(_dir, b.file))
         except OSError: pass
     
 
-def _resolve_limit(limit):
-    if limit is None: return None
-    elif not isinstance(limit,dt):
+def _resolve_limit(exchange, type, limit):
+    if limit is None:
+        limit = get_cache_expiry(exchange, type)
+    if isinstance(limit, (float,int)) and limit < 0:
+        return -1
+    elif not isinstance(limit, dt):
         return dt.utcnow() - freq_to_offset(limit)
-    else: return limit
+    else:
+        return limit
     
 def _resolve_type(type):
     if not isinstance(type,str):
@@ -460,8 +573,8 @@ def _resolve_type(type):
         if len(type) < 2:
             type = type[0]
     type0 = _type0(type)
-    if (type0 not in _METHODS or isinstance(type,str) and len(_METHODS[type0][3]) 
-        or not isinstance(type,str) and len(_METHODS[type0][3])!=len(type)-1):
+    if (type0 not in _METHODS or isinstance(type, str) and len(_METHODS[type0][3]) 
+            or not isinstance(type, str) and len(_METHODS[type0][3])!=len(type)-1):
         raise ValueError('Incorrect type: {}'.format(type))
     return type
 
@@ -469,20 +582,62 @@ def _type_str(type):
     return '_'.join(_type_tuple(type)).replace('/',';')
 
 def _type0(type):
-    return type if isinstance(type,str) else type[0]
+    return type if isinstance(type, str) else type[0]
 
 def _type_tuple(type):
-    return (type,) if isinstance(type,str) else tuple(type)
+    return (type,) if isinstance(type, str) else tuple(type)
+
+
+def clear_cache(exchanges=None, types=None):
+    """
+    If neither exchanges nor types are specified, all cache is deleted
+    """
+    _dir = get_cache_dir()
+    if isinstance(exchanges, str):
+        exchanges = [exchanges]
+    if isinstance(types, str):
+        types = [types]
+        
+    xc_dirs = {f: os.path.join(_dir, f) for f in os.listdir(_dir)
+               if os.path.isdir(os.path.join(_dir, f))}
+    
+    if exchanges is not None:
+        xc_dirs = {xc: pth for xc, pth in xc_dirs.items() if xc in exchanges}
+    
+    if types is None:
+        types = list(_METHODS)
+        
+    for xc, xc_dir in xc_dirs.items():
+        xc_contents = os.listdir(xc_dir)
+        pths = [os.path.join(xc_dir, f) for f in xc_contents
+                if any(f.startswith('[{}]_{}'.format(xc, method)) for method in types)]
+        
+        block_dir = os.path.join(xc_dir, '__block__')
+        
+        if os.path.isdir(block_dir):
+            pths += [os.path.join(block_dir, f) for f in os.listdir(block_dir)
+                     if any(f.startswith('__[{}]_{}'.format(xc, method)) for method in types)]
+            
+        for pth in pths:
+            try: os.remove(pth)
+            except OSError: pass
+        
+    delete_empty_dirs(_dir)
+
 
 def load_profile(profile, exchange, type='markets'):
     now = dt.utcnow()
-    dir = '{}\\{}'.format(PATHS['exchange_profiles'],profile)
-    if not os.path.isdir(dir):
+    profiles_dir = get_setting('profiles_dir')
+    dir = '{}\\{}'.format(profiles_dir, profile)
+    
+    if not profiles_dir or not os.path.isdir(dir):
         return []
+    
     files = os.listdir(dir)
-    startsw = '{}_{}'.format(exchange,type)
+    startsw = '{}_{}'.format(exchange, type)
     matching = [x for x in files if x.startswith(startsw)]
     dates = {}
+    
     for fn in matching:
         ending = fn[len(startsw):]
         is_valid = True
@@ -526,8 +681,8 @@ def load_profile(profile, exchange, type='markets'):
     for fn in unexpired:
         path = os.path.join(dir,fn)
         try:
-            with open(path) as f:
-                data = yaml.load(f)
+            with open(path, encoding='utf-8') as f:
+                data = yaml.safe_load(f)
             t = prInf(profile,exchange,type,dates[fn]['start'],dates[fn]['end'],fn,data)
             unexpired_items.append(t)
         except OSError as e:
