@@ -12,7 +12,7 @@ from uxs.base.ccxt import (get_name, get_exchange, init_exchange,
 from uxs.base._settings import *
 
 from uxs.base.auth import (read_tokens, get_auth, get_auth2, cache_password,
-                           encrypt_tokens, decrypt_tokens)
+                           encrypt_tokens, decrypt_tokens, _interpret_exchange)
 
 from uxs.base import poll
 from uxs.base.poll import (fetch, clear_cache)
@@ -68,12 +68,7 @@ def get_socket(exchange, config={}):
     
     :rtype: ExchangeSocket
     """
-    auth_id = None
-    
-    if ':' in exchange:
-        loc = exchange.find(':')
-        auth_id = exchange[loc+1:]
-        exchange = exchange[:loc]
+    exchange, auth_id = _interpret_exchange(exchange)
     
     if isinstance(config.get('auth'), str):
         config['auth'] = {'id': config['auth']}

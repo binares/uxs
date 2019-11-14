@@ -11,7 +11,6 @@ import datetime
 dt = datetime.datetime
 td = datetime.timedelta
 
-#from wrappers import (get_exchange,get_name)
 from .ccxt import (get_exchange, get_name)
 from ._settings import get_setting, get_cache_dir
 
@@ -264,7 +263,7 @@ async def update(exchange, type, args=None, kwargs=None, *,
     if args is None: args = tuple()
     if kwargs is None: kwargs = {}
     
-    try: api = get_exchange(exchange0)
+    try: api = get_exchange({'xc': exchange0, 'id': 'INFO'})
     except ValueError as e:
         if type in ('balances','balances-account'):
             raise e
@@ -369,7 +368,6 @@ def save(items):
     for item in sorted(items, key=lambda x: x.date):
         fn = item.file if item.file else encode_filename(item.exchange, item.type, item.date)
         
-        print(get_cache_dir(), item.exchange)
         _dir = os.path.join(get_cache_dir(), item.exchange)
         if not os.path.exists(_dir):
             make_dirpath(_dir)

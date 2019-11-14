@@ -65,6 +65,14 @@ def _get_prev_frame():
     return f
 
 
+def _interpret_exchange(exchange, id=''):
+    if isinstance(exchange, str) and ':' in exchange:
+        loc = exchange.find(':')
+        if len(exchange[loc+1:]):
+            id = exchange[loc+1:]
+        exchange = exchange[:loc]
+    return exchange, id
+
 def _interpret_auth_id(id):
     if id is None: id = ''
     specs = id.lower().split('_')
@@ -125,6 +133,7 @@ def _read_ordinary(tokens_path):
 
 
 def get_auth(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
+    exchange, id = _interpret_exchange(exchange, id)
     required = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange.lower(),[])
     auth2 = get_auth2(exchange, info, trade, withdraw, id, user, active, **kw)
     
@@ -132,7 +141,7 @@ def get_auth(exchange, id=None, *, info=None, trade=None, withdraw=None, user=No
     
     
 def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
-    
+    exchange, id = _interpret_exchange(exchange, id)
     requested = dict({'id': id, 'info': info, 'trade': trade, 'withdraw': withdraw,
                       'active': active, 'user': user}, **kw)
     

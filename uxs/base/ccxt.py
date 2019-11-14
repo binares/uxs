@@ -4,7 +4,7 @@ import json
 import time
 import copy as _copy
 
-from .auth import (get_auth, get_auth2, EXTRA_TOKEN_KEYWORDS)
+from .auth import (get_auth, get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
 
 import fintls.basics
 from fons.dict_ops import deep_update
@@ -837,89 +837,88 @@ def get_name(xc):
 def init_exchange(exchange):
     """:rtype: _ccxtWrapper
     (The actual return type is type(..,[ccxtWrapper,exchange_api_cls])"""
-    singular = isinstance(exchange,(str,dict,ccxt.Exchange))
-    if singular: exchanges = [exchange]
-    else: exchanges = exchange
     
-    e_map = []
+    e_obj = None
+    if isinstance(exchange, dict):
+        e_given = exchange.get('exchange', exchange.get('xc', exchange.get('e')))
+        e_given, _id = _interpret_exchange(e_given)
+        e = get_name(e_given)
+        D = dict({'exchange':e},**{x:y for x,y in exchange.items() if x not in ('exchange','xc','e')})
+        if isinstance(e_given,ccxt.Exchange):
+            e_obj = e_given
+    else:
+        e_given, _id = _interpret_exchange(exchange)
+        e = get_name(exchange)
+        D = {'exchange': e}
+        if isinstance(exchange, ccxt.Exchange):
+            e_obj = exchange
     
-    for item in exchanges:
+    if _id:
+        D['id'] = _id
+    
+    asyn = D.pop('async') if 'async' in D else (
+        isinstance(e_obj, ccxt.async_support.Exchange) 
+            if e_obj is not None else RETURN_ASYNC_EXCHANGE)
+    module = ccxt if not asyn else ccxt.async_support
+    cls_reg = _ccxt_cls_wrapped if not asyn else _ccxt_cls_wrapped_async
+    e_reg = _exchanges if not asyn else _exchanges_async
+    
+    if e not in cls_reg:
+        eCls =  getattr(module,_E_REPLACE.get(e,e))
+        wrCls = ccxtWrapper if not asyn else asyncCCXTWrapper
+        cls_reg[e] = type(e,(wrCls,eCls),{})
+       
+    e_cls = cls_reg[e]
+                
+    get = D.pop('get', False)
+    add = D.pop('add', True)
+    args = D.pop('args', ())
+    kwargs = D.pop('kwargs', {})
+    if args is None: args = ()
+    if kwargs is None: kwargs = {}
+
+    eobj_args = args
+    eobj_kw = {x:y for x,y in kwargs.items() if x!='auth'}
+    
+    extra_token_keywords = EXTRA_TOKEN_KEYWORDS.get(e,[])
+    token_keywords = ['apiKey','secret'] + extra_token_keywords
+    
+    if len(D) > 1 or any(kwargs.get(x) for x in token_keywords+['auth']) or not e_obj:
+        auth_dict1 = kwargs.get('auth',{})
+        auth_dict2 = D.get('auth',{})
+        if isinstance(auth_dict1, str): auth_dict1 = {'id': auth_dict1}
+        if isinstance(auth_dict2, str): auth_dict2 = {'id': auth_dict2}
+        #Make it so that auth keywords can be put literally anywhere
+        auth_kw = {x:y for x,y in kwargs.items() if x in token_keywords}
+        auth_kw.update(auth_dict1)
+        auth_kw.update({x:y for x,y in D.items() if x!='auth'})
+        auth_kw.update(auth_dict2)
+        auth = get_auth2(**auth_kw)
+    else:
+        auth = e_obj._auth_info.copy()
+    
+    if e_obj is None: pass
+    elif asyn and not isinstance(e_obj, ccxt.async_support.Exchange): e_obj = None 
+    elif not asyn and isinstance(e_obj, ccxt.async_support.Exchange): e_obj = None
+    
+    if e_obj and e_obj.apiKey != auth.get('apiKey'):
         e_obj = None
-        if isinstance(item,dict):
-            e_given = item.get('exchange', item.get('xc', item.get('e')))
-            e = get_name(e_given)
-            D = dict({'exchange':e},**{x:y for x,y in item.items() if x not in ('exchange','xc','e')})
-            if isinstance(e_given,ccxt.Exchange): e_obj = e_given
-        else:
-            e = get_name(item)
-            D = {'exchange': e}
-            if isinstance(item,ccxt.Exchange): e_obj = item
-            
-        #if e in e_map: continue
         
-        asyn = D.pop('async') if 'async' in D else (
-            isinstance(e_obj, ccxt.async_support.Exchange) 
-                if e_obj is not None else RETURN_ASYNC_EXCHANGE)
-        module = ccxt if not asyn else ccxt.async_support
-        cls_reg = _ccxt_cls_wrapped if not asyn else _ccxt_cls_wrapped_async
-        e_reg = _exchanges if not asyn else _exchanges_async
+    if not e_obj and get:
+        try: e_obj = e_reg[e][auth.get('apiKey')]
+        except KeyError: pass
         
-        if e not in cls_reg:
-            eCls =  getattr(module,_E_REPLACE.get(e,e))
-            wrCls = ccxtWrapper if not asyn else asyncCCXTWrapper
-            cls_reg[e] = type(e,(wrCls,eCls),{})
-           
-        e_cls = cls_reg[e]
-                    
-        get = D.pop('get', False)
-        add = D.pop('add', True)
-        args = D.pop('args', ())
-        kwargs = D.pop('kwargs', {})
-        if args is None: args = ()
-        if kwargs is None: kwargs = {}
+    if not e_obj or e_obj.apiKey != auth.get('apiKey'):
+        logger.debug("Initiating ccxt-exchange '{}' with auth_id '{}'".format(e, auth.get('id')))
+        e_obj = e_cls(*eobj_args, **eobj_kw, auth=auth)
+        #raise ValueError('Could not initiate exchange - {}'.format(e))
 
-        eobj_args = args
-        eobj_kw = {x:y for x,y in kwargs.items() if x!='auth'}
+    if add:
+        deep_update(e_reg,{e: {e_obj.apiKey: e_obj}})
         
-        extra_token_keywords = EXTRA_TOKEN_KEYWORDS.get(e,[])
-        token_keywords = ['apiKey','secret'] + extra_token_keywords
-        
-        if len(D) > 1 or any(kwargs.get(x) for x in token_keywords+['auth']) or not e_obj:
-            auth_dict1 = kwargs.get('auth',{})
-            auth_dict2 = D.get('auth',{})
-            if isinstance(auth_dict1, str): auth_dict1 = {'id': auth_dict1}
-            if isinstance(auth_dict2, str): auth_dict2 = {'id': auth_dict2}
-            #Make it so that auth keywords can be put literally anywhere
-            auth_kw = {x:y for x,y in kwargs.items() if x in token_keywords}
-            auth_kw.update(auth_dict1)
-            auth_kw.update({x:y for x,y in D.items() if x!='auth'})
-            auth_kw.update(auth_dict2)
-            auth = get_auth2(**auth_kw)
-        else:
-            auth = e_obj._auth_info.copy()
-        
-        if e_obj is None: pass
-        elif asyn and not isinstance(e_obj, ccxt.async_support.Exchange): e_obj = None 
-        elif not asyn and isinstance(e_obj, ccxt.async_support.Exchange): e_obj = None
-        
-        if e_obj and e_obj.apiKey != auth.get('apiKey'):
-            e_obj = None
-            
-        if not e_obj and get:
-            try: e_obj = e_reg[e][auth.get('apiKey')]
-            except KeyError: pass
-            
-        if not e_obj or e_obj.apiKey != auth.get('apiKey'):
-            logger.debug("Initiating ccxt-exchange '{}' with auth_id '{}'".format(e, auth.get('id')))
-            e_obj = e_cls(*eobj_args, **eobj_kw, auth=auth)
-            #raise ValueError('Could not initiate exchange - {}'.format(e))
+    e_obj
 
-        if add:
-            deep_update(e_reg,{e: {e_obj.apiKey: e_obj}})
-            
-        e_map.append(e_obj)
-
-    return e_map if not singular else e_map[0] #next(iter(e_map.values()))
+    return e_obj
 
 
 def get_exchange(exchange):
@@ -934,13 +933,7 @@ def get_exchange(exchange):
             d['get'] = True
         return d
     
-    singular = isinstance(exchange,(str,dict,ccxt.Exchange))
-    if singular: exchanges = [exchange]
-    else: exchanges = exchange
-    
-    e_list = [init_exchange(_normalize(e)) for e in exchanges]
-        
-    return e_list if not singular else e_list[0]
+    return init_exchange(_normalize(exchange))
 
 
 def list_exchanges():
