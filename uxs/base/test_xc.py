@@ -237,13 +237,13 @@ def main():
     
     if t_param:
         t_index = p.indexes[t_param][0][0]
-        t_merge = (p.argv[t_index+1] == 'm')
+        t_merge = len(p.argv) > t_index + 1 and (p.argv[t_index+1] == 'm')
         t_symbols = p.get(t_param, ())
         coros += [fetch_tickers(t_symbols, sub=True, unsub=unsub, resub=resub, merge=t_merge)]
         
     if ob_param:
         ob_index = p.indexes[ob_param][0][0]
-        ob_merge = (p.argv[ob_index+1] == 'm')
+        ob_merge = len(p.argv) > ob_index + 1 and (p.argv[ob_index+1] == 'm')
         ob_symbols = p.get(ob_param, ('ETH/BTC',))
         #ob_print = 'changes'
         ob_print = 4

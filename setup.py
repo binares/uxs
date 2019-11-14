@@ -17,12 +17,12 @@ setup(
    python_requires='>=3.5',
    install_requires=[
        'aiohttp>=3.0',
-       'filelock>=3.0',
        'python_dateutil>=2.1',
+       'pandas>=0.21',
        'PyYAML>=3.10',
+       'stockstats>=0.2',
        'fons @ git+https://github.com/binares/fons.git',
        'wsclient @ git+https://github.com/binares/wsclient.git',
-       'fintls @ git+https://github.com/binares/fintls.git',
    ],
 )
 

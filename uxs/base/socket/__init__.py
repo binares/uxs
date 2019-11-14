@@ -14,8 +14,8 @@ from ..ccxt import get_exchange
 from .. import poll
 from .orderbook import OrderbookMaintainer
 from .errors import (ExchangeSocketError, ConnectionLimit)
-from fintls.basics import (as_ob_fill_side, as_direction)
-from fintls.book import (get_stop_condition, create_orderbook, update_branch, assert_integrity)
+from uxs.fintls.basics import (as_ob_fill_side, as_direction)
+from uxs.fintls.ob import (get_stop_condition, create_orderbook, update_branch, assert_integrity)
 from wsclient import WSClient
 
 import fons.log

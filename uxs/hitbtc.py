@@ -5,7 +5,7 @@ td = datetime.timedelta
 from dateutil.parser import parse as parsedate
 
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
-import fintls.basics
+from uxs.fintls.basics import as_direction
 
 from fons.crypto import nonce as _nonce, sign
 from fons.time import timestamp_ms
@@ -260,7 +260,7 @@ class hitbtc(ExchangeSocket):
             
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         #side: buy/sell
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         side = ['sell','buy'][direction]
         order_id = _nonce(32,uppers=False)        
         out = dict(params,**{

@@ -6,7 +6,7 @@ import copy as _copy
 
 from .auth import (get_auth, get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
 
-import fintls.basics
+from uxs.fintls.basics import (as_direction, calc_price, convert_quotation, create_cy_graph)
 from fons.dict_ops import deep_update
 from fons.iter import flatten, unique
 import fons.math
@@ -232,7 +232,7 @@ class ccxtWrapper:
            If balance provided and order size exceeds it, reduces the size.
            Set `full` to True to calculate cost and payout as well.
            `**kw`: ['method'] (`method=None` can only be given if as_type resolves to 'size')"""
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         side = ['sell','buy'][direction]
         if as_type is None:
             as_type = self._decode_as_type(direction, quotation)
@@ -340,7 +340,7 @@ class ccxtWrapper:
             prices = {x: y['last'] for x,y in self.tickers.items()}
             price_in_x = None
             for ln in range(2,4):
-                try: price_in_x = fintls.basics.calc_price((cys[0],xcy),prices,self.load_cy_graph(),ln)
+                try: price_in_x = calc_price((cys[0],xcy),prices,self.load_cy_graph(),ln)
                 except RuntimeError: continue
             #print('{} - price_in_x: {} {}'.format(symbol, price_in_x, (min_xv, max_xv, xcy)))
             #Should these be readjusted?
@@ -386,7 +386,7 @@ class ccxtWrapper:
 
     def round_price(self, symbol, price, direction=None, limit=False):
         if direction is not None:
-            direction = fintls.basics.as_direction(direction)
+            direction = as_direction(direction)
         method = 'round' if direction is None else ['up','down'][direction]
         inf = self.markets[symbol]
         p_round = self.round_entity(price, inf['precision']['price'], method)
@@ -412,7 +412,7 @@ class ccxtWrapper:
     
     def calc_cost_from_order_size(self, symbol, side, amount, price, takerOrMaker='taker',
                                   quotation='base', *, method='truncate', **kw):
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         fee_rate = self.markets[symbol][takerOrMaker]
         amount = self._prepare_order_size(symbol, direction, amount, price, quotation, True, method, **kw)
             
@@ -463,7 +463,7 @@ class ccxtWrapper:
     def calc_payout_from_order_size(self, symbol, side, amount, price, takerOrMaker='taker',
                                     quotation='base', fee=None, *, method='truncate', **kw):
         """The amount to be received in target currency"""
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         amount = self._prepare_order_size(symbol, direction, amount, price, quotation, True, method, **kw)
         
         if fee is not None:
@@ -479,7 +479,7 @@ class ccxtWrapper:
      
      
     def _calc_payout_with_given_fee(self, side, order_size, price, fee):
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         if direction:
             payout = order_size - fee if self.FEE_FROM_TARGET else order_size
         else:
@@ -536,8 +536,8 @@ class ccxtWrapper:
         
     @staticmethod
     def _decode_params(side, quotation):
-        direction = fintls.basics.as_direction(side)
-        quotation = fintls.basics.convert_quotation(quotation, direction)
+        direction = as_direction(side)
+        quotation = convert_quotation(quotation, direction)
         is_quote = (quotation=='quote')
         
         return direction, is_quote
@@ -545,8 +545,8 @@ class ccxtWrapper:
     
     @staticmethod
     def _decode_as_type(side, quotation):
-        direction = fintls.basics.as_direction(side)
-        quotation = fintls.basics.convert_quotation(quotation, direction)
+        direction = as_direction(side)
+        quotation = convert_quotation(quotation, direction)
         _map = {
             (1,'quote'): 'cost',
             (1,'base'): 'size',
@@ -601,7 +601,7 @@ class ccxtWrapper:
     
     
     def get_fee_quotation(self, direction, as_str=True):
-        direction = fintls.basics.as_direction(direction)
+        direction = as_direction(direction)
         quotation = 0 if not self.FEE_FROM_TARGET else direction
         if as_str:
             quotation = ['quote','base'][quotation]
@@ -613,7 +613,7 @@ class ccxtWrapper:
         graph = getattr(self,'cy_graph',None)
         if not graph or reload:
             markets = self.markets if self.markets is not None else {}
-            self.cy_graph = fintls.basics.create_cy_graph(markets)
+            self.cy_graph = create_cy_graph(markets)
             
         return self.cy_graph
     
@@ -633,11 +633,11 @@ class ccxtWrapper:
             elif has_fb: prices[s] = sum(v[x] for x in has_fb) / len(has_fb)
             
         if graph is None:
-            graph = fintls.basics.create_cy_graph(prices)
+            graph = create_cy_graph(prices)
 
         prices_in_quote = {}
         for s in prices:
-            try: prices_in_quote[s] = fintls.basics.calc_price('{}/{}'.format(s.split('/')[0], quote), prices, graph)
+            try: prices_in_quote[s] = calc_price('{}/{}'.format(s.split('/')[0], quote), prices, graph)
             except RuntimeError as e:
                 logger2.error(e)
             
@@ -654,7 +654,7 @@ class ccxtWrapper:
     
     
     def create_order(self, symbol, type, side, amount, price=None, params={}):
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         side = ['sell','buy'][direction]
         # mro example of kucoin:
         # (<class '__main__.kucoin'>, <class '__main__.asyncCCXTWrapper'>, 
@@ -673,7 +673,7 @@ class ccxtWrapper:
             for buy order: highest_bid * (1+max_spread)
             for sell_order: lowest_ask / (1+max_spread)
         """
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         side = ['sell','buy'][direction]
         
         if max_spread < 0:
@@ -704,7 +704,7 @@ class ccxtWrapper:
             
         elif quotation in self.currencies:
             quotation_cy_0 = quotation
-            ref_price = fintls.basics.calc_price((base,quotation_cy_0),prices,cy_graph)
+            ref_price = calc_price((base,quotation_cy_0),prices,cy_graph)
             amount = self.quoteToBase(amount,ref_price)
             quotation_cy = base
             quotation = 'base' 
@@ -774,7 +774,7 @@ class ccxtWrapper:
                 #print(dust_definition)
                 if dust_definition is None: continue
                 elif quote not in self.currencies: continue 
-                price = fintls.basics.calc_price((cy,quote), prices, cy_graph)
+                price = calc_price((cy,quote), prices, cy_graph)
                 cy_balance_in_quote = self.baseToQuote(free, price)
                 is_dust = cy_balance_in_quote < dust_definition
                 #print(cy_balance_in_quote,is_dust)
@@ -803,7 +803,7 @@ class ccxtWrapper:
     
 class asyncCCXTWrapper(ccxtWrapper):
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
-        direction = fintls.basics.as_direction(side)
+        direction = as_direction(side)
         side = ['sell','buy'][direction]
         # mro example of kucoin:
         # (<class '__main__.kucoin'>, <class '__main__.asyncCCXTWrapper'>, 
