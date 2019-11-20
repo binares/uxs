@@ -378,7 +378,7 @@ def save(items):
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(item.data, f, cls=DateTimeEncoder)
         
-        p = probe(item.exchange, item.type, globals=False)
+        p = probe(item.exchange, item.type, -1, globals=False)
         maxlen = _MAXLENS[_type0(item.type)]
         with_file = (x for x in reversed(p[maxlen:]) if x.file)
         for wf in with_file:
