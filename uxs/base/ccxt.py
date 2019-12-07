@@ -5,12 +5,15 @@ import time
 import copy as _copy
 
 from .auth import (get_auth, get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
-
+from .wrappers.bitmex import bitmexWrapper
 from uxs.fintls.basics import (as_direction, calc_price, convert_quotation, create_cy_graph)
+from uxs.fintls.ob import _resolve_times
+from uxs.fintls.margin import Position
+
 from fons.dict_ops import deep_update
 from fons.iter import flatten, unique
 import fons.math
-from fons.time import ctime_ms
+from fons.time import ctime_ms, timestamp
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
@@ -42,6 +45,9 @@ _E_REPLACE = {
     'coinbase-pro':'coinbasepro',
     'gdax':'coinbasepro',
 }
+wrappers = {
+    #'bitmex': bitmexWrapper,
+}
 #PRICE_ACCURACY = 3
 AMOUNT_ACCURACY = 3
 
@@ -55,6 +61,7 @@ _exchanges_async = {}
 class ccxtWrapper:
     """Wraps any ccxt exchange"""
     _try = {'attempts': 2, 'sleep': 0.5}
+    Position = Position
     
     def __init__(self, config={}, load_currencies=None, load_markets=None, *, profile=None, auth=None):
         import uxs.base.poll as poll
@@ -123,10 +130,9 @@ class ccxtWrapper:
         return self.markets
                 
                 
-    async def _set_markets(self,*args,**kw):
-        """_set_markets([limit])"""
+    async def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
-        await poll.set_markets(self,*args,**kw)
+        await poll.load_markets(self, limit)
         
         
     def update_markets(self, changed, deep=True, dismiss_new=True):
@@ -163,16 +169,8 @@ class ccxtWrapper:
     def ticker_entry(symbol=None, timestamp=None, datetime=None, high=None, low=None, bid=None, bidVolume=None,
                      ask=None, askVolume=None, vwap=None, open=None, close=None, last=None, previousClose=None,
                      change=None, percentage=None, average=None, baseVolume=None, quoteVolume=None, **kw):
-        if timestamp is None: 
-            if datetime is None:
-                timestamp = ctime_ms()
-            else:
-                timestamp = ccxt.Exchange.parse8601(datetime)
-        elif isinstance(timestamp,str):
-            timestamp = int(timestamp)
-            
-        if datetime is None: 
-            datetime = ccxt.Exchange.iso8601(timestamp)
+        
+        datetime, timestamp = _resolve_times([datetime, timestamp], create=True)
             
         e = dict({
             'symbol': symbol, 
@@ -216,6 +214,77 @@ class ccxtWrapper:
         if e['close'] is None and e['last'] is not None:
             e['close'] = e['last']
             
+        return e
+    
+    
+    @staticmethod
+    def ob_entry(symbol=None, bids=None, asks=None, timestamp=None, datetime=None, nonce=None):
+        datetime, timestamp = _resolve_times([datetime,timestamp])
+        if bids is None: bids = []
+        if asks is None: asks = []
+        
+        return {
+            'symbol': symbol,
+            'datetime': datetime,
+            'timestamp': timestamp,
+            'bids': bids,
+            'asks': asks,
+            'nonce': nonce,
+        }
+    
+    
+    @staticmethod
+    def trade_entry(symbol=None, timestamp=None, datetime=None, id=None, order=None, type=None,
+                    takerOrMaker=None, side=None, price=None, amount=None, cost=None, fee=None, **kw):
+        """{'timestamp': <int>, 'datetime': <str>, 'symbol': <str>, 'id': <str>,
+             'order': <str>?, 'type': <str>, 'takerOrMaker': <str>, 'side': <str>,
+             'price': <float>, 'amount': <float>, 'cost': <float>, 'fee': <float>}"""
+            
+        datetime, timestamp = _resolve_times([datetime, timestamp])
+        
+        if isinstance(id, int):
+            id = str(id)
+        
+        e = dict({
+            'symbol': symbol, 
+            'timestamp': timestamp, 
+            'datetime': datetime,
+            'id': id, 
+            'order': order, 
+            'type': type, 
+            'takerOrMaker': takerOrMaker, 
+            'side': side, 
+            'price': price, 
+            'amount': amount,
+            'cost': cost, 
+            'fee': fee,
+        },**kw)
+        
+        for var in ['price', 'amount', 'cost', 'fee']:
+            if isinstance(e[var],str):
+                e[var] = float(e[var])
+                
+        return e
+        
+    
+    @staticmethod
+    def ohlcv_entry(timestamp=None, open=None, high=None, low=None, close=None, volume=None):
+        """volume: quoteVolume"""
+        e = [timestamp, open, high, low, close, volume]
+        
+        for i in range(1, len(e)):
+            if isinstance(e[i], str):
+                e[i] = float(e[i])
+                
+        return e
+    
+    
+    @staticmethod
+    def position_entry(timestamp=None, **kw):
+        e = dict({
+            'timestamp': timestamp,
+        },**kw)
+        
         return e
     
     
@@ -299,7 +368,24 @@ class ccxtWrapper:
     @staticmethod
     def round_entity(x, precision, method='round', **kw):
         accuracy = AMOUNT_ACCURACY if 'accuracy' not in kw else kw['accuracy']
-        return fons.math.round.round(x, precision, method, accuracy)
+        if kw.get('precisionMode') == ccxt.TICK_SIZE:
+            ccxt_method = {
+                'round': ccxt.ROUND,
+                'up': ccxt.ROUND,
+                'ceil': ccxt.ROUND,
+                'truncate': ccxt.TRUNCATE,
+                'down': ccxt.TRUNCATE,
+                'floor': ccxt.TRUNCATE,
+                }[method]
+            round_x_str = ccxt.decimal_to_precision(x, ccxt_method, precision, ccxt.TICK_SIZE)
+            round_x = float(round_x_str)
+            #in case it was rounded down, but "up" was requested
+            if method in ('up','ceil') and round_x < x:
+                round_x_str = ccxt.decimal_to_precision(round_x+precision*1.000000001, ccxt_method, precision, ccxt.TICK_SIZE)
+                round_x = float(round_x_str)
+            return round_x
+        else:
+            return fons.math.round.round(x, precision, method, accuracy)
             
         """factor = pow(10,precision)
         return f(x*factor)/factor"""
@@ -372,6 +458,8 @@ class ccxtWrapper:
     
     def round_amount(self, symbol, amount, price=None, limit=False, *, method='truncate', **kw):
         inf = self.markets[symbol]
+        if 'precisionMode' not in kw:
+            kw['precisionMode'] = self.precisionMode
         if limit:
             if price is None:
                 raise ValueError('`price` must not be `None` if `limit` is set to `True`')
@@ -384,12 +472,13 @@ class ccxtWrapper:
         return self.round_entity(amount, inf['precision']['amount'], method, **kw)
 
 
-    def round_price(self, symbol, price, direction=None, limit=False):
+    def round_price(self, symbol, price, direction=None, limit=False, *, method=None):
         if direction is not None:
             direction = as_direction(direction)
-        method = 'round' if direction is None else ['up','down'][direction]
+        if method is None:
+            method = 'round' if direction is None else ['up','down'][direction]
         inf = self.markets[symbol]
-        p_round = self.round_entity(price, inf['precision']['price'], method)
+        p_round = self.round_entity(price, inf['precision']['price'], method, precisionMode=self.precisionMode)
         #TODO: binance is missing price limits. make pull request on ccxt repo.
         if limit:
             if direction is None:
@@ -533,7 +622,7 @@ class ccxtWrapper:
         
         return cost
     
-        
+    
     @staticmethod
     def _decode_params(side, quotation):
         direction = as_direction(side)
@@ -662,6 +751,19 @@ class ccxtWrapper:
         #(super() is relative to current frame (ccxtWrapper), which is 
         # ccxt.async_support.kucoin.kucoin)
         return super().create_order(symbol, type, side, amount, price, params)
+    
+    
+    def edit_order(self, id, symbol, *args):
+        if len(args) >= 2:
+            direction = as_direction(args[1])
+            side = ['sell','buy'][direction]
+            args = args[:1] + (side,) + args[2:]
+        # mro example of kucoin:
+        # (<class '__main__.kucoin'>, <class '__main__.asyncCCXTWrapper'>, 
+        #  <class '__main__.ccxtWrapper'>, <class 'ccxt.async_support.kucoin.kucoin'>, ...)
+        #(super() is relative to current frame (ccxtWrapper), which is 
+        # ccxt.async_support.kucoin.kucoin)
+        return super().edit_order(id, symbol, *args)
         
         
     async def create_limited_market_order(self, symbol, side, amount, max_spread=0.1,
@@ -794,14 +896,29 @@ class ccxtWrapper:
         return sold
     
     
+    @staticmethod
+    def parse_spaceless_symbol(symbol, quotes):
+        """:param quotes: a list of quotes present in exchange"""
+        quote = next((q for q in quotes if symbol.endswith(q)), None)
+        if quote is None:
+            raise ValueError("Could not parse symbol: '{}'".format(symbol))
+        base = symbol[:-len(quote)]
+        
+        return (base, quote)
+        
+
     def __del__(self):
         d = _exchanges_async if isinstance(self, asyncCCXTWrapper) else _exchanges
         if self in d:
             del d[self]
-        super().__del__()
+        super(ccxtWrapper, self).__del__()
     
     
 class asyncCCXTWrapper(ccxtWrapper):
+    
+    _try = {'attempts': 2, 'sleep': 0.5}
+    
+    
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         direction = as_direction(side)
         side = ['sell','buy'][direction]
@@ -810,9 +927,16 @@ class asyncCCXTWrapper(ccxtWrapper):
         #  <class '__main__.ccxtWrapper'>, <class 'ccxt.async_support.kucoin.kucoin'>, ...)
         return await super(ccxtWrapper, self).create_order(symbol, type, side, amount, price, params)
     
-    _try = {'attempts': 2, 'sleep': 0.5}
-
     
+    async def edit_order(self, id, symbol, *args):
+        if len(args) >= 2:
+            direction = as_direction(args[1])
+            side = ['sell','buy'][direction]
+            args = args[:1] + (side,) + args[2:]
+        
+        return await super(ccxtWrapper, self).edit_order(id, symbol, *args)
+
+
 class _ccxtWrapper(ccxtWrapper, ccxt.Exchange):
     """A dummy class for pretty :rtype: specification"""
 
@@ -864,9 +988,13 @@ def init_exchange(exchange):
     e_reg = _exchanges if not asyn else _exchanges_async
     
     if e not in cls_reg:
-        eCls =  getattr(module,_E_REPLACE.get(e,e))
+        # Dynamically create the class
+        _name = _E_REPLACE.get(e,e)
+        eCls =  getattr(module,_name)
         wrCls = ccxtWrapper if not asyn else asyncCCXTWrapper
-        cls_reg[e] = type(e,(wrCls,eCls),{})
+        eWrCls = wrappers.get(_name)
+        bases = (eWrCls,wrCls,eCls) if eWrCls is not None else (wrCls,eCls)
+        cls_reg[e] = type(e,bases,{})
        
     e_cls = cls_reg[e]
                 

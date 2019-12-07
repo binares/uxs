@@ -34,14 +34,18 @@ class binance(ExchangeSocket):
             #'url': '<$base><symbol>@ticker',
             'merge_option': True,
         },
-        'market': {
-            #'url': '<$base><symbol>@trade',
-            'merge_option': True,
-        },
         'orderbook': {
             #'url': '<$base><symbol>@depth',
             'merge_option': True,
             'fetch_limit': 1000,
+        },
+        'trades': {
+            #'url': '<$base><symbol>@trade',
+            'merge_option': True,
+        },
+        'ohlcv': {
+            #'url': '<$base><symbol>@kline_<timeframe>',
+            'merge_option': True,
         },
         'account': {
             'url': '<$base><m$fetch_listen_key>',
@@ -53,6 +57,14 @@ class binance(ExchangeSocket):
         'all_tickers': True,
         'ticker': True,
         'orderbook': True,
+        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
+                   'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
+                   'price': True, 'amount': True, 'cost': False, 'fee': False},
+        'ohlcv': {'timeframes': ['1m', '3m', '5m', '15m', '30m',
+                                 '1h', '2h', '4h', '6h', '8h', '12h',
+                                 '1d', '3d', '1w', '1M'],
+                  'open': True, 'high': True, 'low': True, 'close': True,
+                  'volume': True},
         'account': {'balance': True, 'order': True, 'match': True},
         'fetch_tickers': {
             'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False, 
@@ -77,20 +89,25 @@ class binance(ExchangeSocket):
     def handle(self, R):
         r = R.data
         if isinstance(r, dict):
-            if r.get('e') == '24hrTicker':
+            type = r.get('e')
+            if type == '24hrTicker':
                 self.on_ticker(r)
-            elif r.get('e') == 'depthUpdate':
+            elif type == 'depthUpdate':
                 self.on_orderbook_update(r)
-            elif r.get('e') in ('outboundAccountInfo','outboundAccountPosition'):
+            elif type in ('outboundAccountInfo','outboundAccountPosition'):
                 self.on_balance(r)
-            elif r.get('e') in ('executionReport','listStatus'):
+            elif type in ('executionReport','listStatus'):
                 self.on_order(r)
+            elif type == 'trade':
+                self.on_trade(r)
+            elif type == 'kline':
+                self.on_ohlcv(r)
             #elif r == {} or 'ping' in r:
             #    print('Received ping response? : {}'.format(r))
             #    cnx = self.cm.connections[R.id]
             #    call_via_loop(cnx.send, (r,), loop=cnx.loop)
             else:
-                self.notify_unknown_response(r)
+                self.notify_unknown(r)
         elif isinstance(r, list) and len(r):
             if isinstance(r[0], dict) and r[0].get('e') == '24hrTicker':
                 self.on_all_tickers(r)
@@ -111,7 +128,7 @@ class binance(ExchangeSocket):
                 
         if reload_markets and time.time() - getattr(self,'_markets_last_reloaded',0) > 60:
             logger2.error('{} - reloading markets due to KeyError'.format(self.name))
-            asyncio.ensure_future(self.api._set_markets(limit=60))
+            asyncio.ensure_future(self.api.poll_load_markets(limit=60))
             self._markets_last_reloaded = time.time()
     
     
@@ -195,6 +212,66 @@ class binance(ExchangeSocket):
             'nonce': (r['U'],r['u']),
         }
         self.orderbook_maintainer.send_update(update)
+        
+        
+    def on_trade(self, r):
+        """{
+          "e": "trade",     // Event type
+          "E": 123456789,   // Event time
+          "s": "BNBBTC",    // Symbol
+          "t": 12345,       // Trade ID
+          "p": "0.001",     // Price
+          "q": "100",       // Quantity
+          "b": 88,          // Buyer order ID
+          "a": 50,          // Seller order ID
+          "T": 123456785,   // Trade time
+          "m": true,        // Is the buyer the market maker?
+          "M": true         // Ignore
+        }"""
+        symbol = self.convert_symbol(r['s'], 0)
+        id = r['t']
+        price = r['p']
+        amount = r['q']
+        ts = r['T']
+        side = ['buy','sell'][r['m']]
+        
+        e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=id,
+                                 side=side, price=price, amount=amount)
+        
+        self.update_trades([{'symbol': symbol, 'trades': [e]}])
+        
+        
+    def on_ohlcv(self, r):
+        """{
+          "e": "kline",     // Event type
+          "E": 123456789,   // Event time
+          "s": "BNBBTC",    // Symbol
+          "k": {
+            "t": 123400000, // Kline start time
+            "T": 123460000, // Kline close time
+            "s": "BNBBTC",  // Symbol
+            "i": "1m",      // Interval
+            "f": 100,       // First trade ID
+            "L": 200,       // Last trade ID
+            "o": "0.0010",  // Open price
+            "c": "0.0020",  // Close price
+            "h": "0.0025",  // High price
+            "l": "0.0015",  // Low price
+            "v": "1000",    // Base asset volume
+            "n": 100,       // Number of trades
+            "x": false,     // Is this kline closed?
+            "q": "1.0000",  // Quote asset volume
+            "V": "500",     // Taker buy base asset volume
+            "Q": "0.500",   // Taker buy quote asset volume
+            "B": "123456"   // Ignore
+          }
+        }"""
+        symbol = self.convert_symbol(r['s'], 0)
+        rr = r['k']
+        e = self.api.ohlcv_entry(timestamp=rr['t'], open=rr['o'], high=rr['h'],
+                                 low=rr['l'], close=rr['c'], volume=rr['q'])
+        
+        self.update_ohlcv([{'symbol': symbol, 'timeframe': rr['i'], 'ohlcv': [e]}])
         
     
     def on_balance(self, r):
@@ -287,36 +364,38 @@ class binance(ExchangeSocket):
             'id': str(r['i']), #ccxt parses to str
             'symbol': self.convert_symbol(r['s'], 0),
             'side': r['S'].lower(),
-            'rate': float(r['p']),
-            'qty': float(r['q']),
-            'ts': r['E'],
-            'executed': float(r['z']),
+            'price': float(r['p']),
+            'amount': float(r['q']),
+            'timestamp': r['E'],
+            'filled': float(r['z']),
         }
-        d['left'] = d['qty'] - d['executed'] if r['X'] not in ('CANCELED','REJECTED','EXPIRED') else 0
-        d['payout'] = d['executed'] if d['side'] == 'buy' else float(r['Z'])
+        d['remaining'] = d['amount'] - d['filled'] if r['X'] not in ('CANCELED','REJECTED','EXPIRED') else 0
+        d['payout'] = d['filled'] if d['side'] == 'buy' else float(r['Z'])
         
         o = None
-        try: o = self.get_order(d['id'])
-        except ValueError: pass
+        try: o = self.orders[d['id']]
+        except KeyError: pass
         
         if o is None:
-            #(self, id, symbol, side, rate, qty, ts, left=None, executed=None, payout=0)
+            #(self, id, symbol, side, price, amount, timestamp, remaining=None, filled=None, payout=0)
             self.add_order(**d)
         else:
-            d['left'] = min(d['left'],o['left'])
-            self.update_order(d['id'], d['left'], d['executed'], d['payout'])
+            d['remaining'] = min(d['remaining'],o['remaining'])
+            self.update_order(d['id'], d['remaining'], d['filled'], d['payout'])
     
     
     def create_url(self, url_factory):
         params = url_factory.params
         channel = params['_']
         symbol = params['symbol']
+        timeframe = params.get('timeframe')
         if isinstance(symbol, str):
             symbol = [symbol]
-        map = {'ticker': '@ticker',
-               'orderbook': '@depth',
-               'market': '@trade'}
-        suffix = map[channel]
+        suffixes = {'ticker': '@ticker',
+                    'orderbook': '@depth',
+                    'trades': '@trade',
+                    'ohlcv': '@kline_{}'.format(timeframe)}
+        suffix = suffixes[channel]
         return '/'.join(['{}{}'.format(s,suffix) for s in symbol])
     
     
@@ -339,8 +418,7 @@ class binance(ExchangeSocket):
         
         r2 = await call_via_loop(self.prolong_listen_key_expiry,
                                  args=(listen_key,),
-                                 loop=self.loop, 
-                                 cb_loop=asyncio.get_event_loop(),
+                                 loop=self.loop,
                                  module='asyncio')
         
         self.start_listen_key_prolonging(listen_key)
@@ -352,13 +430,13 @@ class binance(ExchangeSocket):
         async def prolong_key():
             return await self.api.publicPutUserDataStream({'listenKey': listen_key})
         
-        logger.debug('{} - prolonging listen key {}'.format(self.name, listen_key))
+        logger.debug('{} - prolonging listen key'.format(self.name))
         
         r = await call_via_loop(prolong_key,
                                 loop=self.loop,
                                 module='asyncio')
         
-        #logger.debug('{} - listen key prolonging response: {}'.format(self.name, r))
+        #logger.debug('{} - listen key prolonging response: {}'.format(self.name))
         
         return r
     
@@ -381,17 +459,14 @@ class binance(ExchangeSocket):
                              loop=self.loop)
         
         async def prolong_and_cancel_on_inactive():
-            print('after _ | s is active: {}; s is active2: {}'.format(s.is_active(), s.is_active2()))
             while True:
                 try: await s.wait_till_active(15)
                 except asyncio.TimeoutError:
                     if not any(_s is s for _s in self.sh.subscriptions):
                         return
                 else: break
-            print('after active | s is active: {}; s is active2: {}'.format(s.is_active(), s.is_active2()))
             asyncio.ensure_future(ticker.loop())
             await inactive.wait()
-            print('after inactive | s is active: {}; s is active2: {}'.format(s.is_active(), s.is_active2()))
             await ticker.close()
             
         call_via_loop(prolong_and_cancel_on_inactive,

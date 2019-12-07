@@ -5,7 +5,7 @@ import itertools as it
 import json
 import yaml
 import asyncio
-import copy as _copy
+from copy import deepcopy
 import ccxt
 import datetime
 dt = datetime.datetime
@@ -38,6 +38,8 @@ _METHODS = {
     'tickers': ('fetch_tickers',tuple(),{},[]),
     'ticker': ('fetch_ticker',tuple(),{},['symbol']),
     'orderbook': ('fetch_order_book',tuple(),{},['symbol']),
+    'trades': ('fetch_trades',tuple(),{},['symbol']),
+    'ohlcv': ('fetch_ohlcv',tuple(),{},['symbol','timeframe']),
 }
 
 _BLOCK = {
@@ -48,18 +50,22 @@ _BLOCK = {
     'tickers': 2,
     'ticker': 2,
     'orderbook': 2,
+    'trades': 2,
+    'ohlcv': 2,
 }
 
 _MAXLENS = {
     'markets': 5,
     'currencies': 5,
-    'balances': 5,
-    'balances-account': 5,
+    'balances': 2,
+    'balances-account': 2,
     'tickers': 5,
     'ticker': 2,
-    'orderbook': 2,}
+    'orderbook': 2,
+    'trades': 2,
+    'ohlcv': 2,}
 
-_LOADS_MARKETS = ('balances','balances-account','tickers','ticker','orderbook')
+_LOADS_MARKETS = ('balances','balances-account','tickers','ticker','orderbook','trades','ohlcv')
 
 storage = {}
 
@@ -127,18 +133,27 @@ def get_cache_expiry(exchange, type):
                                     'cache_expiry_for_exchanges', return2=0)
     
         
-async def set_markets(api, limit=None):
+async def load_markets(api, limit=None):
     exchange = get_name(api)
     limit = _resolve_limit(exchange, 'markets', limit)
+    markets_initial = api.markets
+    currencies_initial = api.currencies
+    api.markets = {}
+    api.currencies = {}
     markets = currencies = None
     try:
+        #this will call load_markets, which will set both markets and currencies
         m0 = (await fetch(exchange,'markets',limit,strip=False))[0]
-        l1 = limit
-        l2 = _resolve_limit(exchange, 'markets', m0.date)
-        limit = min(l1,l2) if None not in (l1,l2) else \
-                next((x for x in (l1,l2) if x is not None),None)
-        markets = _copy.deepcopy(m0.data)
-        currencies = _copy.deepcopy(load(exchange,'currencies',limit,1)[0].data)
+        #unless it loaded from cache, in which case they will have to be set manually
+        if not api.markets:
+            l1 = limit
+            l2 = _resolve_limit(exchange, 'markets', m0.date)
+            limit = min(l1,l2) if None not in (l1,l2) else \
+                    next((x for x in (l1,l2) if x is not None),None)
+            markets = m0.data
+            
+            if not api.currencies:
+                currencies = load(exchange,'currencies',limit,1)[0].data
     except Exception as e:
         logger.exception(e)
     finally:
@@ -147,6 +162,9 @@ async def set_markets(api, limit=None):
             try: api.set_markets(markets,currencies)
             except Exception as e2:
                 logger.exception(e2)
+        if not api.markets:
+            api.markets = markets_initial
+            api.currencies = currencies_initial
 
 
 async def get(exchange, type, limit=None, max=1,*,
@@ -301,7 +319,7 @@ async def update(exchange, type, args=None, kwargs=None, *,
     is_market = (type == 'markets')
     
     if type0 in _LOADS_MARKETS and not api.markets:
-        await set_markets(api)
+        await load_markets(api)
     
     exc, i = None, 0
     while i < attempts:
@@ -322,7 +340,7 @@ async def update(exchange, type, args=None, kwargs=None, *,
                 i = attempts-1
             elif isinstance(e, KeyError) and type=='tickers' and not i:
                 logger.debug('{} - fetch_tickers caused KeyError. Re-loading markets.'.format(exchange))
-                await set_markets(api)
+                await load_markets(api)
             if i == attempts-1:
                 logger2.error('{} - error fetching {}: {}'.format(exchange, type, e))
                 logger.exception(e)
@@ -350,6 +368,8 @@ def globalise(items):
         if pos is None:
             if len(seq): continue
             else: pos = 0
+        
+        item = deepcopy(item)
         
         try: 
             if seq[pos].date == item.date:
@@ -402,6 +422,8 @@ def retrieve(exchange, type, limit=None, max=5):
     
     if max is not None:
         items = items[:max]
+    
+    items = deepcopy(items)
     
     return items
 

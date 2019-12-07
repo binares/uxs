@@ -1,9 +1,6 @@
-import asyncio
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
-from dateutil.parser import parse as parsedate
-from collections import defaultdict
 from base64 import b64decode
 from zlib import decompress, MAX_WBITS
 import zlib
@@ -77,7 +74,7 @@ class bittrex(ExchangeSocket):
     }
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
-        'update_payout_on_trade': False,
+        'update_payout_on_fill': False,
     }
     
     
@@ -330,27 +327,27 @@ class bittrex(ExchangeSocket):
         symbol = self.convert_symbol(o['E'],0)
         id = o['OU']
         side = 'buy' if 'buy' in o['OT'].lower() else 'sell'
-        qnt = o['Q']
-        left = o['q']
-        rate = o['X']
-        ts = o['Y']
-        executed = qnt-left
+        amount = o['Q']
+        remaining = o['q']
+        price = o['X']
+        timestamp = o['Y']
+        filled = amount-remaining
         #precision = self.api.markets[symbol]['precision']['amount']
-        payout = (executed if side == 'buy' else 
+        payout = (filled if side == 'buy' else 
                   #(round down is precise operation, bittrex server doesn't round up)
-                  #fons.math.round.round(self.api.baseToQuote(executed,o['PU']) - o['n'], 8, 'down'))
+                  #fons.math.round.round(self.api.baseToQuote(filled,o['PU']) - o['n'], 8, 'down'))
                   o['P'] - o['n'])
                 
                   
         is_open = o['i']
         if not is_open:
-            left = 0
-        #print('on_order:',id,symbol,side,rate,qnt,ts,left,executed,payout)
-        try: self.get_order(id,'open')
+            remaining = 0
+        #print('on_order:',id,symbol,side,price,amount,timestamp,remaining,filled,payout)
+        try: self.orders[id]
         except ValueError:
-            self.add_order(id, symbol, side, rate, qnt, ts, left, executed, payout)
+            self.add_order(id, symbol, side, price, amount, timestamp, remaining, filled, payout)
         else:
-            self.update_order(id, left, executed, payout)
+            self.update_order(id, remaining, filled, payout)
             
         self.change_subscription_state({'_': 'account'}, 1)
         

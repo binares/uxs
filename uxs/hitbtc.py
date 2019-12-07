@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
@@ -70,10 +69,14 @@ class hitbtc(ExchangeSocket):
     }
     has['fetch_ticker'] = has['fetch_tickers'].copy()
     message_id_keyword = 'id'
+    ob = {
+        'force_create': None,
+        'receives_snapshot': True,
+    }
     order = {
-        'update_left_on_trade': False,
-        'update_executed_on_trade': False,
-        'update_payout_on_trade': True,
+        'update_remaining_on_fill': False,
+        'update_filled_on_fill': False,
+        'update_payout_on_fill': True,
     }
     
     def handle(self, R):
@@ -217,32 +220,32 @@ class hitbtc(ExchangeSocket):
         status = rr['status']
         rtype = rr['reportType']
         o = None
-        try: o = self.get_order(id)
-        except ValueError: pass
+        try: o = self.orders[id]
+        except KeyError: pass
         symbol = self.convert_symbol(rr['symbol'],0)
         side = rr['side']
-        qty = float(rr['quantity'])
-        executed = float(rr['cumQuantity'])
-        left = qty-executed if status not in ('canceled','filled','suspended','expired') else 0
+        amount = float(rr['quantity'])
+        filled = float(rr['cumQuantity'])
+        remaining = amount-filled if status not in ('canceled','filled','suspended','expired') else 0
         if o is None:
             #(status == "new")
             #"2017-10-20T12:29:43.166Z"
             dto = parsedate(rr['createdAt']).replace(tzinfo=None)
             ts = timestamp_ms(dto)
             price = float(rr['price'])
-            self.add_order(id,symbol,side,price,qty,ts,left,executed)
+            self.add_order(id,symbol,side,price,amount,ts,remaining,filled)
         else:
             #Can the server send "canceled"/replaced message twice, in response
             # to both cancelOrder/cancelReplaceOrder and subscribeReports?
             #Worse yet, the "expired" may arrive sooner than update,
-            # thus have to check that left is smaller than previous, and executed larger
-            left = min(left,o['left'])
-            executed = max(executed,o['executed'])
+            # thus have to check that remaining is smaller than previous, and filled larger
+            remaining = min(remaining,o['remaining'])
+            filled = max(filled,o['filled'])
             if status in ('canceled','filled','suspended','expired'):
-                self.update_order(id,0,executed)
+                self.update_order(id,0,filled)
                 #logger.error('{} - received unregistered order {}'.format(self.name,id))
             elif status in ('partiallyFilled','new'):
-                self.update_order(id,left,executed)
+                self.update_order(id,remaining,filled)
             else:
                 #order 
                 logger2.info('{} - received unknown order status. r: {}'.format(self.name,rr))
@@ -250,13 +253,13 @@ class hitbtc(ExchangeSocket):
         if rtype == 'trade':
             tid = rr['tradeId']
             tprice = float(rr['tradePrice'])
-            tqty = float(rr['tradeQuantity'])
+            tamount = float(rr['tradeQuantity'])
             tdto = parsedate(rr['updatedAt']).replace(tzinfo=None)
             tts = timestamp_ms(tdto)
             #fee is negative when we are paid the rebate
             #NB! fee is always in payout currency
             fee = float(rr['tradeFee'])
-            self.add_trade(tid,symbol,side,tprice,tqty,None,tts,id,fee=fee)
+            self.add_fill(tid,symbol,side,tprice,tamount,None,tts,id,fee=fee)
             
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         #side: buy/sell
@@ -275,8 +278,8 @@ class hitbtc(ExchangeSocket):
             out['price'] = str(price)
         r = (await self.send(out,True)).data
         self.check_errors(r)
-        o = self.get_order(order_id)
-        return o #{'id': order_id, 'price': o['rate'], 'amount': o['qty']}
+        o = self.orders[order_id]
+        return o #{'id': order_id, 'price': o['price'], 'amount': o['amount']}
                         
     async def cancel_order(self, id, symbol=None, params={}):
         out = dict(params,**{
@@ -285,8 +288,8 @@ class hitbtc(ExchangeSocket):
         })
         r = (await self.send(out,True)).data
         self.check_errors(r)
-        o = self.get_order(id,'closed')
-        return o #{'id': id, 'price': o['rate'], 'amount'}
+        o = self.orders[id]
+        return o #{'id': id, 'price': o['price'], 'amount'}
     
     async def fetch_balance(self):
         r = (await self.send({'_':'fetch_balance'},True)).data
@@ -303,7 +306,7 @@ class hitbtc(ExchangeSocket):
         elif channel in ('orderbook','ticker','market'):
             method = {'orderbook': 'subscribeOrderbook',
                       'ticker': 'subscribeTicker',
-                      'market': 'subscribeTrades'}[channel]
+                      'trades': 'subscribeTrades'}[channel]
             if unsub:
                 method = 'un'+method
             #symbol=self.comma_separate(config['symbol'],self.convert_symbol)

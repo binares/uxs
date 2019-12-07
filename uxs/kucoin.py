@@ -41,7 +41,7 @@ class kucoin(ExchangeSocket):
                         'baseVolume' :False, 'quoteVolume': False},
         'ticker': {}, #same as all_tickers
         'orderbook': True,
-        'market': {'match': True},
+        'trades': {'match': True},
         'account': {'balance': True, 'order': False, 'match': False},
         'match': True,
         'fetch_tickers': True,
@@ -55,21 +55,22 @@ class kucoin(ExchangeSocket):
         'subscription_push_rate_limit': 0.04,
         'ping': 'm$ping',
         'ping_interval': 30,
+        'ping_as_message': True,
     }
     topics = {
         'account': '/account/balance',
         'ticker': '/market/ticker:{symbol}',
         'all_tickers': '/market/ticker:all',
         'orderbook': '/market/level2:{symbol}',
-        'market': '/market/match:{symbol}',
+        'trades': '/market/match:{symbol}',
         'match': '/market/match:{symbol}',
     }
     message_id_keyword = 'id'
-    match_is_subset_of_market = True
+    match_is_subset_of_trades = True
     order = {
-        'update_executed_on_trade': True,
-        'update_payout_on_trade': True,
-        'update_left_on_trade': True,
+        'update_filled_on_fill': True,
+        'update_payout_on_fill': True,
+        'update_remaining_on_fill': True,
     }
 
  
@@ -168,7 +169,7 @@ class kucoin(ExchangeSocket):
             for side in ['bids','asks']:
                 try: changes = d['changes'][side]
                 except KeyError: continue
-                update[side] = [[float(rate),float(qnt)] for rate,qnt,nonce in changes
+                update[side] = [[float(price),float(qty)] for price,qty,nonce in changes
                                 if nonce==str_nonce]
             if len(update['bids']) or len(update['asks']):
                 updates.append(update)
@@ -222,24 +223,35 @@ class kucoin(ExchangeSocket):
         }"""
         #print('match: {}'.format(r['data']))
         d = r['data']
+        symbol = self.convert_symbol(d['symbol'],0)
         moid = d['makerOrderId']
         toid = d['takerOrderId']
         order = None
         for oid in (moid,toid):
-            try: order = self.get_order(oid,'open')
-            except ValueError: pass
+            try: order = self.orders[oid]
+            except KeyError: pass
             else: break
-        if order is None:
+        
+        is_subbed_to_trades = self.is_subscribed_to({'_': 'trades', 'symbol': symbol})
+        
+        if order is None and not is_subbed_to_trades:
             return
+        
         #print('myMatch: {}'.format(r['data']))
         takerOrMaker = 'taker' if order['id'] == toid else 'maker'
         ts = int(d['time'][:-6])
-        symbol = self.convert_symbol(d['symbol'],0)
-        qty = float(d['size'])
-        rate = float(d['price'])
+        amount = float(d['size'])
+        price = float(d['price'])
         side = d['side']
         fee_mp = takerOrMaker #0.002
-        self.add_trade(d['tradeId'], symbol, side, rate, qty, fee_mp, ts, order['id'])
+        
+        if order is not None:
+            self.add_fill(d['tradeId'], symbol, side, price, amount, fee_mp, ts, order['id'])
+        
+        if is_subbed_to_trades:
+            e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=d['tradeId'],
+                                     price=price, amount=amount, side=side)
+            self.update_trades([{'symbol': symbol, 'trades': [e]}])
         
         
     async def create_connection_url(self):#, auth=True):
