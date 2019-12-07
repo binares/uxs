@@ -46,7 +46,7 @@ _E_REPLACE = {
     'gdax':'coinbasepro',
 }
 wrappers = {
-    #'bitmex': bitmexWrapper,
+    'bitmex': bitmexWrapper,
 }
 #PRICE_ACCURACY = 3
 AMOUNT_ACCURACY = 3

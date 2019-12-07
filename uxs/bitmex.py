@@ -1,0 +1,748 @@
+import os
+from dateutil.parser import parse as parsedate
+from collections import defaultdict
+import urllib
+import json
+import asyncio
+import time
+import datetime
+dt = datetime.datetime
+td = datetime.timedelta
+
+from uxs.base.socket import ExchangeSocket, ExchangeSocketError
+
+from fons.time import timestamp_ms, pydt_from_ms, ctime_ms
+from fons.crypto import nonce_ms, sign
+import fons.log
+logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
+
+
+class bitmex(ExchangeSocket): 
+    exchange = 'bitmex'
+
+    auth_defaults = {
+        'takes_input': False,
+        'each_time': False,
+        'send_separately': True,
+    }
+    url_components = {
+        'base': 'wss://www.bitmex.com/realtime',
+    }
+    channel_defaults = {
+        'url': '<$base>',
+        'unsub_option': True,
+        'merge_option': True,
+    }
+    channels = {
+        'account': {
+            'required': ['symbol'],
+            'identifying': (),
+            #Multiple symbols can actually be given at once,
+            # but since they are not in id_tuple ("identifying")
+            # it doesn't count as "merged"
+            'merge_option': False,
+            'auth': {'apply_to_packs': [0]},
+        },
+    }
+    has = {
+        'balance': {'delta': True},
+        'ticker': False,
+        'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+                        'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
+                        'change': True, 'percentage': True, 'average': False, 'vwap': True,
+                        'baseVolume': True, 'quoteVolume': True, 'active': True},
+        'orderbook': True,
+        'account': {'balance': True, 'order': True, 'match': True},
+        'fetch_tickers': True,
+        'fetch_ticker': True,
+        'fetch_order_book': True,
+        'fetch_balance': True,
+    }
+    connection_defaults = {
+        'max_subscriptions': 95, #?
+        #'subscription_push_rate_limit': 0.12,
+        'rate_limit': (1, 2),
+        #'ping': 'm$ping',
+        'ping_interval': 0.5,
+        #'ping_as_message': True,
+        'ping_after': 5,
+        'ping_timeout': 5,
+        #'recv_timeout': 10,
+    }
+    ob = {
+        'force_create': None,
+        'cache_size': 1000,
+        'uses_nonce': False,
+        'receives_snapshot': True,
+        'hold_times': {
+            'orderBookL2_25': 0.05,
+            #this is the lowest "exact" asyncio.sleep time on Windows
+            'orderBookL2': 0.016,
+        }
+    }
+    order = {
+        'update_filled_on_fill': False,
+        'update_payout_on_fill': False,
+        'update_remaining_on_fill': False,
+    }
+    _id_prices = defaultdict(lambda: {'start': None,
+                                      'multiplier': None,
+                                      'per_tick': None,
+                                      'cache': []})
+    __deepcopy_on_init__ = ExchangeSocket.__deepcopy_on_init__[:] + ['_id_prices']
+    
+    
+    def handle(self, response):
+        message = response.data
+        
+        #logger.debug(json.dumps(message))
+        if not isinstance(message, dict):
+            print(message)
+            return
+
+        table = message['table'] if 'table' in message else None
+        action = message['action'] if 'action' in message else None
+
+        if 'subscribe' in message:
+            if message['success']:
+                _channel = message['subscribe']
+                if _channel == 'position':
+                    async def change_state():
+                        await asyncio.sleep(1)
+                        self.change_subscription_state({'_': 'account'}, 1)
+                    asyncio.ensure_future(change_state())
+                logger.debug("Subscribed to %s." % message['subscribe'])
+            else:
+                self.error("Unable to subscribe to %s. Error: \"%s\" Please check and restart." %
+                           (message['request']['args'][0], message['error']))
+        elif 'status' in message:
+            if message['status'] == 400:
+                self.error(message['error'])
+            if message['status'] == 401:
+                self.error("API Key incorrect, please check and restart.")
+        elif action:
+            if table == 'order':
+                self.on_order(message)
+            elif table == 'position':
+                self.on_position(message)
+            elif table == 'instrument':
+                self.on_ticker(message)
+            elif table in ('orderBookL2', 'orderBookL2_25'):
+                self.on_orderbookL2(message)
+            elif table == 'orderBook10':
+                self.on_orderbook10(message)
+    
+    def error(self, r):
+        logger2.error('{} - {}'.format(self.name, r))
+        
+    def on_ticker(self, message):
+        pass
+            
+    def on_orderbookL2(self, message):
+        """
+        > {"op": "subscribe", "args": ["orderBookL2_25:XBTUSD"]}
+        {"success":true,"subscribe":"orderBookL2_25:XBTUSD","request":{"op":"subscribe","args":["orderBookL2_25:XBTUSD"]}}
+        {
+            "table":"orderBookL2_25",
+            "keys":["symbol","id","side"],
+            "types":{"id":"long","price":"float","side":"symbol","size":"long","symbol":"symbol"}
+            "foreignKeys":{"side":"side","symbol":"instrument"},
+            "attributes":{"id":"sorted","symbol":"grouped"},
+            "action":"partial",
+            "data":[
+              {"symbol":"XBTUSD","id":17999992000,"side":"Sell","size":100,"price":80},
+              {"symbol":"XBTUSD","id":17999993000,"side":"Sell","size":20,"price":70},
+              {"symbol":"XBTUSD","id":17999994000,"side":"Sell","size":10,"price":60},
+              {"symbol":"XBTUSD","id":17999995000,"side":"Buy","size":10,"price":50},
+              {"symbol":"XBTUSD","id":17999996000,"side":"Buy","size":20,"price":40},
+              {"symbol":"XBTUSD","id":17999997000,"side":"Buy","size":100,"price":30}
+            ]
+          }
+        {
+            "table":"orderBookL2_25",
+            "action":"update",
+            "data":[
+              {"symbol":"XBTUSD","id":17999995000,"side":"Buy","size":5}
+            ]
+          }
+        {
+            "table":"orderBookL2_25",
+            "action":"delete",
+            "data":[
+              {"symbol":"XBTUSD","id":17999995000,"side":"Buy"}
+            ]
+          }
+        {
+            "table":"orderBookL2_25",
+            "action":"insert",
+            "data":[
+              {"symbol":"XBTUSD","id":17999995500,"side":"Buy","size":10,"price":45},
+            ]
+        }
+        """
+        
+        # There are four possible actions from the WS:
+        # 'partial' - full table image
+        # 'insert'  - new row
+        # 'update'  - update row
+        # 'delete'  - delete row
+        
+        # Since 'delete' actions are sent in separate payloads
+        # there are moments of crossing (buy level <-> sell level)
+        # where the crossed levels are empty (when in fact they (probably) aren't)
+        # The solution is to cache the update and prevent it from being pushed for
+        # a short amount of time
+        
+        table = message['table']
+        action = message['action']
+        
+        hold_time = self.ob['hold_times'][table]
+        _default = lambda price, size: [price, size]
+        _delete = lambda price, size: [price, 0]
+        op = _default if action != 'delete' else _delete
+        updates = {}
+        
+        for x in message['data']:
+            symbol = self.convert_symbol(x['symbol'], 0)
+            side = 'bids' if x['side'] == 'Buy' else 'asks'
+            price = self._ob_price_from_id(symbol, x['id'], x.get('price'))
+            if price is not None:
+                item = op(price, x.get('size'))
+                if symbol not in updates:
+                    updates[symbol] = self.api.ob_entry(symbol, timestamp=ctime_ms())
+                updates[symbol][side].append(item)
+        
+        for symbol,ob in updates.items():
+            if action == 'partial':
+                ob['bids'].sort(key=lambda x: x[0], reverse=True)
+                ob['asks'].sort(key=lambda x: x[0])
+                self.obm.send_orderbook(ob)
+            else:
+                force_push = False
+                if action == 'delete':
+                    # hold for 16/50 ms
+                    # this seems to be enough for the next 'insert' action to be received
+                    ob['__hold__'] = hold_time
+                elif action == 'insert' and table == 'orderBookL2':
+                    #orderBookL2 seems to send the associating inserts right after delete,
+                    #while orderBookL2_25 may first send inserts related to fringe changes
+                    #(it always shows 25 items)
+                    force_push = True
+                self.obm.send_update(ob, force_push)
+                
+                
+    def on_orderbook10(self, message):      
+        """
+        {
+            'table': 'orderBook10',
+            'action': 'partial',
+            'keys': ['symbol'],
+            'types': {'symbol': 'symbol', 'bids': '', 'asks': '', 'timestamp': 'timestamp'},
+            'foreignKeys': {'symbol': 'instrument'},
+            'attributes': {'symbol': 'sorted'},
+            'filter': {'symbol': 'ETHUSD'},
+            'data': [
+                {'symbol': 'ETHUSD',
+                 'bids': [[146.05, 52650], [146, 283623], [145.95, 125823], [145.9, 94451], [145.85, 184467], [145.8, 274912], [145.75, 102778], [145.7, 142252], [145.65, 73277], [145.6, 123599]],
+                 'asks': [[146.1, 207296], [146.15, 134945], [146.2, 243843], [146.25, 167226], [146.3, 88612], [146.35, 185717], [146.4, 184628], [146.45, 54077], [146.5, 130910], [146.55, 73635]],
+                 'timestamp': '2019-12-04T12:30:38.937Z'},
+            ]
+          }
+        {
+            'table': 'orderBook10',
+            'action': 'update',
+            'data': [
+                {'symbol': 'ETHUSD',
+                 'bids': [[146.05, 52650], [146, 283623], [145.95, 115823], [145.9, 94451], [145.85, 184467], [145.8, 274912], [145.75, 102778], [145.7, 142252], [145.65, 73277], [145.6, 123599]],
+                 'asks': [[146.1, 207296], [146.15, 134945], [146.2, 243843], [146.25, 167226], [146.3, 88612], [146.35, 185717], [146.4, 184628], [146.45, 54077], [146.5, 130910], [146.55, 73635]],
+                 'timestamp': '2019-12-04T12:30:39.239Z'},
+            ]
+        }
+        """
+        
+        # Action can be either 'partial' or 'update'
+        
+        updates = {}
+        
+        for x in message['data']:
+            symbol = self.convert_symbol(x['symbol'], 0)
+            updates[symbol] = self.api.ob_entry(symbol, bids=x.get('bids'), asks=x.get('asks'), datetime=x.get('timestamp'))
+                
+        for symbol,ob in updates.items():
+            self.obm.send_orderbook(ob)
+    
+    
+    def on_order(self, message):
+        """
+        #STOP ORDER:
+        {'table': 'order',
+         'action': 'insert',
+         'data': [{'orderID': 'c4bf0e2c-e6af-5c2b-9e62-73ca8300e02e',
+                   'clOrdID': '',
+                   'clOrdLinkID': '',
+                   'account': 123456,
+                   'symbol': 'ETHUSD',
+                   'side': 'Buy',
+                   'simpleOrderQty': None,
+                   'orderQty': 216,
+                   'price': None,
+                   'displayQty': None,
+                   'stopPx': 153.25,
+                   'pegOffsetValue': None,
+                   'pegPriceType': '',
+                   'currency': 'USD',
+                   'settlCurrency': 'XBt',
+                   'ordType': 'Stop',
+                   'timeInForce': 'ImmediateOrCancel',
+                   'execInst': '',
+                   'contingencyType': '',
+                   'exDestination': 'XBME',
+                   'ordStatus': 'New',
+                   'triggered': '',
+                   'workingIndicator': False,
+                   'ordRejReason': '',
+                   'simpleLeavesQty': None,
+                   'leavesQty': 216,
+                   'simpleCumQty': None,
+                   'cumQty': 0,
+                   'avgPx': None,
+                   'multiLegReportingType': 'SingleSecurity',
+                   'text': 'Submitted via API.',
+                   'transactTime': '2019-11-25T18:20:48.149Z',
+                   'timestamp': '2019-11-25T18:20:48.149Z'}]}
+                   
+        {'table': 'order',
+         'action': 'update',
+         'data': [{'orderID': 'c4bf0e2c-e6af-5c2b-9e62-73ca8300e02e',
+                   'ordStatus': 'Canceled',
+                   'leavesQty': 0,
+                   'text': 'Canceled: Cancel from www.bitmex.com\nSubmitted via API.',
+                   'timestamp': '2019-11-25T18:20:55.304Z',
+                   'clOrdID': '',
+                   'account': 123456,
+                   'symbol': 'ETHUSD'}]}
+        
+        #LIMIT ORDER:
+        #1
+        {'table': 'order', 'action': 'insert',
+        'data': [{'orderID': 'ab4f4d1b-436c-b49a-c8f9-b1c6bcfde4c0', 'clOrdID': '', 'clOrdLinkID': '', 'account': 123456,
+                  'symbol': 'ETHUSD', 'side': 'Buy', 'simpleOrderQty': None, 'orderQty': 8, 'price': 145.8, 'displayQty': None,
+                  'stopPx': None, 'pegOffsetValue': None, 'pegPriceType': '', 'currency': 'USD', 'settlCurrency': 'XBt',
+                  'ordType': 'Limit', 'timeInForce': 'GoodTillCancel', 'execInst': '', 'contingencyType': '', 'exDestination': 'XBME',
+                  'ordStatus': 'New', 'triggered': '', 'workingIndicator': False, 'ordRejReason': '', 'simpleLeavesQty': None,
+                  'leavesQty': 8, 'simpleCumQty': None, 'cumQty': 0, 'avgPx': None, 'multiLegReportingType': 'SingleSecurity',
+                  'text': 'Submission from www.bitmex.com', 'transactTime': '2019-11-21T15:21:53.006Z',
+                  'timestamp': '2019-11-26T00:26:57.245Z'}]}
+        
+        #8
+        {'table': 'order',
+         'action': 'update',
+         'data': [{'orderID': 'ab4f4d1b-436c-b49a-c8f9-b1c6bcfde4c0', 'ordStatus': 'Filled', 'workingIndicator': False,
+                  'leavesQty': 0, 'cumQty': 8, 'avgPx': 145.8, 'timestamp': '2019-11-21T15:21:53.006Z', 'clOrdID': '',
+                  'account': 123456, 'symbol': 'ETHUSD'}]}
+        #10
+        {'table': 'order', 'action': 'insert',
+         'data': [{'orderID': '66ab03de-fc2a-a990-4ab7-4bd1c00353ab', 'clOrdID': '', 'clOrdLinkID': '', 'account': 123456,
+                   'symbol': 'ETHUSD', 'side': '', 'simpleOrderQty': None, 'orderQty': None, 'price': None, 'displayQty': None,
+                   'stopPx': None, 'pegOffsetValue': None, 'pegPriceType': '', 'currency': 'USD', 'settlCurrency': 'XBt',
+                   'ordType': 'Market', 'timeInForce': 'ImmediateOrCancel', 'execInst': 'Close', 'contingencyType': '',
+                   'exDestination': 'XBME', 'ordStatus': 'New', 'triggered': '', 'workingIndicator': False, 'ordRejReason': '',
+                   'simpleLeavesQty': None, 'leavesQty': None, 'simpleCumQty': None, 'cumQty': 0, 'avgPx': None,
+                   'multiLegReportingType': 'SingleSecurity', 'text': 'Position Close from www.bitmex.com',
+                   'transactTime': '2019-11-21T15:24:17.091Z', 'timestamp': '2019-11-21T15:24:17.091Z'}]}
+        #11                                                         
+        {'table': 'order', 'action': 'update',
+         'data': [{'orderID': '66ab03de-fc2a-a990-4ab7-4bd1c00353ab', 'side': 'Sell', 'orderQty': 8, 'price': 145,
+                   'workingIndicator': True, 'leavesQty': 8, 'clOrdID': '', 'account': 123456, 'symbol': 'ETHUSD',
+                   'timestamp': '2019-11-21T15:24:17.091Z'}]}
+        #13
+        {'table': 'order', 'action': 'update',
+         'data': [{'orderID': '66ab03de-fc2a-a990-4ab7-4bd1c00353ab', 'ordStatus': 'Filled', 'workingIndicator': False,
+                   'leavesQty': 0, 'cumQty': 8, 'avgPx': 145, 'clOrdID': '', 'account': 123456, 'symbol': 'ETHUSD',
+                   'timestamp': '2019-11-21T15:24:17.091Z'}]}
+        """
+                   
+        action = message['action']
+        for d in message['data']:
+            symbol = self.convert_symbol(d['symbol'], 0)
+            id = d['orderID']
+            timestamp = self.api.parse8601(d['timestamp'])
+            #For stop order the price is None
+            price = d.get('price')
+            #types: #Limit, Stop (market), Market, ...
+            type = d['ordType'].lower() if 'ordType' in d else None 
+            amount = d.get('orderQty')
+            side = d['side'].lower() if 'side' in d else None
+            remaining = d.get('leavesQty')
+            filled = d.get('cumQty')
+            extra = {}
+            if 'stopPx' in d:
+                extra['stop'] = d['stopPx']
+            exists = id in self.orders
+            is_create_action = action in ('insert','partial')
+            #('partial' sends open orders upon subscription)
+            if is_create_action and not exists:
+                extra['type'] = type
+                self.add_order(id, symbol, side, price, amount, timestamp,
+                               remaining=remaining, filled=filled, 
+                               datetime=d['timestamp'], params=extra)
+            elif is_create_action and exists or action == 'update':
+                if amount is not None:
+                    extra['amount'] = amount
+                if 'price' in d:
+                    extra['price'] = price
+                if type is not None:
+                    extra['type'] = type
+                if side is not None:
+                    extra['side'] = side
+                self.update_order(id, remaining, filled, params=extra)
+            #elif action == 'delete':
+            #    self.update_order(id, 0, filled) #?
+            else:
+                self.error("Unknown order action: '{}'; item: {}".format(action, d))
+            
+            
+    def on_fill(self, message):
+        """
+        #5
+        {'table': 'execution',
+         'action': 'insert',
+         'data': [{'execID': '18108e22-13a1-7fd7-7115-a661254356d7',
+                   'orderID': 'ab4f4d1b-436c-b49a-c8f9-b1c6bcfde4c0',
+                   'clOrdID': '',
+                   'clOrdLinkID': '',
+                   'account': 123456,
+                   'symbol': 'ETHUSD',
+                   'side': 'Buy',
+                   'lastQty': None,
+                   'lastPx': None,
+                   'underlyingLastPx': None,
+                   'lastMkt': '',
+                   'lastLiquidityInd': '',
+                   'simpleOrderQty': None,
+                   'orderQty': 8,
+                   'price': 145.8,
+                   'displayQty': None,
+                   'stopPx': None,
+                   'pegOffsetValue': None,
+                   'pegPriceType': '',
+                   'currency': 'USD',
+                   'settlCurrency': 'XBt',
+                   'execType': 'New',
+                   'ordType': 'Limit',
+                   'timeInForce': 'GoodTillCancel',
+                   'execInst': '',
+                   'contingencyType':'',
+                   'exDestination': 'XBME',
+                   'ordStatus': 'New',
+                   'triggered': '',
+                   'workingIndicator': True,
+                   'ordRejReason': '',
+                   'simpleLeavesQty': None,
+                   'leavesQty': 8,
+                   'simpleCumQty': None,
+                   'cumQty': 0,
+                   'avgPx': None,
+                   'commission': None,
+                   'tradePublishIndicator': '',
+                   'multiLegReportingType': 'SingleSecurity',
+                   'text': 'Submission from www.bitmex.com',
+                   'trdMatchID': '00000000-0000-0000-0000-000000000000',
+                   'execCost': None,
+                   'execComm': None,
+                   'homeNotional': None,
+                   'foreignNotional': None,
+                   'transactTime': '2019-11-21T15:22:09.810Z',
+                   'timestamp': '2019-11-21T15:22:09.810Z'}]}
+        
+        #7
+        {'table': 'execution',
+        'action': 'insert',
+        'data': [{'execID': '6fc465d9-7d94-653b-4015-0498e564907c', 'orderID': 'ab4f4d1b-436c-b49a-c8f9-b1c6bcfde4c0',
+                  'clOrdID': '', 'clOrdLinkID': '', 'account': 123456, 'symbol': 'ETHUSD', 'side': 'Buy', 'lastQty': 8,
+                  'lastPx': 145.8, 'underlyingLastPx': None, 'lastMkt': 'XBME', 'lastLiquidityInd': 'AddedLiquidity',
+                  'simpleOrderQty': None, 'orderQty': 8, 'price': 145.8, 'displayQty': None, 'stopPx': None,
+                  'pegOffsetValue': None, 'pegPriceType': '', 'currency': 'USD', 'settlCurrency': 'XBt', 'execType': 'Trade',
+                  'ordType': 'Limit', 'timeInForce': 'GoodTillCancel', 'execInst': '', 'contingencyType': '',
+                  'exDestination': 'XBME', 'ordStatus': 'Filled', 'triggered': '', 'workingIndicator': False,
+                  'ordRejReason': '', 'simpleLeavesQty': None, 'leavesQty': 0, 'simpleCumQty': None, 'cumQty': 8,
+                  'avgPx': 145.8, 'commission': -0.00025, 'tradePublishIndicator': 'PublishTrade',
+                  'multiLegReportingType': 'SingleSecurity', 'text': 'Submission from www.bitmex.com',
+                  'trdMatchID': 'ec3ba73b-e402-4226-63c4-d673926a2d63', 'execCost': 116640, 'execComm': -29,
+                  'homeNotional': 0.05690305142613273, 'foreignNotional': -8.296464897930152,
+                  'transactTime': '2019-11-21T15:22:11.351Z', 'timestamp': '2019-11-21T15:22:11.351Z'}]}
+        #12
+        {'table': 'execution', 'action': 'insert',
+         'data': [{'execID': '4445e25d-8c87-21da-2d09-021dc7cf6f51', 'orderID': '66ab03de-fc2a-a990-4ab7-4bd1c00353ab',
+                   'clOrdID': '', 'clOrdLinkID': '', 'account': 123456, 'symbol': 'ETHUSD', 'side': 'Sell', 'lastQty': None,
+                   'lastPx': None, 'underlyingLastPx': None, 'lastMkt': '', 'lastLiquidityInd': '', 'simpleOrderQty': None,
+                   'orderQty': 8, 'price': 145, 'displayQty': None, 'stopPx': None, 'pegOffsetValue': None, 'pegPriceType': '',
+                   'currency': 'USD', 'settlCurrency': 'XBt', 'execType': 'New', 'ordType': 'Market', 'timeInForce': 'ImmediateOrCancel',
+                   'execInst': 'Close', 'contingencyType': '', 'exDestination': 'XBME', 'ordStatus': 'New', 'triggered': '',
+                   'workingIndicator': True, 'ordRejReason': '', 'simpleLeavesQty': None, 'leavesQty': 8, 'simpleCumQty': None,
+                   'cumQty': 0, 'avgPx': None, 'commission': None, 'tradePublishIndicator': '', 'multiLegReportingType': 'SingleSecurity',
+                   'text': 'Position Close from www.bitmex.com', 'trdMatchID': '00000000-0000-0000-0000-000000000000', 'execCost': None,
+                   'execComm': None, 'homeNotional': None, 'foreignNotional': None, 'transactTime': '2019-11-21T15:24:17.091Z',
+                   'timestamp': '2019-11-21T15:24:17.091Z'},
+                   {'execID': '30619e49-c1ac-7ef0-3406-6c0270076103', 'orderID': '66ab03de-fc2a-a990-4ab7-4bd1c00353ab',
+                   'clOrdID': '', 'clOrdLinkID': '', 'account': 123456, 'symbol': 'ETHUSD', 'side': 'Sell', 'lastQty': 8,
+                   'lastPx': 145, 'underlyingLastPx': None, 'lastMkt': 'XBME', 'lastLiquidityInd': 'RemovedLiquidity',
+                   'simpleOrderQty': None, 'orderQty': 8, 'price': 145, 'displayQty': None, 'stopPx': None,
+                   'pegOffsetValue': None, 'pegPriceType': '', 'currency': 'USD', 'settlCurrency': 'XBt', 'execType': 'Trade',
+                   'ordType': 'Market', 'timeInForce': 'ImmediateOrCancel', 'execInst': 'Close', 'contingencyType': '',
+                   'exDestination': 'XBME', 'ordStatus': 'Filled', 'triggered': '', 'workingIndicator': False, 'ordRejReason': '',
+                   'simpleLeavesQty': None, 'leavesQty': 0, 'simpleCumQty': None, 'cumQty': 8, 'avgPx': 145, 'commission': 0.00075,
+                   'tradePublishIndicator': 'PublishTrade', 'multiLegReportingType': 'SingleSecurity',
+                   'text': 'Position Close from www.bitmex.com', 'trdMatchID': '3972ebc0-b24e-5683-1bd3-dae1955df36a', 
+                   'execCost': -116000, 'execComm': 87, 'homeNotional': -0.05684240443370755, 'foreignNotional': 8.242148642887594,
+                   'transactTime': '2019-11-21T15:24:17.091Z', 'timestamp': '2019-11-21T15:24:17.091Z'}]}
+        """
+    
+    def on_position(self, message):
+        #https://www.bitmex.com/api/explorer/#!/Position/Position_get
+        """
+        These are sent on 10-25 sec interval, and right after orders are created/executed
+        #3
+        {'table': 'position', 'action': 'update', 
+         'data': [{'account': 123456, 'symbol': 'ETHUSD', 'currency': 'XBt', 'openOrderBuyQty': 8, 'openOrderBuyCost': 116640,
+                   'grossOpenCost': 116640, 'markPrice': 145.88, 'riskValue': 116640, 'initMargin': 39085,
+                   'timestamp': '2019-11-21T15:21:53.006Z', 'currentQty': 0, 'liquidationPrice': None}]}
+        #4
+        {'table': 'margin', 'action': 'update', 
+         'data': [{'account': 123456, 'currency': 'XBt', 'grossOpenCost': 116640, 'riskValue': 116640, 'initMargin': 39085,
+                   'marginUsedPcnt': 0.9858, 'excessMargin': 563, 'availableMargin': 563, 'withdrawableMargin': 563,
+                   'timestamp': '2019-11-21T15:21:53.006Z'}]}
+        #6 - position updates
+        ...
+        #9 - position and margin updates (after order "filled" #8)
+        {'table': 'position', 'action': 'update',
+         'data': [{'account': 123456, 'symbol': 'ETHUSD', 'currency': 'XBt', 'openOrderBuyQty': 0, 'openOrderBuyCost': 0,
+                   'execBuyQty': 8, 'execBuyCost': 116640, 'execQty': 8, 'execCost': 116640, 'execComm': -29,
+                   'currentTimestamp': '2019-11-21T15:21:53.008Z', 'currentQty': 8, 'currentCost': 183120, 'currentComm': -531,
+                   'unrealisedCost': 116640, 'grossOpenCost': 0, 'grossExecCost': 116640, 'isOpen': True, 'markValue': 116616,
+                   'riskValue': 116616, 'homeNotional': 0.05690305142613273, 'foreignNotional': -8.294757806387368, 'posCost': 116640,
+                   'posCost2': 116640, 'posInit': 38880, 'posComm': 117, 'posMargin': 38997, 'posMaint': 1349, 'initMargin': 0,
+                   'maintMargin': 38973, 'realisedPnl': -65949, 'unrealisedGrossPnl': -24, 'unrealisedPnl': -24,
+                   'unrealisedPnlPcnt': -0.0002, 'unrealisedRoePcnt': -0.0006, 'avgCostPrice': 145.8, 'avgEntryPrice': 145.8,
+                   'breakEvenPrice': 145.8, 'marginCallPrice': 98.75, 'liquidationPrice': 98.75, 'bankruptPrice': 97.2,
+                   'timestamp': '2019-11-21T15:21:53.008Z', 'lastValue': 116616, 'markPrice': 145.77}]}
+        {'table': 'margin', 'action': 'update',
+         'data': [{'account': 123456, 'currency': 'XBt', 'grossComm': -531, 'grossOpenCost': 0, 'grossExecCost': 116640,
+                   'grossMarkValue': 116616, 'riskValue': 116616, 'initMargin': 0, 'maintMargin': 38973, 'realisedPnl': -65949,
+                   'unrealisedPnl': -24, 'walletBalance': 39677, 'marginBalance': 39653, 'marginBalancePcnt': 0.34,
+                   'marginLeverage': 2.9409124152018764, 'marginUsedPcnt': 0.9829, 'excessMargin': 680, 'excessMarginPcnt': 0.0058,
+                   'availableMargin': 680, 'withdrawableMargin': 680, 'timestamp': '2019-11-21T15:21:53.009Z', 'grossLastValue': 116616}]}
+        ...
+        #14 (after order "filled" #13)
+        {'table': 'position', 'action': 'update',
+         'data': [{'account': 123456, 'symbol': 'ETHUSD', 'currency': 'XBt', 'rebalancedPnl': 66676, 'prevRealisedPnl': -698,
+                   'execSellQty': 8, 'execSellCost': 116000, 'execQty': 0, 'execCost': 640, 'execComm': 58,
+                   'currentTimestamp': '2019-11-21T15:24:17.092Z', 'currentQty': 0, 'currentCost': 67120, 'currentComm': -444,
+                   'realisedCost': 67120, 'unrealisedCost': 0, 'grossExecCost': 0, 'isOpen': False, 'markPrice': None, 'markValue': 0,
+                   'riskValue': 0, 'homeNotional': 0, 'foreignNotional': 0, 'posCost': 0, 'posCost2': 0, 'posInit': 0, 'posComm': 0,
+                   'posMargin': 0, 'posMaint': 0, 'maintMargin': 0, 'realisedGrossPnl': -67120, 'realisedPnl': -66676, 'unrealisedGrossPnl': 0,
+                   'unrealisedPnl': 0, 'unrealisedPnlPcnt': 0, 'unrealisedRoePcnt': 0, 'avgCostPrice': None, 'avgEntryPrice': None,
+                   'breakEvenPrice': None, 'marginCallPrice': None, 'liquidationPrice': None, 'bankruptPrice': None,
+                   'timestamp': '2019-11-21T15:24:17.092Z','lastPrice': None, 'lastValue': 0}]}
+        #15 [final]
+        {'table': 'margin', 'action': 'update',
+         'data': [{'account': 123456, 'currency': 'XBt', 'prevRealisedPnl': -588323, 'grossComm': -444, 'grossExecCost': 0, 'grossMarkValue': 0,
+                   'riskValue': 0, 'maintMargin': 0, 'realisedPnl': -66676, 'unrealisedPnl': 0, 'walletBalance': 38950, 'marginBalance': 38950,
+                   'marginBalancePcnt': 1, 'marginLeverage': 0, 'marginUsedPcnt': 0, 'excessMargin': 38950, 'excessMarginPcnt': 1,
+                   'availableMargin': 38950, 'withdrawableMargin': 38950, 'timestamp': '2019-11-21T15:24:17.093Z', 'grossLastValue': 0}]}
+        """
+        #Position updates are import (liquidation price)
+        data = []
+        for d in message['data']:
+            symbol = self.convert_symbol(d['symbol'], 0)
+            timestamp = self.api.parse8601(d['timestamp'])
+            items = {x: d.get(x) for x in ['realisedPnl','unrealisedPnl','avgCostPrice','avgEntryPrice','currentQty',
+                                           'breakEvenPrice','marginCallPrice','liquidationPrice','bankruptPrice',
+                                           'isOpen', ] if x in d}
+            e = self.api.position_entry(symbol=symbol, timestamp=timestamp, **items)
+            data.append({'symbol': symbol, 'position': e})
+            
+        self.update_positions(data)
+                
+         
+    def _ob_price_from_id(self, symbol, id, price=None):
+        id_prices = self._id_prices[symbol]
+        start = id_prices['start']
+        per_tick = id_prices['per_tick']
+        multiplier = id_prices['multiplier']
+        cache = id_prices['cache']
+       
+        if start is None:
+            if price is not None and not any(x[0]==id for x in cache):
+                cache.append([id, price])
+            if len(cache) >= 2:
+                cache.sort(key=lambda x: x[1])
+                id_0,price_0 = cache[0]
+                id_1,price_1 = cache[1]
+                tick_size = self.api.markets[symbol]['precision']['price']
+                ticks_count = (price_1-price_0)/tick_size
+                id_diff = id_0 - id_1
+                per_tick = id_diff / ticks_count
+                id_prices['per_tick'] = per_tick
+                multiplier = 1/per_tick*tick_size
+                id_prices['multiplier'] = multiplier
+                start = round(id_0 + price_0 / multiplier)
+                id_prices['start'] = start
+                #print('start: {} per_tick: {} mp: {} cache: {}'.format(start, per_tick, multiplier, cache))
+                
+        if price is None and start is not None:
+            price = (start - id) * multiplier
+            price = self.api.round_price(symbol, price, method='round')
+            #print('id: {} inferred price: {}'.format(id, price))
+            
+        return price
+    
+       
+    def encode(self, rq, sub=None):
+        """
+            "announcement",        // Site announcements
+            "chat",                // Trollbox chat
+            "connected",           // Statistics of connected users/bots
+            "funding",             // Updates of swap funding rates. Sent every funding interval (usually 8hrs)
+            "instrument",          // Instrument updates including turnover and bid/ask
+            "insurance",           // Daily Insurance Fund updates
+            "liquidation",         // Liquidation orders as they're entered into the book
+            "orderBookL2_25",      // Top 25 levels of level 2 order book
+            "orderBookL2",         // Full level 2 order book
+            "orderBook10",         // Top 10 levels using traditional full book push
+            "publicNotifications", // System-wide notifications (used for short-lived messages)
+            "quote",               // Top level of the book
+            "quoteBin1m",          // 1-minute quote bins
+            "quoteBin5m",          // 5-minute quote bins
+            "quoteBin1h",          // 1-hour quote bins
+            "quoteBin1d",          // 1-day quote bins
+            "settlement",          // Settlements
+            "trade",               // Live trades
+            "tradeBin1m",          // 1-minute trade bins
+            "tradeBin5m",          // 5-minute trade bins
+            "tradeBin1h",          // 1-hour trade bins
+            "tradeBin1d",          // 1-day trade bins
+            
+            "execution",   // Individual executions; can be multiple per order
+            "order",       // Live updates on your orders
+            "margin",      // Updates on your current account balance and margin requirements
+            "position",    // Updates on your positions
+            "privateNotifications", // Individual notifications - currently not used
+            "transact"     // Deposit/Withdrawal updates
+            "wallet"       // Bitcoin address balance data, including total deposits & withdrawals
+        """
+        channel = rq.channel
+        params = rq.params
+        
+        if sub:
+            op = 'subscribe'
+        elif sub is False:
+            op = 'unsubscribe'
+        
+        extent = params.get('extent')
+        throttled = params.get('throttled')
+        if throttled is None:
+            throttled = True
+        
+        if extent is None or extent > 25:
+            orderbook = ['orderBookL2:{symbol}']
+        elif extent <= 10 and throttled:
+            orderbook = ['orderBook10:{symbol}']
+        elif extent <= 25:
+            orderbook = ['orderBookL2_25:{symbol}']
+            
+        map = {
+            'account': ['execution:{symbol}','order:{symbol}','margin','position'], #'transact','wallet'
+            'ticker': ['instrument:{symbol}'],
+            'orderbook': orderbook,
+            'trades': ['trades:{symbol}'],
+        }
+        
+        symbols = params.get('symbol')
+        if symbols is None:
+            symbols = []
+        elif isinstance(symbols, str):
+            symbols = [symbols]
+        symbols = [self.convert_symbol(s,1) for s in symbols]
+            
+        topics = map[channel]
+        with_symbol = [t for t in topics if '{symbol}' in t]
+        without_symbol = [t for t in topics if '{symbol}' not in t ]
+        
+        args = without_symbol[:]
+        
+        for s in symbols:
+            args += [t.format(symbol=s) for t in with_symbol]
+        print(op,args)
+        
+        return {'op': op, 'args': args}
+    
+    
+    def sign(self, out=None):
+        #signature is hex(HMAC_SHA256(secret, 'GET/realtime' + expires))
+        #expires must be a number, not a string.
+        #{"op": "authKeyExpires", "args": ["<APIKey>", <expires>, "<signature>"]}
+        expires = int(time.time()) + 5
+        signature = sign(self.secret, 'GET/realtime' + str(expires))
+        return {
+            'op': 'authKeyExpires',
+            'args': [self.apiKey, expires, signature],
+        }
+    
+    
+    def convert_symbol(self, symbol, direction=1):
+        #0: ex to ccxt 1: ccxt to ex
+        try: return super().convert_symbol(symbol, direction)
+        except KeyError: pass
+        
+        if '.' in symbol:
+            return symbol
+        
+        if not direction:
+            base, quote = self.api.parse_spaceless_symbol(symbol, ['USD'])
+            return '/'.join(self.convert_cy(x,0) for x in (base,quote))
+        else:
+            return ''.join(self.convert_cy(x,1) for x in symbol.split('/'))
+
+
+    """def ping(self):
+        #This is an unrecognized request, but at least it receives response
+        #that tells us that the connection is still up
+        #Will regular "pinging" also make it less likely for the cnx to drop?
+        #(which happened without pinging in every ~3 min)
+        return 'ping'"""
+
+
+# Generates an API signature.
+# A signature is HMAC_SHA256(secret, verb + path + nonce + data), hex encoded.
+# Verb must be uppercased, url is relative, nonce must be an increasing 64-bit integer
+# and the data, if present, must be JSON without whitespace between keys.
+def bitmex_signature(apiSecret, verb, url, nonce, postdict=None):
+    """Given an API Secret key and data, create a BitMEX-compatible signature."""
+    data = ''
+    if postdict:
+        # separators remove spaces from json
+        # BitMEX expects signatures from JSON built without spaces
+        data = json.dumps(postdict, separators=(',', ':'))
+    parsedURL = urllib.parse.urlparse(url)
+    path = parsedURL.path
+    if parsedURL.query:
+        path = path + '?' + parsedURL.query
+    # print("Computing HMAC: %s" % verb + path + str(nonce) + data)
+    message = verb + path + str(nonce) + data
+    print("Signing: %s" % str(message))
+    
+    signature = sign(apiSecret, message)
+    print("Signature: %s" % signature)
+    
+    return signature
+
+
+"""
+{'table': 'execution', 'action': 'partial', 'keys': ['execID'], 'types': {'execID': 'guid', 'orderID': 'guid', 'clOrdID': 'symbol', 'clOrdLinkID': 'symbol', 'account': 'long', 'symbol': 'symbol', 'side': 'symbol', 'lastQty': 'long', 'lastPx': 'float', 'underlyingLastPx': 'float', 'lastMkt': 'symbol', 'lastLiquidityInd': 'symbol', 'simpleOrderQty': 'float', 'orderQty': 'long', 'price': 'float', 'displayQty': 'long', 'stopPx': 'float', 'pegOffsetValue': 'float', 'pegPriceType': 'symbol', 'currency': 'symbol', 'settlCurrency': 'symbol', 'execType': 'symbol', 'ordType': 'symbol', 'timeInForce': 'symbol', 'execInst': 'symbol', 'contingencyType': 'symbol', 'exDestination': 'symbol', 'ordStatus': 'symbol', 'triggered': 'symbol', 'workingIndicator': 'boolean', 'ordRejReason': 'symbol', 'simpleLeavesQty': 'float', 'leavesQty': 'long', 'simpleCumQty': 'float', 'cumQty': 'long', 'avgPx': 'float', 'commission': 'float', 'tradePublishIndicator': 'symbol', 'multiLegReportingType': 'symbol', 'text': 'symbol', 'trdMatchID': 'guid', 'execCost': 'long', 'execComm': 'long', 'homeNotional': 'float', 'foreignNotional': 'float', 'transactTime': 'timestamp', 'timestamp': 'timestamp'}, 'foreignKeys': {'symbol': 'instrument', 'side': 'side', 'ordStatus': 'ordStatus'}, 'attributes': {'execID': 'grouped', 'account': 'grouped', 'execType': 'grouped', 'transactTime': 'sorted'}, 'filter': {'account': 123456, 'symbol': 'ETHUSD'}, 'data': []}
+{'table': 'order', 'action': 'partial', 'keys': ['orderID'], 'types': {'orderID': 'guid', 'clOrdID': 'symbol', 'clOrdLinkID': 'symbol', 'account': 'long', 'symbol': 'symbol', 'side': 'symbol', 'simpleOrderQty': 'float', 'orderQty': 'long', 'price': 'float', 'displayQty': 'long', 'stopPx': 'float', 'pegOffsetValue': 'float', 'pegPriceType': 'symbol', 'currency': 'symbol', 'settlCurrency': 'symbol', 'ordType': 'symbol', 'timeInForce': 'symbol', 'execInst': 'symbol', 'contingencyType': 'symbol', 'exDestination': 'symbol', 'ordStatus': 'symbol', 'triggered': 'symbol', 'workingIndicator': 'boolean', 'ordRejReason': 'symbol', 'simpleLeavesQty': 'float', 'leavesQty': 'long', 'simpleCumQty': 'float', 'cumQty': 'long', 'avgPx': 'float', 'multiLegReportingType': 'symbol', 'text': 'symbol', 'transactTime': 'timestamp', 'timestamp': 'timestamp'}, 'foreignKeys': {'symbol': 'instrument', 'side': 'side', 'ordStatus': 'ordStatus'}, 'attributes': {'orderID': 'grouped', 'account': 'grouped', 'ordStatus': 'grouped', 'workingIndicator': 'grouped'}, 'filter': {'account': 123456, 'symbol': 'ETHUSD'}, 'data': []}
+{'table': 'execution', 'action': 'partial', 'keys': ['execID'], 'types': {'execID': 'guid', 'orderID': 'guid', 'clOrdID': 'symbol', 'clOrdLinkID': 'symbol', 'account': 'long', 'symbol': 'symbol', 'side': 'symbol', 'lastQty': 'long', 'lastPx': 'float', 'underlyingLastPx': 'float', 'lastMkt': 'symbol', 'lastLiquidityInd': 'symbol', 'simpleOrderQty': 'float', 'orderQty': 'long', 'price': 'float', 'displayQty': 'long', 'stopPx': 'float', 'pegOffsetValue': 'float', 'pegPriceType': 'symbol', 'currency': 'symbol', 'settlCurrency': 'symbol', 'execType': 'symbol', 'ordType': 'symbol', 'timeInForce': 'symbol', 'execInst': 'symbol', 'contingencyType': 'symbol', 'exDestination': 'symbol', 'ordStatus': 'symbol', 'triggered': 'symbol', 'workingIndicator': 'boolean', 'ordRejReason': 'symbol', 'simpleLeavesQty': 'float', 'leavesQty': 'long', 'simpleCumQty': 'float', 'cumQty': 'long', 'avgPx': 'float', 'commission': 'float', 'tradePublishIndicator': 'symbol', 'multiLegReportingType': 'symbol', 'text': 'symbol', 'trdMatchID': 'guid', 'execCost': 'long', 'execComm': 'long', 'homeNotional': 'float', 'foreignNotional': 'float', 'transactTime': 'timestamp', 'timestamp': 'timestamp'}, 'foreignKeys': {'symbol': 'instrument', 'side': 'side', 'ordStatus': 'ordStatus'}, 'attributes': {'execID': 'grouped', 'account': 'grouped', 'execType': 'grouped', 'transactTime': 'sorted'}, 'filter': {'account': 123456, 'symbol': 'XBTUSD'}, 'data': []}
+{'table': 'order', 'action': 'partial', 'keys': ['orderID'], 'types': {'orderID': 'guid', 'clOrdID': 'symbol', 'clOrdLinkID': 'symbol', 'account': 'long', 'symbol': 'symbol', 'side': 'symbol', 'simpleOrderQty': 'float', 'orderQty': 'long', 'price': 'float', 'displayQty': 'long', 'stopPx': 'float', 'pegOffsetValue': 'float', 'pegPriceType': 'symbol', 'currency': 'symbol', 'settlCurrency': 'symbol', 'ordType': 'symbol', 'timeInForce': 'symbol', 'execInst': 'symbol', 'contingencyType': 'symbol', 'exDestination': 'symbol', 'ordStatus': 'symbol', 'triggered': 'symbol', 'workingIndicator': 'boolean', 'ordRejReason': 'symbol', 'simpleLeavesQty': 'float', 'leavesQty': 'long', 'simpleCumQty': 'float', 'cumQty': 'long', 'avgPx': 'float', 'multiLegReportingType': 'symbol', 'text': 'symbol', 'transactTime': 'timestamp', 'timestamp': 'timestamp'}, 'foreignKeys': {'symbol': 'instrument', 'side': 'side', 'ordStatus': 'ordStatus'}, 'attributes': {'orderID': 'grouped', 'account': 'grouped', 'ordStatus': 'grouped', 'workingIndicator': 'grouped'}, 'filter': {'account': 123456, 'symbol': 'XBTUSD'}, 'data': []}
+{'table': 'margin', 'action': 'partial', 'keys': ['account', 'currency'], 'types': {'account': 'long', 'currency': 'symbol', 'riskLimit': 'long', 'prevState': 'symbol', 'state': 'symbol', 'action': 'symbol', 'amount': 'long', 'pendingCredit': 'long', 'pendingDebit': 'long', 'confirmedDebit': 'long', 'prevRealisedPnl': 'long', 'prevUnrealisedPnl': 'long', 'grossComm': 'long', 'grossOpenCost': 'long', 'grossOpenPremium': 'long', 'grossExecCost': 'long', 'grossMarkValue': 'long', 'riskValue': 'long', 'taxableMargin': 'long', 'initMargin': 'long', 'maintMargin': 'long', 'sessionMargin': 'long', 'targetExcessMargin': 'long', 'varMargin': 'long', 'realisedPnl': 'long', 'unrealisedPnl': 'long', 'indicativeTax': 'long', 'unrealisedProfit': 'long', 'syntheticMargin': 'long', 'walletBalance': 'long', 'marginBalance': 'long', 'marginBalancePcnt': 'float', 'marginLeverage': 'float', 'marginUsedPcnt': 'float', 'excessMargin': 'long', 'excessMarginPcnt': 'float', 'availableMargin': 'long', 'withdrawableMargin': 'long', 'timestamp': 'timestamp', 'grossLastValue': 'long', 'commission': 'float'}, 'foreignKeys': {}, 'attributes': {'account': 'sorted', 'currency': 'grouped'}, 'filter': {'account': 123456}, 'data': [{'account': 123456, 'currency': 'XBt', 'riskLimit': 1000000000000, 'prevState': '', 'state': '', 'action': '', 'amount': 105626, 'pendingCredit': 0, 'pendingDebit': 0, 'confirmedDebit': 0, 'prevRealisedPnl': -876198, 'prevUnrealisedPnl': 0, 'grossComm': -1082, 'grossOpenCost': 0, 'grossOpenPremium': 0, 'grossExecCost': 0, 'grossMarkValue': 0, 'riskValue': 0, 'taxableMargin': 0, 'initMargin': 0, 'maintMargin': 0, 'sessionMargin': 0, 'targetExcessMargin': 0, 'varMargin': 0, 'realisedPnl': -82467, 'unrealisedPnl': 0, 'indicativeTax': 0, 'unrealisedProfit': 0, 'syntheticMargin': None, 'walletBalance': 94256, 'marginBalance': 94256, 'marginBalancePcnt': 1, 'marginLeverage': 0, 'marginUsedPcnt': 0, 'excessMargin': 94256, 'excessMarginPcnt': 1, 'availableMargin': 94256, 'withdrawableMargin': 94256, 'timestamp': '2019-11-25T20:12:18.159Z', 'grossLastValue': 0, 'commission': None}]}
+{'table': 'position', 'action': 'partial', 'keys': ['account', 'symbol', 'currency'], 'types': {'account': 'long', 'symbol': 'symbol', 'currency': 'symbol', 'underlying': 'symbol', 'quoteCurrency': 'symbol', 'commission': 'float', 'initMarginReq': 'float', 'maintMarginReq': 'float', 'riskLimit': 'long', 'leverage': 'float', 'crossMargin': 'boolean', 'deleveragePercentile': 'float', 'rebalancedPnl': 'long', 'prevRealisedPnl': 'long', 'prevUnrealisedPnl': 'long', 'prevClosePrice': 'float', 'openingTimestamp': 'timestamp', 'openingQty': 'long', 'openingCost': 'long', 'openingComm': 'long', 'openOrderBuyQty': 'long', 'openOrderBuyCost': 'long', 'openOrderBuyPremium': 'long', 'openOrderSellQty': 'long', 'openOrderSellCost': 'long', 'openOrderSellPremium': 'long', 'execBuyQty': 'long', 'execBuyCost': 'long', 'execSellQty': 'long', 'execSellCost': 'long', 'execQty': 'long', 'execCost': 'long', 'execComm': 'long', 'currentTimestamp': 'timestamp', 'currentQty': 'long', 'currentCost': 'long', 'currentComm': 'long', 'realisedCost': 'long', 'unrealisedCost': 'long', 'grossOpenCost': 'long', 'grossOpenPremium': 'long', 'grossExecCost': 'long', 'isOpen': 'boolean', 'markPrice': 'float', 'markValue': 'long', 'riskValue': 'long', 'homeNotional': 'float', 'foreignNotional': 'float', 'posState': 'symbol', 'posCost': 'long', 'posCost2': 'long', 'posCross': 'long', 'posInit': 'long', 'posComm': 'long', 'posLoss': 'long', 'posMargin': 'long', 'posMaint': 'long', 'posAllowance': 'long', 'taxableMargin': 'long', 'initMargin': 'long', 'maintMargin': 'long', 'sessionMargin': 'long', 'targetExcessMargin': 'long', 'varMargin': 'long', 'realisedGrossPnl': 'long', 'realisedTax': 'long', 'realisedPnl': 'long', 'unrealisedGrossPnl': 'long', 'longBankrupt': 'long', 'shortBankrupt': 'long', 'taxBase': 'long', 'indicativeTaxRate': 'float', 'indicativeTax': 'long', 'unrealisedTax': 'long', 'unrealisedPnl': 'long', 'unrealisedPnlPcnt': 'float', 'unrealisedRoePcnt': 'float', 'simpleQty': 'float', 'simpleCost': 'float', 'simpleValue': 'float', 'simplePnl': 'float', 'simplePnlPcnt': 'float', 'avgCostPrice': 'float', 'avgEntryPrice': 'float', 'breakEvenPrice': 'float', 'marginCallPrice': 'float', 'liquidationPrice': 'float', 'bankruptPrice': 'float', 'timestamp': 'timestamp', 'lastPrice': 'float', 'lastValue': 'long'}, 'foreignKeys': {'symbol': 'instrument'}, 'attributes': {'account': 'sorted', 'symbol': 'grouped', 'currency': 'grouped', 'underlying': 'grouped', 'quoteCurrency': 'grouped'}, 'filter': {'account': 123456}, 'data': [{'account': 123456, 'symbol': 'ETHUSD', 'currency': 'XBt', 'underlying': 'ETH', 'quoteCurrency': 'USD', 'commission': 0.00075, 'initMarginReq': 0.02, 'maintMarginReq': 0.01, 'riskLimit': 5000000000, 'leverage': 50, 'crossMargin': False, 'deleveragePercentile': None, 'rebalancedPnl': 65978, 'prevRealisedPnl': 12185, 'prevUnrealisedPnl': 0, 'prevClosePrice': 142.5, 'openingTimestamp': '2019-11-26T00:00:00.000Z', 'openingQty': 0, 'openingCost': 66480, 'openingComm': -502, 'openOrderBuyQty': 0, 'openOrderBuyCost': 0, 'openOrderBuyPremium': 0, 'openOrderSellQty': 0, 'openOrderSellCost': 0, 'openOrderSellPremium': 0, 'execBuyQty': 0, 'execBuyCost': 0, 'execSellQty': 0, 'execSellCost': 0, 'execQty': 0, 'execCost': 0, 'execComm': 0, 'currentTimestamp': '2019-11-26T00:00:01.236Z', 'currentQty': 0, 'currentCost': 66480, 'currentComm': -502, 'realisedCost': 66480, 'unrealisedCost': 0, 'grossOpenCost': 0, 'grossOpenPremium': 0, 'grossExecCost': 0, 'isOpen': False, 'markPrice': None, 'markValue': 0, 'riskValue': 0, 'homeNotional': 0, 'foreignNotional': 0, 'posState': '', 'posCost': 0, 'posCost2': 0, 'posCross': 0, 'posInit': 0, 'posComm': 0, 'posLoss': 0, 'posMargin': 0, 'posMaint': 0, 'posAllowance': 0, 'taxableMargin': 0, 'initMargin': 0, 'maintMargin': 0, 'sessionMargin': 0, 'targetExcessMargin': 0, 'varMargin': 0, 'realisedGrossPnl': -66480, 'realisedTax': 0, 'realisedPnl': -65978, 'unrealisedGrossPnl': 0, 'longBankrupt': 0, 'shortBankrupt': 0, 'taxBase': 0, 'indicativeTaxRate': 0, 'indicativeTax': 0, 'unrealisedTax': 0, 'unrealisedPnl': 0, 'unrealisedPnlPcnt': 0, 'unrealisedRoePcnt': 0, 'simpleQty': None, 'simpleCost': None, 'simpleValue': None, 'simplePnl': None, 'simplePnlPcnt': None, 'avgCostPrice': None, 'avgEntryPrice': None, 'breakEvenPrice': None, 'marginCallPrice': None, 'liquidationPrice': None, 'bankruptPrice': None, 'timestamp': '2019-11-26T00:00:01.236Z', 'lastPrice': None, 'lastValue': 0}, {'account': 123456, 'symbol': 'XBTUSD', 'currency': 'XBt', 'underlying': 'XBT', 'quoteCurrency': 'USD', 'commission': 0.00075, 'initMarginReq': 0.1, 'maintMarginReq': 0.005, 'riskLimit': 20000000000, 'leverage': 10, 'crossMargin': False, 'deleveragePercentile': None, 'rebalancedPnl': 0, 'prevRealisedPnl': -587625, 'prevUnrealisedPnl': 0, 'prevClosePrice': 6879.75, 'openingTimestamp': '2019-11-26T00:00:00.000Z', 'openingQty': 0, 'openingCost': 0, 'openingComm': 0, 'openOrderBuyQty': 0, 'openOrderBuyCost': 0, 'openOrderBuyPremium': 0, 'openOrderSellQty': 0, 'openOrderSellCost': 0, 'openOrderSellPremium': 0, 'execBuyQty': 0, 'execBuyCost': 0, 'execSellQty': 0, 'execSellCost': 0, 'execQty': 0, 'execCost': 0, 'execComm': 0, 'currentTimestamp': '2019-11-26T00:00:42.156Z', 'currentQty': 0, 'currentCost': 0, 'currentComm': 0, 'realisedCost': 0, 'unrealisedCost': 0, 'grossOpenCost': 0, 'grossOpenPremium': 0, 'grossExecCost': 0, 'isOpen': False, 'markPrice': None, 'markValue': 0, 'riskValue': 0, 'homeNotional': 0, 'foreignNotional': 0, 'posState': '', 'posCost': 0, 'posCost2': 0, 'posCross': 0, 'posInit': 0, 'posComm': 0, 'posLoss': 0, 'posMargin': 0, 'posMaint': 0, 'posAllowance': 0, 'taxableMargin': 0, 'initMargin': 0, 'maintMargin': 0, 'sessionMargin': 0, 'targetExcessMargin': 0, 'varMargin': 0, 'realisedGrossPnl': 0, 'realisedTax': 0, 'realisedPnl': 0, 'unrealisedGrossPnl': 0, 'longBankrupt': 0, 'shortBankrupt': 0, 'taxBase': 0, 'indicativeTaxRate': 0, 'indicativeTax': 0, 'unrealisedTax': 0, 'unrealisedPnl': 0, 'unrealisedPnlPcnt': 0, 'unrealisedRoePcnt': 0, 'simpleQty': None, 'simpleCost': None, 'simpleValue': None, 'simplePnl': None, 'simplePnlPcnt': None, 'avgCostPrice': None, 'avgEntryPrice': None, 'breakEvenPrice': None, 'marginCallPrice': None, 'liquidationPrice': None, 'bankruptPrice': None, 'timestamp': '2019-11-26T00:00:42.156Z', 'lastPrice': None, 'lastValue': 0}]}
+"""

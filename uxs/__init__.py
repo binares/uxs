@@ -19,7 +19,7 @@ from uxs.base.poll import (fetch, clear_cache)
 
 
 from uxs.binance import binance
-#from uxs.bitmex import bitmex
+from uxs.bitmex import bitmex
 from uxs.bittrex import bittrex
 from uxs.hitbtc import hitbtc
 #from uxs.kraken import kraken
