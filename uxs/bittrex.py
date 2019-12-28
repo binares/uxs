@@ -47,7 +47,7 @@ class bittrex(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'_': True, 'strict_delta': False},
+        'balance': {'_': True},
         'all_tickers': {
             'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
             'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False, 
@@ -55,7 +55,7 @@ class bittrex(ExchangeSocket):
             'baseVolume': True, 'quoteVolume': True},
         'ticker': False,
         'orderbook': True,
-        'account': {'balance': True, 'order': True, 'match': False},
+        'account': {'balance': True, 'order': True, 'fill': False},
         'fetch_tickers': {'ws': True},
         'fetch_ticker': True,
         'fetch_order_book': {'ws': True},
@@ -292,7 +292,7 @@ class bittrex(ExchangeSocket):
             
             
     def on_order(self, e):
-        print(e)
+        tlogger.debug(e)
         """{
             'w': '123456ab-7890-cd12-345e-f1234567890a', #AccountUuid
             'N': 2, #Nonce

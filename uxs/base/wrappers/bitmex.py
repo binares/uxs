@@ -21,7 +21,7 @@ class bitmexPosition(Position):
         self.verify_is_perpetual()
         mp = 1 if self.amount > 0 else -1
         taker_fee = self.api.markets[self.symbol]['taker']
-        bankrupt_price = self.entry / (1 + mp*self._initial_margin(self.leverage, taker_fee))
+        bankrupt_price = self.price / (1 + mp*self._initial_margin(self.leverage, taker_fee))
         if round:
             method = 'up' if self.amount > 0 else 'down'
             bankrupt_price = self.api.round_price(self.symbol, bankrupt_price, method=method)
@@ -36,7 +36,7 @@ class bitmexPosition(Position):
         
         mp = 1 if self.amount > 0 else -1
         bankrupt_price = self._calc_bankrupt_price(round=False)
-        liq = bankrupt_price + mp*(self.entry * (maintenance_margin + mp*funding_rate))
+        liq = bankrupt_price + mp*(self.price * (maintenance_margin + mp*funding_rate))
         
         method = 'up' if self.amount > 0 else 'down'
         
@@ -53,7 +53,7 @@ class bitmexPosition(Position):
             raise ValueError('The contract must be perpetual swap. Got symbol: {}'.format(self.symbol))
         
         
-class bitmexWrapper:
+class bitmex:
     
     Position = bitmexPosition
 
@@ -77,11 +77,12 @@ if __name__ == '__main__':
     taker = 0.00075
     funding = -0.000139
     data = {
-        #i: [amount, entry, lev, taker, funding], result | correct
+        #i: [amount, price, lev, taker, funding], result | correct
         0: [1000, 5000, 25, taker, funding], #4835.5 | 4831.0 )
         1: [-1000, 5000, 25, taker, funding], #5178.0 | 5180.5
         2: [1000, 5000, 25, taker, funding, 10, 7613, 25], #4860.5
         3: [1000, 5000, 25, taker, funding, 10, 7613, 2], #4839.5 | 4847.0 (the current amount was on 2x lev)
+        4: [1000, 5000, 1, taker, 0.00001], #2523.5 | 2506.5
     }
     for i,args in data.items():
         api = _bitmex(*args[3:5])

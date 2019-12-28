@@ -6,7 +6,7 @@ import yaml
 
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
 
-from uxs.base.ccxt import (get_name, get_exchange, init_exchange, 
+from uxs.base.ccxt import (get_name, get_exchange, init_exchange,
                            list_exchanges, ccxtWrapper, asyncCCXTWrapper)
 
 from uxs.base._settings import *
@@ -17,8 +17,11 @@ from uxs.base.auth import (read_tokens, get_auth, get_auth2, cache_password,
 from uxs.base import poll
 from uxs.base.poll import (fetch, clear_cache)
 
+import uxs.fintls as fintls
+
 
 from uxs.binance import binance
+from uxs.binancefu import binancefu
 from uxs.bitmex import bitmex
 from uxs.bittrex import bittrex
 from uxs.hitbtc import hitbtc

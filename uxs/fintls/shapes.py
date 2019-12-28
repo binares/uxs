@@ -13,21 +13,20 @@ from fons.iter import (unique, flatten)
 class Line:
     #Linear path of symbols
     __slots__ = ('n', 'exchanges', 'symbols', 'cys', 'cy_sides',
-                 'directions', 'xccys', 'xcsyms', 'cpaths',)
+                 'directions', 'xccys', 'xcsyms', 'cpaths', 'cys_map')
 
 
-    def __init__(self, xc_symbol_pairs, start_direction=None):
+    def __init__(self, xc_symbol_pairs, start_direction=None, cys_map={}):
         """Symbol path must be linear
            If `start_direction` is not given, it is determined automatically,
             and may be unexpected if cys_in_symbol_0==cys_in_symbol_1 (or n==2 for circular)"""
         
-        xc_symbol_pairs = tuple(x[:2] for x in xc_symbol_pairs)
+        xc_symbol_pairs = tuple(tuple(x[:2]) for x in xc_symbol_pairs)
         n = len(xc_symbol_pairs)
         exchanges = tuple(x[0] for x in xc_symbol_pairs)
         symbols = tuple(x[1] for x in xc_symbol_pairs)
-        split = [s.split('/') for s in symbols]
         
-        cys, cy_sides = self._init_cys(n, symbols, split, start_direction)
+        cys, cy_sides = self._init_cys(n, xc_symbol_pairs, cys_map, start_direction)
         directions = tuple(int(not cy_sides[i]) for i in range(n))
         
         self.n = n
@@ -38,14 +37,18 @@ class Line:
         self.cy_sides = tuple(cy_sides)
         self.xccys = tuple(zip(exchanges+(None,),cys))
         self.xcsyms = xc_symbol_pairs
+        self.cys_map = tuple(cys_map.items())
         
         self.create_paths()
         
         
     @staticmethod
-    def _init_cys(n, symbols, split, start_direction=None):
+    def _init_cys(n, xc_symbol_pairs, cys_map={}, start_direction=None):
+        if not isinstance(cys_map, dict):
+            cys_map = dict(cys_map)
         cys = []
         cy_sides = []
+        split = [s.split('/') if (xc,s) not in cys_map else cys_map[(xc,s)] for xc,s in xc_symbol_pairs]
         if start_direction is not None:
             start_direction = as_direction(start_direction)
             
@@ -63,7 +66,7 @@ class Line:
                 cys.append(cy)
                 cy_sides.append(cy_side)
         except StopIteration:
-            raise ValueError("Symbol path isn't linear at [{}:{}]: {}".format(i-1, i, symbols))
+            raise ValueError("Symbol path isn't linear at [{}:{}]: {}".format(i-1, i, xc_symbol_pairs))
         
         final_cy_side = int(not(cy_sides[-1]))
         final_cy = split[-1][not final_cy_side]
@@ -123,13 +126,15 @@ class Line:
                 i = x
             else:
                 xccy = tuple(x)
-                search = xccys if '/' not in xccy[1] else xcsyms
-                occurences = [i for i,x in enumerate(search) if x == xccy]
-                if len(occurences) > 1:
+                search = [xcsyms] if '/' in xccy[1] else [xcsyms, xccys]
+                all_occurrences = [[i for i,x in enumerate(_s) if x == xccy]
+                                   for _s in search]
+                occurrences = max(all_occurrences, key=lambda l: len(l))
+                if len(occurrences) > 1:
                     raise ValueError('Line contains more than one {} pair'.format(xccy))
-                elif len(occurences) == 0:
+                elif len(occurrences) == 0:
                     raise ValueError('Does not contain {}'.format(xccy))
-                i = occurences[0]
+                i = occurrences[0]
             indexes.append(i)
             
         return indexes[0] if single else tuple(indexes)
@@ -209,8 +214,8 @@ class Line:
 class Shape(Line):
     #Circular path of symbols without starting point
     
-    def __init__(self, xc_symbol_pairs, start_direction=None):
-        super().__init__(xc_symbol_pairs, start_direction)
+    def __init__(self, xc_symbol_pairs, start_direction=None, cys_map={}):
+        super().__init__(xc_symbol_pairs, start_direction, cys_map)
         
         if self.cys[0] != self.cys[-1]:
             raise ValueError("Line isn't circular: {}".format(self.symbols))
@@ -286,14 +291,13 @@ class Path:
         self.exchanges = tuple(line.exchanges[i] for i in self.indexes)
         self.symbols = tuple(line.symbol(i) for i in self.indexes)
         self.directions = tuple(_get_direction(i) for i in self.indexes)
+        self.xcsyms = tuple(zip(self.exchanges, self.symbols))
         
-        split = [s.split('/') for s in self.symbols]
-        cys, cy_sides = Line._init_cys(line.n, self.symbols, split, self.directions[0])
+        cys, cy_sides = Line._init_cys(line.n, self.xcsyms, line.cys_map, self.directions[0])
         
         self.cys = tuple(cys)
         self.cy_sides = tuple(cy_sides)
         self.xccys = tuple(zip(self.exchanges+(None,), self.cys))
-        self.xcsyms = tuple(zip(self.exchanges, self.symbols))
         self.entities = tuple(zip(self.exchanges, self.symbols, self.directions))
         
         self.conv_pairs = tuple((self.cys[j], self.cys[j+1]) for j in range(self.n))
@@ -378,7 +382,12 @@ def _flatten_symbols(markets_coll):
     xsymbols = []
     for xc,markets in markets_coll.items():
         for symbol in markets:
-            xsymbols.append((xc,symbol))
+            base, quote = _extract_cys(symbol, xc, markets_coll)
+            if base is not None and quote is not None:
+                t = (xc, symbol, base, quote)
+            else:
+                t = (xc, symbol, None, None)
+            xsymbols.append(t)
             
     return xsymbols
 
@@ -386,9 +395,11 @@ def _flatten_symbols(markets_coll):
 class _symbol_rank:
     __slots__ = ('symbol','base','quote','bases')
     
-    def __init__(self, symbol, quote_base_map):
+    def __init__(self, symbol, base, quote, quote_base_map):
         self.symbol = symbol
-        self.base, self.quote = symbol.split('/')
+        self.base = base
+        self.quote = quote
+
         self.bases = quote_base_map
         
     def is_quote(self, cy):
@@ -396,6 +407,11 @@ class _symbol_rank:
         
     def __lt__(self, other):
         q, b, oq, ob, bases = self.quote, self.base, other.quote, other.base, self.bases
+        
+        if None in (q, b):
+            return True
+        elif None in (oq, ob):
+            return False
         
         isq, oisq = self.is_quote(b), self.is_quote(ob)
         if isq != oisq:
@@ -429,50 +445,77 @@ class _symbol_rank:
         return True
             
         
-def _create_quote_base_map(symbols):
+def _create_quote_base_map(xsymbols, markets_coll={}):
     bases = defaultdict(set)
     
-    for symbol in symbols:
-        base, quote = symbol.split('/')
+    for xc,symbol,base,quote in xsymbols:
         bases[quote].add(base)
     
     return bases
 
 
-def _sort_symbols(symbols, quote_base_map=None, reverse=False):
-    if quote_base_map is None:
-        quote_base_map = _create_quote_base_map(symbols)
+def _extract_cys(symbol, xc, markets_coll):
+    base = quote = None
+    both_defined = False
+    
+    if xc in markets_coll:
+        if symbol in markets_coll[xc]:
+            x = markets_coll[xc][symbol]
+            if isinstance(x, dict):
+                both_defined = 'base' in x and 'quote' in x
+                base = x.get('base')
+                quote = x.get('quote')
+    
+    if not both_defined:
+        try: base, quote = symbol.split('/')
+        except ValueError: pass
         
-    srs = [_symbol_rank(s, quote_base_map) for s in symbols]
+    if None not in (base, quote):
+        return base, quote
+    else:
+        return None, None
+
+
+def _sort_xsymbols(xsymbols, quote_base_map=None, reverse=False, markets_coll={}):
+    if quote_base_map is None:
+        quote_base_map = _create_quote_base_map(xsymbols, markets_coll)
+        
+    srs = [_symbol_rank(s, base, quote, quote_base_map) for xc,s,base,quote in xsymbols]
     srs.sort(reverse=reverse)
     #[base-only-cys -> hybrids -> quote-only-cys]
     
-    return [x.symbol for x in srs]
+    return list(unique(x.symbol for x in srs))
 
 
 def create_symbol_graph(markets_coll):
     
     xsymbols = _flatten_symbols(markets_coll)
-    symbols = [x[1] for x in xsymbols]
-    symbols = _sort_symbols(symbols, reverse=True)
-    #print(symbols)
-    xsymbols.sort(key=lambda x: symbols.index(x[1]))
+    symbol_list = _sort_xsymbols(xsymbols, reverse=True)
+    #print(symbol_list)
+    xsymbols.sort(key=lambda x: symbol_list.index(x[1]))
     graph = {}
     
     for i,xcsym in enumerate(xsymbols):
-        xc,sym = xcsym
-        graph[xcsym] = add_to = []
-        spl = sym.split('/')
+        xc,sym,base,quote = xcsym
+        cys = (base,quote)
+        graph[(xc,sym)] = add_to = []
+        
+        if base is None:
+            continue
         
         for xcsym2 in xsymbols[i+1:]:
-            xc2,sym2 = xcsym2
-            split2 = sym2.split('/')
+            xc2,sym2,base2,quote2 = xcsym2
+            cys2 = (base2,quote2)
             
-            for j,_cy in enumerate(spl):
+            if base2 is None:
+                continue
+            
+            for j,_cy in enumerate(cys):
                 # _cy in source_cy in sym2, and target_cy in sym1
-                try: pos2 = split2.index(_cy)
+                try: pos2 = cys2.index(_cy)
                 except ValueError: continue
                 d = int(not j)
+                #(exchange, symbol, direction)
                 add_to.append((xc2,sym2,d))
                 
     return graph
@@ -505,9 +548,11 @@ def get_shapes(n, markets_coll, tickers_coll={}, limit_xcs=None, as_tuples=False
         return (t[0],) + (t[-1:0:-1])
     
     def _is_circular(trail):
-        first_sym, first_d = trail[0][1:]
-        last_sym, last_d = trail[-1][1:]
-        return get_target_cy(last_sym, last_d) == get_source_cy(first_sym, first_d)
+        first_xc,first_sym, first_d = trail[0]
+        last_xc,last_sym, last_d = trail[-1]
+        f_cys = _extract_cys(first_sym, first_xc, markets_coll)
+        l_cys = _extract_cys(last_sym, last_xc, markets_coll)
+        return get_target_cy(l_cys, last_d) == get_source_cy(f_cys, first_d)
     
     _exceeds_xcs_limit = (lambda *a: False) if limit_xcs is None else \
                          (lambda xcs, xc_count, cy_xc: xc_count >= limit_xcs and cy_xc not in xcs)
@@ -515,7 +560,8 @@ def get_shapes(n, markets_coll, tickers_coll={}, limit_xcs=None, as_tuples=False
     def rec(trail):
         trail_0 = trail
         xc,sym,d = trail[-1]
-        tcy = get_target_cy(sym, d)
+        cys = _extract_cys(sym, xc, markets_coll)
+        tcy = get_target_cy(cys, d)
         
         xcs = set(x[0] for x in trail_0)
         xc_count = len(xcs)
@@ -528,7 +574,8 @@ def get_shapes(n, markets_coll, tickers_coll={}, limit_xcs=None, as_tuples=False
             if _d != d or _exceeds_xcs_limit(xcs, xc_count, xc2):
                 continue
             
-            d2 = int(sym2.split('/').index(tcy))
+            cys2 = _extract_cys(sym2, xc2, markets_coll)
+            d2 = int(cys2.index(tcy))
             trail = trail_0 + ((xc2,sym2,d2),)
 
             if is_included and _is_circular(trail):
@@ -544,9 +591,18 @@ def get_shapes(n, markets_coll, tickers_coll={}, limit_xcs=None, as_tuples=False
     for xc,sym in symbol_graph:
         rec(((xc,sym,0),))
     
+    
+    def _create_cys_map(t):
+        cys_map = {}
+        for xc,sym,d in t:
+            mdict = markets_coll[xc][sym]
+            cys_map[(xc,sym)] = (mdict['base'], mdict['quote'])
+        return cys_map
+    
     #n_shapes = _filter_shapes(n_shapes)
     if not as_tuples:
-        n_shapes = {_n: [Shape(t) for t in items] for _n,items in n_shapes.items()}
+        n_shapes = {_n: [Shape(t, cys_map=_create_cys_map(t)) for t in items]
+                    for _n,items in n_shapes.items()}
         
     if compact is None:
         compact = is_int

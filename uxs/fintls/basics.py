@@ -118,10 +118,10 @@ def convert(amount, price, direction='buy'):
     return op(amount,price)
 
 
-def as_ob_side(direction, as_string=True):
+def as_ob_side(direction, as_string=True, inverse=False):
     """Returns (source) orderbook side for direction"""
     #1 is bid because direction-1 order is buy order (bid)
-    i = as_direction(direction)
+    i = as_direction(direction, inverse)
     if as_string:
         return ('asks','bids')[i]
     return i
@@ -153,6 +153,35 @@ def as_ob_fill_side(direction, as_string=True, inverse=False):
         return ('bids','asks')[i]
     return i
 
+
+def get_crossed_condition(side, closed=True, inverse=False):
+    """For *outwards* crossing. Set inverse to True for inwards crossing."""
+    if closed: _ops = [lambda x,y: x<y, lambda x,y: x>y]
+    else: _ops = [lambda x,y: x<=y, lambda x,y: x>=y]
+    i = as_direction(side, inverse)
+    return _ops[i]
+
+
+def has_crossed(price, other, side, closed=True, inverse=False):
+    """
+    returns True if price is more *outwards* than other
+    :param side:
+        'bid': price > other
+        'ask': price < other
+    :param closed: 
+        if False, will also return True if price == other
+    :param inverse:
+        if True, reverses the side
+    """
+    sc = get_crossed_condition(side, closed, inverse)
+    return sc(price, other)
+
+
+def is_outwards_crossed(price, other, side, closed=True):
+    return has_crossed(price, other, side, closed)
+
+def is_inwards_crossed(price, other, side, closed=True):
+    return has_crossed(price, other, side, closed, inverse=True)
 
 #------------------------------
 

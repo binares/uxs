@@ -43,7 +43,7 @@ class hitbtc(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'_': False, 'delta': False},
+        'balance': {'_': False},
         'all_tickers': False,
         'ticker': {
             'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
@@ -51,7 +51,7 @@ class hitbtc(ExchangeSocket):
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True},
         'orderbook': True,
-        'account': {'balance': False, 'order': True, 'match': True},
+        'account': {'balance': False, 'order': True, 'fill': True},
         'fetch_tickers': {
             'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False, 
@@ -168,8 +168,8 @@ class hitbtc(ExchangeSocket):
             #its bid book receives updates from *ask* of BCH/USDT and BSV/USDT
             pass
         else:
-            print(ob['symbol'],nonce_0,ob['nonce'])
-            logger.debug('Reloading orderbook {} due to unsynced nonce'.format(ob['symbol']))
+            logger.debug('Reloading orderbook {} due to unsynced nonce ({}!={}+1)'.format(
+                ob['symbol'], ob['nonce'], nonce_0))
             #self.change_subscription_state({'_': 'orderbook','symbol':ob['symbol']}, 0)
             self.orderbook_maintainer._change_status(ob['symbol'], 0)
             self.unsubscribe_to_orderbook(ob['symbol'])
@@ -214,7 +214,7 @@ class hitbtc(ExchangeSocket):
         self.update_balances(balances_formatted)
         
     def on_order(self, rr):
-        print(rr)
+        tlogger.debug(rr)
         #rr = r['result']
         id = rr['clientOrderId']
         status = rr['status']
@@ -259,7 +259,8 @@ class hitbtc(ExchangeSocket):
             #fee is negative when we are paid the rebate
             #NB! fee is always in payout currency
             fee = float(rr['tradeFee'])
-            self.add_fill(tid,symbol,side,tprice,tamount,None,tts,id,fee=fee)
+            self.add_fill(id=tid, symbol=symbol, side=side, price=tprice, amount=tamount,
+                          timestamp=tts, order=id, fee=fee)
             
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         #side: buy/sell

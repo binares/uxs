@@ -26,6 +26,12 @@ python -m uxs.base.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d
 python -m uxs.base.test_xc bitmex ob=BTC/USD d
 python -m uxs.base.test_xc bitmex ob=BTC/USD ob_extent=10 d
 python -m uxs.base.test_xc bitmex ob=BTC/USD ob_extent=25 d
+python -m uxs.base.test_xc bitmex tickers d
+python -m uxs.base.test_xc binancefu order position d
+python -m uxs.base.test_xc binancefu ob=BTC/USDT d
+python -m uxs.base.test_xc binancefu ticker=BTC/USDT,ETH/USDT m d
+python -m uxs.base.test_xc binancefu trades=BTC/USDT,ETH/USDT m d
+python -m uxs.base.test_xc binancefu ohlcv=BTC/USDT d
 
 python -m uxs.base.tools.ccxt
 

@@ -17,6 +17,7 @@ setup(
    python_requires='>=3.5',
    install_requires=[
        'aiohttp>=3.0',
+       'ccxt>=1.20.81',
        'python_dateutil>=2.1',
        'pandas>=0.21',
        'PyYAML>=3.10',

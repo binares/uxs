@@ -109,8 +109,8 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
             xs.subscribe_to_orderbook(symbol, params)
     else: xs.subscribe_to_orderbook(symbols, params)
         
-    def _print_ob_changes(changes, symbol=symbols[0]):
-        print('(d)ob  {}: {}'.format(symbol, changes))
+    def _print_ob_changes(inp, symbol=symbols[0]):
+        print('(d)ob  {}: {}'.format(symbol, inp['data']))
         
     def _print_last_n(symbol=symbols[0]):
         ob = xs.orderbooks.get(symbol,{})

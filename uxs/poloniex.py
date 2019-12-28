@@ -54,14 +54,14 @@ class poloniex(ExchangeSocket):
         'merge_option': False,
     }
     has = {
-        'balance': {'delta': True},
+        'balance': {'_': True},
         'ticker': False,
         'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
                         'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
                         'change': True, 'percentage': True, 'average': False, 'vwap': True,
                         'baseVolume': True, 'quoteVolume': True, 'active': True},
         'orderbook': True,
-        'account': {'balance': True, 'order': True, 'match': True},
+        'account': {'balance': True, 'order': True, 'fill': True},
         'fetch_tickers': True,
         'fetch_ticker': True,
         'fetch_order_book': True,
@@ -164,7 +164,7 @@ class poloniex(ExchangeSocket):
             elif item[0] == 't':
                 pass
             else:
-                print('Unknown orderbook item: {}'.format(item))
+                logger2.error('{} - unknown orderbook item: {}'.format(self.name, item))
                 
         if methods['create']:
             self.create_orderbooks([new_obs])
@@ -175,7 +175,7 @@ class poloniex(ExchangeSocket):
     def on_account(self, r):
         #[1000, '', [..data..]]
         #[1000, '', [['o', 51973790409, '0.00000000', 'c'], ['b', 299, 'e', '13.43481824']]]
-        print(r)
+        tlogger.debug(r)
         try: data = r[2]
         except IndexError: return #[1000, 1]
         tree = {k:[] for k in ('b','n','o','t')}
@@ -184,7 +184,7 @@ class poloniex(ExchangeSocket):
             a_type = item[0]
             try: tree[a_type].append(item)
             except KeyError:
-                print('Unknown account item: {}'.format(item))
+                logger2.error('{} - unknown account item: {}'.format(self.name, item))
                 
         if tree['b']:
             self.on_balances(tree['b'])
@@ -236,17 +236,18 @@ class poloniex(ExchangeSocket):
         #['t', 9394539, '0.00057427', '0.00000476', '0.00000000', 0, 274547887461]
         #["t", <trade ID>, "<price>", "<amount>", "<fee multiplier>", <funding type>, <order number>, <total fee>, <date>]
         #funding_type: 0 (exchange wallet), 1 (borrowed funds), 2 (margin funds), or 3 (lending funds).
-        _, tid, price, amount, fee_multiplier, funding_type, oid = item[:7]
+        _, tid, price, amount, fee_rate, funding_type, oid = item[:7]
         tid, oid = str(tid), str(oid)
         price = float(price)
         amount = float(amount)
-        fee_multiplier = float(fee_multiplier)
+        fee_rate = float(fee_rate)
         total_fee = float(item[7]) if len(item) > 7 else None
         dto = parsedate(item[8]) if len(item) > 8 else dt.utcnow()
         if dto.tzinfo is not None:
             logger2.error('POLONIEX HAS CHANGED THEIR DATE FORMAT: {}, {}'.format(item[8], dto))
         ts = timestamp_ms(dto.replace(tzinfo=None))
-        self.add_fill(tid, None, None, price, amount, fee_multiplier, ts, oid)
+        self.add_fill(id=tid, symbol=None, side=None, price=price, amount=amount,
+                      fee_rate=fee_rate, timestamp=ts, order=oid)
         
     def parse_ccxt_order(self, r):
         """{
@@ -267,9 +268,9 @@ class poloniex(ExchangeSocket):
             'order': None, 'type': 'limit', 'side': 'buy', 'takerOrMaker': None, 'price': 0.02341327, 
             'amount': 0.02, 'cost': 0.00046826, 'fee': None}], 
         'fee': None}"""
-        #If the order is filled immediately then only trade is sent
-        # thus have to acquire 'remaining' from ccxt order
-        #Adding the trades too to avoid delay between "remaining" and "filled"/"payout" being updated
+        # If the order is filled immediately then only trade is sent, thus have to acquire 
+        # 'remaining' from ccxt order.
+        # Adding the trades too to avoid delay between "remaining" and "filled"/"payout" being updated
         # (delay between .create_order and websocket order recv; in websocket itself this is not a problem
         #  as poloniex sends new_order,order_updates,trades in one batch)
         #Note: 'remaining' == 'amount', neither is 'filled' always accurate (check ccxt.poloniex.parse_order)
@@ -278,21 +279,26 @@ class poloniex(ExchangeSocket):
             'order': {'remaining': max(0, r['amount']-filled), 
                       'filled': 0}, #'filled' is calculated from trades
             'fills': [
-                    {'id': t['info']['tradeID'], 'symbol': t['symbol'], 
-                     'side': t['side'], 'price': t['price'], 'amount': t['amount'], 
+                    {'id': t['info']['tradeID'],
+                     'symbol': t['symbol'], 
+                     'side': t['side'],
+                     'price': t['price'],
+                     'amount': t['amount'], 
                      #it may be imprecise but round should eliminate that
-                     'fee_mp': round(1 - float(t['info']['takerAdjustment'])
+                     'fee_rate': round(1 - float(t['info']['takerAdjustment'])
                                 / float(t['info']['amount' if t['side']=='buy' else 'total']), 5) 
                               if 'takerAdjustment' in t['info'] else round(float(r['info']['fee']),5),
                      'timestamp': t['timestamp'],
-                     'oid': r['id'], 
+                     'datetime': t['datetime'],
+                     'cost': t['cost'],
+                     'order': r['id'], 
                      'payout': float(t['info']['takerAdjustment']) if 'takerAdjustment' in t['info'] else None,
                      }
                 for t in r.get('trades',[])
             ]
         }
-        print('r: {}'.format(r))
-        print('parsed: {}'.format(parsed))
+        #print('r: {}'.format(r))
+        #print('parsed: {}'.format(parsed))
         return parsed
     
     def encode(self, rq, sub=None):

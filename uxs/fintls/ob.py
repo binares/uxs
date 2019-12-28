@@ -3,21 +3,22 @@ import ccxt
 import datetime
 dt = datetime.datetime
 
-from .basics import (quotation_as_string, as_source, as_target, as_ob_side)
-
-from fons.time import ctime_ms
+from .basics import (quotation_as_string, as_source, as_target,
+                     as_ob_side, get_crossed_condition)
+from .utils import resolve_times
 
 ISOFORMAT = '%Y-%m-%dT%H:%M:%S.%f'
 
 
 def get_stop_condition(side, closed=True, inverse=False):
     """Returns the stop condition operation if book is iterated from start
-       (price a is more inwards than stop price b; sc(a,b) == True)"""
-    if closed: _ops = [lambda x,y: x>y, lambda x,y: x<y]
-    else: _ops = [lambda x,y: x>=y, lambda x,y: x<=y]
-    i = as_ob_side(side,False)
-    if inverse: i = not i
-    return _ops[i]
+       (price a is more *inwards* than stop price b; sc(a,b) == True)"""
+    return get_crossed_condition(side, closed, not inverse)
+
+
+def is_ob_crossed(price, other, side, closed=True, inverse=False):
+    sc = get_stop_condition(side, closed, inverse)
+    return sc(price, other)
 
 
 def exec_step_by_base_volume(it, step, price=None, remainder=0, 
@@ -179,51 +180,10 @@ def get_to_matching_price(ob_branch, price, side, closed=True,
 
 def sort_branch(branch, side='bids'):
     return sorted(branch, key=lambda x:x[0], reverse=(side in ('bid','bids')))
-    
-    
-def _from_timestamp(timestamp):
-    if timestamp is None:
-        timestamp = ctime_ms()
-    datetime = ccxt.Exchange.iso8601(timestamp)
-    
-    return datetime, timestamp
-
-
-def _from_datetime(datetime):
-    if datetime is None:
-        return _from_timestamp(None)
-    else:
-        return datetime, ccxt.Exchange.parse8601(datetime)
-
-
-def _resolve_times(data, create=False):
-    timestamp = None
-    
-    if isinstance(data, str):
-        datetime = data
-    elif not isinstance(data, dict):
-        it = iter(data)
-        try: datetime = next(it)
-        except StopIteration:
-            raise ValueError(data)
-        try: timestamp = next(it)
-        except StopIteration: pass
-    else:
-        datetime = data.get('datetime')
-        timestamp = data.get('timestamp')
-        
-    if datetime is None and timestamp is None and not create:
-        pass
-    elif datetime is None:
-        datetime, timestamp = _from_timestamp(timestamp)
-    elif timestamp is None:
-        datetime, timestamp = _from_datetime(datetime)
-        
-    return datetime, timestamp
 
 
 def create_orderbook(data, add_time=False):
-    datetime, timestamp = _resolve_times(data, add_time)
+    datetime, timestamp = resolve_times(data, add_time)
     
     return {'symbol': data['symbol'],
             'bids': sort_branch(data['bids'],'bids'),

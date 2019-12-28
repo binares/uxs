@@ -2,18 +2,17 @@ import ccxt
 import ccxt.async_support
 import json
 import time
-import copy as _copy
+from copy import deepcopy
 
-from .auth import (get_auth, get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
-from .wrappers.bitmex import bitmexWrapper
+from .auth import (get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
+from . import wrappers as _wrappers
 from uxs.fintls.basics import (as_direction, calc_price, convert_quotation, create_cy_graph)
-from uxs.fintls.ob import _resolve_times
+from uxs.fintls.utils import resolve_times
 from uxs.fintls.margin import Position
 
 from fons.dict_ops import deep_update
-from fons.iter import flatten, unique
+from fons.iter import flatten
 import fons.math
-from fons.time import ctime_ms, timestamp
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
@@ -22,31 +21,32 @@ ccxt.hitbtc2.commonCurrencies = \
 ccxt.async_support.hitbtc.commonCurrencies = \
 ccxt.async_support.hitbtc2.commonCurrencies = \
     dict(ccxt.Exchange.commonCurrencies,
-         **{'BCC':'Bitconnect',
-            #'BCH': 'BCH'
-            })
-ccxt.poloniex.nonce = lambda self: int(time.time()*pow(10,6))
+         BCC = 'Bitconnect',
+    )
 ccxt.async_support.poloniex.rateLimit = 100
 ccxt.async_support.poloniex.enableRateLimit = True
 QUOTE_PREFERENCE_ORDER = \
     ['BTC','ETH','USDT','USD','EUR','USDC','TUSD','SUSD','EURS','DAI','BNB','NEO']
-DUST_DEFINITIONS = {'BTC': 0.001, 'ETH': 0.01, 'USDT': None,
-                'USD': None, 'EUR': None, 'USDC': None,
-                'TUSD': None, 'SUSD': None, 'EURS': None,
-                'DAI': None, 'BNB': None, 'NEO': 0.5}
+DUST_DEFINITIONS = {
+    'BTC': 0.001, 'ETH': 0.01, 'USDT': None,
+    'USD': None, 'EUR': None, 'USDC': None,
+    'TUSD': None, 'SUSD': None, 'EURS': None,
+    'DAI': None, 'BNB': None, 'NEO': 0.5}
 MAX_SPREAD_HARD_LIMIT = 0.15
 DUST_SPREAD_LIMIT = 0.5
 RETURN_ASYNC_EXCHANGE = True
 FEE_FROM_TARGET = ['binance','poloniex']
 COST_LIMIT_WITH_FEE = []
 _E_REPLACE = {
+    'binancefu': 'binance',
     'hitbtc':'hitbtc2',
     'huobi':'huobipro',
     'coinbase-pro':'coinbasepro',
     'gdax':'coinbasepro',
 }
 wrappers = {
-    'bitmex': bitmexWrapper,
+    'binancefu': _wrappers.binancefu,
+    'bitmex': _wrappers.bitmex,
 }
 #PRICE_ACCURACY = 3
 AMOUNT_ACCURACY = 3
@@ -137,18 +137,18 @@ class ccxtWrapper:
         
     def update_markets(self, changed, deep=True, dismiss_new=True):
         """{symbol: {taker: x, maker: y}}"""
-        from_markets = {x: _copy.deepcopy(y) for x,y in changed.items() if '/' in x}
+        from_markets = {x: deepcopy(y) for x,y in changed.items() if '/' in x}
         from_quote_cys = {}
         from_all = {}
         
         if '__all__' in changed:
             _dict = changed['__all__']
-            from_all.update({m: _copy.deepcopy(_dict) for m in self.markets})
+            from_all.update({m: deepcopy(_dict) for m in self.markets})
         
         for name,_dict in list(changed.items()):
             if '/' in name: continue
             markets = [x for x,y in self.markets.items() if y['quote']==name]
-            from_quote_cys.update({m: _copy.deepcopy(_dict) for m in markets})
+            from_quote_cys.update({m: deepcopy(_dict) for m in markets})
         #print('from_markets: {}\nfrom_quote_cys: {}\nfrom_all:{}'.format(from_markets,from_quote_cys,from_all))
         if deep:
             new = deep_update(deep_update(from_all, from_quote_cys), from_markets)
@@ -170,7 +170,7 @@ class ccxtWrapper:
                      ask=None, askVolume=None, vwap=None, open=None, close=None, last=None, previousClose=None,
                      change=None, percentage=None, average=None, baseVolume=None, quoteVolume=None, **kw):
         
-        datetime, timestamp = _resolve_times([datetime, timestamp], create=True)
+        datetime, timestamp = resolve_times([datetime, timestamp], create=True)
             
         e = dict({
             'symbol': symbol, 
@@ -219,7 +219,7 @@ class ccxtWrapper:
     
     @staticmethod
     def ob_entry(symbol=None, bids=None, asks=None, timestamp=None, datetime=None, nonce=None):
-        datetime, timestamp = _resolve_times([datetime,timestamp])
+        datetime, timestamp = resolve_times([datetime,timestamp])
         if bids is None: bids = []
         if asks is None: asks = []
         
@@ -240,7 +240,7 @@ class ccxtWrapper:
              'order': <str>?, 'type': <str>, 'takerOrMaker': <str>, 'side': <str>,
              'price': <float>, 'amount': <float>, 'cost': <float>, 'fee': <float>}"""
             
-        datetime, timestamp = _resolve_times([datetime, timestamp])
+        datetime, timestamp = resolve_times([datetime, timestamp])
         
         if isinstance(id, int):
             id = str(id)
@@ -280,10 +280,27 @@ class ccxtWrapper:
     
     
     @staticmethod
-    def position_entry(timestamp=None, **kw):
+    def position_entry(symbol=None, timestamp=None, datetime=None, price=None, amount=None, 
+                       leverage=None, liq_price=None, **kw):
+        """
+        :param price: current entry price
+        :pram amount: current amount (negative for short)
+        """
+        datetime, timestamp = resolve_times([datetime, timestamp])
+        
         e = dict({
+            'symbol': symbol,
             'timestamp': timestamp,
+            'datetime': datetime,
+            'price': price,
+            'amount': amount,
+            'leverage': leverage,
+            'liq_price': liq_price,
         },**kw)
+        
+        for var in ['price', 'amount', 'leverage', 'liq_price']:
+            if isinstance(e[var],str):
+                e[var] = float(e[var])
         
         return e
     
@@ -397,11 +414,19 @@ class ccxtWrapper:
         return self.round_amount(symbol, initial_volume + sign*n*step)
     
     
-    def price_step(self, symbol, initial_price, direction=1, n=1):
+    def price_step(self, symbol, initial_price, side='buy', n=1, where='inwards'):
+        if where not in ('inwards','inw','outwards','outw'):
+            raise ValueError(where)
         #step *inwards*
         inf = self.markets[symbol]
-        step = pow(10,-inf['precision']['price'])
+        if self.precisionMode == ccxt.TICK_SIZE:
+            step = inf['precision']['price']
+        else:
+            step = pow(10,-inf['precision']['price'])
+        direction = as_direction(side)
         sign = -1 if direction else 1
+        if where in ('outwards','outw'):
+            sign *= -1
         return self.round_price(symbol, initial_price + sign*n*step)
     
     
@@ -569,6 +594,8 @@ class ccxtWrapper:
      
     def _calc_payout_with_given_fee(self, side, order_size, price, fee):
         direction = as_direction(side)
+        if isinstance(fee, dict):
+            fee = fee['cost']
         if direction:
             payout = order_size - fee if self.FEE_FROM_TARGET else order_size
         else:
@@ -949,7 +976,8 @@ def get_name(xc):
     if isinstance(xc, ccxt.Exchange):
         try: return xc._custom_name
         except AttributeError:
-            spl = xc.name.lower().split()
+            #spl = xc.name.lower().split()
+            spl = xc.__class__.__name__.lower().split()
             num_loc = max(1, next((i for i,x in enumerate(spl) if any(y.isdigit() for y in x)),len(spl)))
             #return '-'.join(spl[:num_loc])
             return ''.join(spl[:num_loc]).replace('-','')
@@ -983,16 +1011,16 @@ def init_exchange(exchange):
     asyn = D.pop('async') if 'async' in D else (
         isinstance(e_obj, ccxt.async_support.Exchange) 
             if e_obj is not None else RETURN_ASYNC_EXCHANGE)
-    module = ccxt if not asyn else ccxt.async_support
+    ccxt_module = ccxt if not asyn else ccxt.async_support
     cls_reg = _ccxt_cls_wrapped if not asyn else _ccxt_cls_wrapped_async
     e_reg = _exchanges if not asyn else _exchanges_async
     
     if e not in cls_reg:
         # Dynamically create the class
         _name = _E_REPLACE.get(e,e)
-        eCls =  getattr(module,_name)
+        eCls =  getattr(ccxt_module, _name)
         wrCls = ccxtWrapper if not asyn else asyncCCXTWrapper
-        eWrCls = wrappers.get(_name)
+        eWrCls = wrappers.get(e)
         bases = (eWrCls,wrCls,eCls) if eWrCls is not None else (wrCls,eCls)
         cls_reg[e] = type(e,bases,{})
        

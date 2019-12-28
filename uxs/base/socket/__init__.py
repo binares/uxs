@@ -15,8 +15,8 @@ from .. import poll
 from .orderbook import OrderbookMaintainer
 from .errors import (ExchangeSocketError, ConnectionLimit)
 from uxs.fintls.basics import (as_ob_fill_side, as_direction)
-from uxs.fintls.ob import (get_stop_condition, create_orderbook, update_branch, assert_integrity,
-    _resolve_times)
+from uxs.fintls.ob import (get_stop_condition, create_orderbook, update_branch, assert_integrity)
+from uxs.fintls.utils import resolve_times
 from wsclient import WSClient
 
 import fons.log
@@ -56,6 +56,7 @@ class ExchangeSocket(WSClient):
             #If set to True then it deletes "balances" and "positions"
             #when unsubscribed (including lost connection)
             'delete_data_on_unsub': False,
+            'merge_option': False,
         },
         'match': {
             'required': ['symbol'],
@@ -63,6 +64,7 @@ class ExchangeSocket(WSClient):
         },
         'all_tickers': {
             'required': [],
+            'merge_option': False,
         },
         'ticker': {
             'required': ['symbol'],
@@ -131,7 +133,7 @@ class ExchangeSocket(WSClient):
         'send': 100,
     }
     
-    #The accepted age for retrieving stored markets,currencies,balances etc...
+    #The accepted age for retrieving cached markets,currencies,balances etc...
     api_attr_limits = {
         'markets': None,
         #'currencies': None,
@@ -149,7 +151,7 @@ class ExchangeSocket(WSClient):
          ['sub_to_ob','subscribe_to_orderbook'],
          ['unsub_to_ob','unsubscribe_to_orderbook'],]
     
-    __extend_attrs__ = WSClient.__extend_attrs__ + ['api_attr_limits','order','ob']
+    __extend_attrs__ = ['api_attr_limits','order','ob']
     __deepcopy_on_init__ = __extend_attrs__[:]
     
     
@@ -185,8 +187,8 @@ class ExchangeSocket(WSClient):
         self.events['recv'][-1] = self.station.get_event('recv',0,0)
         self._init_events()
         
-        self.callbacks = {'orderbook': {}, 'ticker': {}, 'trades': {}, 'ohlcv': {},
-                          'position': {}}
+        self.callbacks = {x: {} for x in ['orderbook','ticker','trades',
+                                          'ohlcv','position','balance']}
         self.tickers = {}
         self.balances = {'free': {}, 'used': {}, 'total': {}}
         self.orderbooks = {}
@@ -200,19 +202,16 @@ class ExchangeSocket(WSClient):
         
         self.orderbook_maintainer = self.OrderbookMaintainer_cls(self)
         self._last_markets_loaded_ts = 0
-        #deep_update(self.merge_subs, {n:{} for n in ['ticker','orderbook','market']})
     
     
     async def _init_api_attrs(self):
-        #if not getattr(self.api,'markets',None):
         limit = self.api_attr_limits['markets']
         await self.api.poll_load_markets(limit)
-        #self.api.markets = await poll.fetch(self.api,'markets',limit)
-        #self.api.currencies = await poll.fetch(self.api,'currencies',limit)
         if len(self.balances) < 5 and self.apiKey: #info,free,used,total
             self.balances = await poll.fetch(self.api,'balances',self.api_attr_limits['balances'])
         self._init_events()
         self._init_api_attrs_done = True
+    
     
     def _init_events(self):
         markets = self.api.markets if self.api.markets is not None else {}
@@ -227,25 +226,37 @@ class ExchangeSocket(WSClient):
             for x in ['balance']:
                 if cy not in self.events[x]:
                     self.events[x][cy] = asyncio.Event(loop=self.loop)
-            
-            
+    
+    
     async def on_start(self):    
         #TODO: make _init_api_attrs safe?
         if not getattr(self,'_init_api_attrs_done',None):
             await self._init_api_attrs()
         self._init_events()
-        
-        
+    
+    
     def notify_unknown(self, r, max_chars=500):
-        print('{} - unknown response: {}'.format(self.name, str(r[:max_chars])))
-        
-    def update_tickers(self, data):
-        """[{
-        'symbol': 'ETH/BTC', 'timestamp': 1546177530977, 'datetime': '2018-12-30T13:45:30.977Z',
-        'high': 0.037441, 'low': 0.034593, 'bid': 0.036002, 'bidVolume': 0.416, 'ask': 0.036016, 'askVolume': 0.052, 'vwap': 0.03580656,
-        'open': 0.035201, 'close': 0.036007, 'last': 0.036007, 'previousClose': 0.035201, 'change': 0.000806, 'percentage': 2.29, 'average': None,
-        'baseVolume': 370410.985, 'quoteVolume': 13263.14351447, }, ...]"""
-        ticker_events = self.events['ticker']
+        print('{} - unknown response: {}'.format(self.name, str(r)[:max_chars]))
+    
+    
+    def update_tickers(self, data, *, action='update', set_event=True):
+        """
+        :param data:
+            [
+                {
+                 'symbol': 'ETH/BTC', 'timestamp': 1546177530977, 'datetime': '2018-12-30T13:45:30.977Z',
+                 'high': 0.037441, 'low': 0.034593, 'bid': 0.036002, 'bidVolume': 0.416,
+                 'ask': 0.036016, 'askVolume': 0.052, 'vwap': 0.03580656,
+                 'open': 0.035201, 'close': 0.036007, 'last': 0.036007, 'previousClose': 0.035201,
+                 'change': 0.000806, 'percentage': 2.29, 'average': None,
+                 'baseVolume': 370410.985, 'quoteVolume': 13263.14351447,
+                },
+                ...
+            ]
+        :param update:
+            'update': add/overwrite prev dict values
+            'replace': replace prev dict entirely
+        """
         cb_data = []
         for d in data:
             #subscribe_to_all_tickers may suddenly receive new markets when they are added
@@ -253,93 +264,138 @@ class ExchangeSocket(WSClient):
             symbol = d['symbol']
             if symbol not in self.api.markets:
                 continue
-            self.tickers[symbol] = d
-            _set_event(ticker_events, symbol)
-            self.broadcast_event('ticker', symbol)
-            cb_input = d.copy()
+            prev = self.tickers.get(symbol)
+            self.tickers[symbol] = self.dict_update(d, prev if action=='update' else None)
+            if set_event:
+                self.safe_set_event('ticker', symbol, {'symbol': symbol})
+            cb_input = {'_': 'ticker',
+                        'symbol': symbol,
+                        'data': self.dict_changes(d, prev)}
             self.exec_callbacks(cb_input, 'ticker', symbol)
             cb_data.append(cb_input)
-            
-        _set_event(ticker_events, -1)
+        
         self.api.tickers = self.tickers
-        self.exec_callbacks(cb_data, 'ticker', -1)
+        if cb_data:
+            if set_event:
+                self.safe_set_event('ticker', -1)
+            self.exec_callbacks(cb_data, 'ticker', -1)
     
-    def create_orderbooks(self, data): 
-        ob_events = self.events['orderbook']
+    
+    def create_orderbooks(self, data, *, set_event=True): 
+        """
+        :param data:
+            [
+                {
+                 'symbol': <str>,
+                 'bids': [[bprice0,bqnt0],...],
+                 'asks': [[aprice0,aqnt0],...],
+                 'nonce': <int> or None]}
+                },
+                ...
+            ]
+        """
         for ob in data:
             symbol = ob['symbol']
             self.orderbooks[symbol] = new = create_orderbook(ob)
-            _set_event(ob_events, symbol)
-            self.broadcast_event('orderbook',
-                                 (symbol, len(new['bids']), len(new['asks'])))
+            if set_event:
+                self.safe_set_event('orderbook', symbol, {'symbol': symbol,
+                                                          'bids_count': len(new['bids']),
+                                                          'aks_count': len(new['asks'])})
             if self.ob['assert_integrity']:
                 assert_integrity(self.orderbooks[symbol])
-        _set_event(ob_events, -1)
-            
-    def update_orderbooks(self, data):
-        ob_events = self.events['orderbook']
+        if data and set_event:
+            self.safe_set_event('orderbook', -1)
+    
+    
+    def update_orderbooks(self, data, *, set_event=True):
+        """
+        :param data:
+            [
+                {
+                 'symbol': <str>,
+                 'bids': [[bprice0,bqnt0],...],
+                 'asks': [[aprice0,aqnt0],...],
+                 'nonce': <int> or None]}
+                },
+                ...
+            ]
+        """
         sends = self.ob['sends_bidAsk']
         all_subbed = self.is_subscribed_to({'_': 'all_tickers'}, 1)
+        does_send = sends and (not isinstance(sends, dict) or '_' not in sends or sends['_'])
         only_if_not_subbed = isinstance(sends,dict) and sends.get('only_if_not_subbed_to_ticker')
-        set_ticker_event = isinstance(sends,dict) and sends.get('set_ticker_event', True)
+        set_ticker_event = not isinstance(sends,dict) or sends.get('set_ticker_event', True)
         is_subbed = lambda symbol: self.is_subscribed_to({'_':'ticker','symbol':symbol}, 1)
         cb_data = []
+        update_tickers = []
         
-        for symbol_changes in data:
-            symbol = symbol_changes['symbol']
+        for d in data:
+            symbol = d['symbol']
             uniq_bid_changes,uniq_ask_changes = {},{}
             
             for side,uniq_changes in zip(('bids','asks'),(uniq_bid_changes,uniq_ask_changes)):
                 branch = self.orderbooks[symbol][side]
-                for item in symbol_changes[side]:
+                for item in d[side]:
                     p,sprev,snew = update_branch(item,branch,side)
                     try: sprev = uniq_changes.pop(p)[1]
                     except KeyError: pass
                     uniq_changes[p] = [p,sprev,snew]
-                    
+            
             prev_nonce = self.orderbooks[symbol].get('nonce')
-            if 'nonce' in symbol_changes:
-                self.orderbooks[symbol]['nonce'] = symbol_changes['nonce']
-                
-            _set_event(ob_events, symbol)
-            self.broadcast_event('orderbook',
-                                 (symbol, len(symbol_changes['bids']), len(symbol_changes['asks'])))
+            if 'nonce' in d:
+                self.orderbooks[symbol]['nonce'] = d['nonce']
             
-            if sends and (not only_if_not_subbed or not all_subbed and not is_subbed(symbol)):
-                self._update_ticker_from_ob(symbol, set_ticker_event)
+            if set_event:
+                self.safe_set_event('orderbook', symbol, {'symbol': symbol,
+                                                          'bids_count': len(d['bids']),
+                                                          'aks_count': len(d['asks'])})
             
-            cb_input = {'symbol': symbol,
-                        'bids': list(uniq_bid_changes.values()), 
-                        'asks': list(uniq_ask_changes.values()),
-                        'nonce': (prev_nonce, symbol_changes.get('nonce'))}
+            if does_send and (not only_if_not_subbed or not all_subbed and not is_subbed(symbol)):
+                update_tickers.append(symbol)
+            
+            cb_input = {'_': 'orderbook',
+                        'symbol': symbol,
+                        'data': {'symbol': symbol,
+                                 'bids': list(uniq_bid_changes.values()), 
+                                 'asks': list(uniq_ask_changes.values()),
+                                 'nonce': (prev_nonce, d.get('nonce'))}}
             self.exec_callbacks(cb_input, 'orderbook', symbol)
             cb_data.append(cb_input)
             
             if self.ob['assert_integrity']:
                 assert_integrity(self.orderbooks[symbol])
-                
-        _set_event(ob_events, -1)
-        self.exec_callbacks(cb_data, 'orderbook', -1)
         
-    def _update_ticker_from_ob(self, symbol, set_event=True):
-        try: d = self.tickers[symbol]
-        except KeyError:
-            d = self.tickers[symbol] = self.api.ticker_entry(symbol)
-        for side in ('bid','ask'):
-            try: d.update(dict(zip([side,side+'Volume'],
-                                   self.orderbooks[symbol][side+'s'][0])))
-            except IndexError: pass
-        if set_event:
-            _set_event(self.events['ticker'], symbol)
-            _set_event(self.events['ticker'], -1)
-            self.broadcast_event('ticker', symbol)
-            
-    def update_trades(self, data, key=None):
-        """data: [{'symbol': symbol, 'trades': trades}, ...]
-            where trades = [{'timestamp': <int>, 'datetime': <str>, 'symbol': <str>, 'id': <str>,
-                             'order': <str>?, 'type': <str>, 'takerOrMaker': <str>, 'side': <str>,
-                             'price': <float>, 'amount': <float>, 'cost': <float>, 'fee': <float>},
-                             ... increasing timestamp]"""
+        if cb_data:
+            if set_event:
+                self.safe_set_event('orderbook', -1)
+            self.exec_callbacks(cb_data, 'orderbook', -1)
+        
+        if update_tickers:
+            self._update_tickers_from_ob(update_tickers, set_ticker_event)
+    
+    
+    def _update_tickers_from_ob(self, symbols, set_event=True):
+        data = []
+        for symbol in symbols:
+            d = {'symbol': symbol}
+            for side in ('bid','ask'):
+                try: d.update(dict(zip([side,side+'Volume'],
+                                       self.orderbooks[symbol][side+'s'][0])))
+                except (IndexError, KeyError): pass
+            if len(d) > 1:
+                data.append(d)
+        self.update_tickers(data, set_event=set_event)
+    
+    
+    def update_trades(self, data, key=None, *, set_event=True):
+        """
+        :param data: 
+            [{'symbol': symbol, 'trades': trades}, ...]
+            trades: [{'timestamp': <int>, 'datetime': <str>, 'symbol': <str>, 'id': <str>,
+                      'order': <str>?, 'type': <str>, 'takerOrMaker': <str>, 'side': <str>,
+                      'price': <float>, 'amount': <float>, 'cost': <float>, 'fee': <float>},
+                      ... increasing timestamp]
+        """
         cb_data = []
         if key is None:
             key = lambda x: int(x['id'])
@@ -355,20 +411,26 @@ class ExchangeSocket(WSClient):
             trades = sorted(trades, key=key)
             sequence_insert(trades, add_to, key=key, duplicates='drop')
             
-            _set_event(self.events['trades'], symbol)
-            self.broadcast_event('trades', symbol)
+            if set_event:
+                self.safe_set_event('trades', symbol, {'symbol': symbol})
             
-            cb_input = {'symbol': symbol,
-                        'trades': [x.copy() for x in trades]}
+            cb_input = {'_': 'trades',
+                        'symbol': symbol,
+                        'data': [x.copy() for x in trades]}
             self.exec_callbacks(cb_input, 'trades', symbol)
             cb_data.append(cb_input)
-            
-        _set_event(self.events['trades'], -1)
-        self.exec_callbacks(cb_data, 'trades', -1)
         
-    def update_ohlcv(self, data):
-        """data: [{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': ohlcv}, ...]
-                where ohlcv = [[timestamp_ms, o, h, l, c, quoteVolume], ... increasing timestamp]"""
+        if cb_data:
+            if set_event:
+                self.safe_set_event('trades', -1)
+            self.exec_callbacks(cb_data, 'trades', -1)
+    
+    
+    def update_ohlcv(self, data, *, set_event=True):
+        """
+        :param data: [{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': ohlcv}, ...]
+                     ohlcv: [[timestamp_ms, o, h, l, c, quoteVolume], ... increasing timestamp]
+        """
         cb_data = []
         key = lambda x: x[0]
         
@@ -388,83 +450,159 @@ class ExchangeSocket(WSClient):
             ohlcv = sorted(ohlcv, key=key)
             sequence_insert(ohlcv, add_to, key=key, duplicates='drop')
             
-            _set_event(self.events['ohlcv'], symbol)
-            self.broadcast_event('ohlcv', symbol)
+            if set_event:
+                self.safe_set_event('ohlcv', symbol, {'symbol': symbol})
             
-            cb_input = {'symbol': symbol,
+            cb_input = {'_': 'ohlcv',
+                        'symbol': symbol,
                         'timeframe': timeframe,
-                        'ohlcv': [x.copy() for x in ohlcv]}
+                        'data': [x.copy() for x in ohlcv]}
             self.exec_callbacks(cb_input, 'ohlcv', symbol)
             cb_data.append(cb_input)
         
         if cb_data:
-            _set_event(self.events['ohlcv'], -1)
+            if set_event:
+                self.safe_set_event('ohlcv', -1)
             self.exec_callbacks(cb_data, 'ohlcv', -1)
     
-    def update_positions(self, data):
-        """data: [{'symbol': symbol, 'position': position}, ...]"""
+    
+    def update_positions(self, data, *, set_event=True):
+        """
+        :param data: [position0, position1, ...]
+        """
         cb_data = []
         
         for d in data:
             symbol = d['symbol']
-            position = d['position']
-            prev = self.positions.get(symbol, {})
+            prev = self.positions.get(symbol)
             
-            changes = {k: (prev.get(k),new_value) for k,new_value in position.items()
-                       if prev.get(k) != position[k]}
+            self.positions[symbol] = self.dict_update(d, prev)
             
-            self.positions[symbol] = dict(prev, **position)
+            if set_event:
+                self.safe_set_event('position', symbol, {'symbol': symbol})
             
-            _set_event(self.events['position'], symbol)
-            self.broadcast_event('position', symbol)
-            
-            cb_input = {'symbol': symbol,
-                        'position': position.copy(),
-                        'changes': changes}
+            cb_input = {'_': 'position',
+                        'symbol': symbol,
+                        'data': self.dict_changes(d, prev)}
             self.exec_callbacks(cb_input, 'position', symbol)
             cb_data.append(cb_input)
-            
-        _set_event(self.events['position'], -1)
-        self.exec_callbacks(cb_data, 'position', -1)
-                   
-    def update_balances(self, balances):
-        b_events = self.events['balance']
-        for cy,free,used in balances:
-            self.balances[cy] = {'free': free, 'used': used, 'total': free+used}
-            self.balances['free'][cy] = free
-            self.balances['used'][cy] = used
-            self.balances['total'][cy] = free + used
-            _set_event(b_events, cy)
-            self.broadcast_event('balance', ('balance', cy))
-        _set_event(b_events, -1)
+        
+        if cb_data:
+            if set_event:
+                self.safe_set_event('position', -1)
+            self.exec_callbacks(cb_data, 'position', -1)
     
-    def update_balances_delta(self, deltas):
-        balances2 = []
-        for symbol,delta in deltas:
+    
+    def update_balances(self, data, *, set_event=True):
+        """
+        :param data: [entry_0, entry_1, ...]
+                     entry:
+                      {'cy': <str>, 'free': <float>, 'used': <float>}
+                      (cy, free, used)
+        """
+        cb_data = []
+        
+        def parse_dict(x):
+            new = {}
+            try: cy = x['cy']
+            except KeyError:
+                cy = x['currency']
+            if 'free' in x:
+                new['free'] = x['free']
+            if 'used' in x:
+                new['used'] = x['used']
+            if 'total' in x:
+                new['total'] = x['total']
+                if 'free' not in new and new.get('used') is not None and new['total'] is not None:
+                    new['free'] = new['total'] - new['used']
+                if 'used' not in new and new.get('free') is not None and new['total'] is not None:
+                    new['used'] = new['total'] - new['free']
+            elif new.get('free') is not None and new.get('used') is not None:
+                new['total'] = new['free'] + new['used']
+            if 'info' in x:
+                new['info'] = x['info']
+            
+            return cy, new
+        
+        for x in data:
+            if isinstance(x, dict):
+                cy, new = parse_dict(x)
+            else:
+                cy,free,used = x
+                new = {'free': free, 'used': used, 'total': free+used}
+            
+            prev = self.balances.get(cy)
+            new_dict = self.dict_update(new, prev)
+            
+            for k in ['free','used','total']:
+                if k not in new_dict:
+                    new_dict[k] = None
+                self.balances[k][cy] = new_dict[k]
+            
+            self.balances[cy] = new_dict
+            
+            if set_event:
+                self.safe_set_event('balance', cy, {'currency': cy})
+            
+            cb_input = {
+                '_': 'balance',
+                'cy': cy,
+                'data': self.dict_changes(new, prev)
+            }
+            self.exec_callbacks(cb_input, 'balance', cy)
+            cb_data.append(cb_input)
+        
+        if cb_data:
+            if set_event:
+                self.safe_set_event('balance', -1)
+            self.exec_callbacks(cb_data, 'balance', -1)
+    
+    
+    def update_balances_delta(self, deltas, **kw):
+        data = []
+        for x in deltas:
+            delta_free = delta_used = 0
+            if isinstance(x, dict):
+                symbol = x['symbol']
+                try: delta_free = x['free']
+                except KeyError: pass
+                try: delta_used = x['used']
+                except KeyError: pass
+            else:
+                symbol = x[0]
+                try:
+                    delta_free = x[1]
+                    delta_used = x[2]
+                except IndexError:
+                    pass
             try: d = self.balances[symbol]
             except KeyError: d = {'free': 0, 'used': 0, 'total': 0}
-            free = d['free'] + delta
-            balances2.append((symbol,free,d['used']))
-        self.update_balances(balances2)
+            free = d['free'] + delta_free
+            used = d['used'] + delta_used
+            data.append((symbol,free,used))
+        self.update_balances(data, **kw)
     
     
     def add_order(self, id, symbol, side, price, amount, timestamp, 
-                  remaining=None, filled=None, payout=0, datetime=None, params={}):
+                  remaining=None, filled=None, payout=0, datetime=None,
+                  type='limit', stop=None, params={}, *, set_event=True):
         if remaining is None:
             remaining = amount
-        if filled is None:
+        if filled is None and remaining is not None:
             filled = amount - remaining
             
         if id in self.orders:
-            return self.update_order(id,remaining,filled,payout)
+            return self.update_order(id, remaining, filled, payout)
         
-        datetime, timestamp = _resolve_times([datetime, timestamp])
-              
+        datetime, timestamp = resolve_times([datetime, timestamp])
+        
         o = dict(
             {'id': id,
              'symbol': symbol,
+             'type': type,
              'side': side,
              'price': price,
+             'stop': stop,
              'amount': amount,
              'timestamp': timestamp,
              'datetime': datetime,
@@ -477,25 +615,29 @@ class ExchangeSocket(WSClient):
         if remaining:
             self.open_orders[id] = o
         
-        _set_event(self.events['order'], id)
-        _set_event(self.events['order'], -1)
-        self.broadcast_event('order', (symbol, id))
+        if set_event:
+            self.safe_set_event('order', id, {'symbol': symbol, 'id': id})
+            self.safe_set_event('order', -1)
         
         if id in self.unprocessed_fills:
-            for args in self.unprocessed_fills[id]:
+            for kwargs in self.unprocessed_fills[id]:
                 tlogger.debug('{} - processing fill {} from unprocessed_fills'\
-                              .format(self.name,args))
-                self.add_fill(*args)
+                              .format(self.name, kwargs))
+                self.add_fill(**kwargs)
             self.unprocessed_fills.pop(id)
-
-
-    def update_order(self, id, remaining=None, filled=None, payout=None, set_event=True, params={}):
+    
+    
+    def update_order(self, id, remaining=None, filled=None, payout=None, params={}, *,
+                     set_event=True):
         try: o = self.orders[id]
         except KeyError:
             logger2.error('{} - not recognized order: {}'.format(self.name, id))
             return
         
-        amount_difference = 0 if 'amount' not in params else params['amount'] - o['amount']
+        if params.get('amount') is not None and o['amount'] is not None:
+            amount_difference = params['amount'] - o['amount']
+        else:
+            amount_difference = None
         
         o.update(params)
         
@@ -505,8 +647,10 @@ class ExchangeSocket(WSClient):
             try: 
                 #min_v = self.api.markets[o['symbol']]['limits']['amount']['min']
                 precision = self.api.markets[o['symbol']]['precision']['amount']
+                smallest_allowed = pow(10, (-1)*precision) if self.api.precisionMode != ccxt.TICK_SIZE \
+                                    else precision
                 if precision is None: pass
-                elif remaining < pow(10, (-1)*precision):
+                elif remaining < smallest_allowed:
                     remaining = 0
             except KeyError:
                 pass
@@ -514,8 +658,6 @@ class ExchangeSocket(WSClient):
         
         def modify_remaining(prev, new):
             #Order size was edited, thus the "remaining" can increase
-            """if amount_difference >= 0:
-                return min(prev+amount_difference, value)"""
             if amount_difference != 0:
                 return new
             else:
@@ -530,90 +672,125 @@ class ExchangeSocket(WSClient):
                 value = op(prev, value)
             if value is not None:
                 o[name] = value
-                
+        
         if not o['remaining']:
             try:
                 del self.open_orders[id]
             except KeyError:
                 pass
-
+        
         if set_event:
-            _set_event(self.events['order'], id)
-            _set_event(self.events['order'], -1)
-        self.broadcast_event('order', (o['symbol'], o['id']))
+            self.safe_set_event('order', id, {'symbol': o['symbol'], 'id': id})
+            self.safe_set_event('order', -1)
     
     
-    def add_fill(self, id, symbol, side, price, amount, fee_mp, timestamp,
-                 oid=None, payout=None, fee=None, datetime=None, params={}):
-        """`symbol` and `side` can be left undefined (None) if oid is given"""
+    def add_fill(self, id, symbol, side, price, amount, timestamp=None,
+                 datetime=None, order=None, type=None, payout=None,
+                 fee=None, fee_rate=None, takerOrMaker=None, cost=None,
+                 info=None, params={}, *, set_event=True, set_order_event=True,
+                 **kw):
+        """
+        args 'symbol' and 'side' can be left undefined (None) if order is given
+        """
         try: 
-            o_fills = self.fills[oid]
+            o_fills = self.fills[order]
         except KeyError:
-            o_fills = self.fills[oid] = {}
+            o_fills = self.fills[order] = []
+        
+        if (symbol is None or side is None) and order is None:
+            raise ValueError("{} - fill id: {}. Both symbol and side must be "\
+                             "defined if order is None.".format(self.name, id))
             
-        try: o_fills[id]
-        except KeyError: pass
-        else: 
+        loc = next((i for i,x in enumerate(o_fills) if x['id']==id), None)
+        
+        if loc is not None:
             tlogger.debug('{} - fill {} already registered.'.format(
-                self.name,(id,symbol,side,price,amount,fee_mp,timestamp,oid)))
+                self.name,(id,symbol,side,price,amount,order)))
+            del o_fills[loc]
         
         def insert_fill(f):
-            o_fills[id] = f
-            _set_event(self.events['fill'], -1)
-            self.broadcast_event('fill', (oid, id))
+            o_fills.append(f)
+            if set_event:
+                self.safe_set_event('fill', order, {'order': order, 'id': order})
+                self.safe_set_event('fill', -1)
         
-        if (symbol is None or side is None) and oid is None:
-            raise ValueError('{} - fill id: {}. Both symbol and side must be '\
-                            'defined if oid is None.'.format(self.name, id))
+        if fee_rate is None and takerOrMaker is not None:
+            fee_rate = self.api.markets[symbol][takerOrMaker]
         
-        #fee_mp is given as 'taker'/'maker'
-        if isinstance(fee_mp,str):
-            fee_mp = self.api.markets[symbol][fee_mp]
-
-        fee_entry = None if fee is None else [fee, self.api.get_fee_quotation(side, as_str=False)]
+        fee_dict = None
+        if isinstance(fee, (int,float)):
+            fee_dict = {'cost': fee}
+        elif isinstance(fee, dict):
+            fee_dict = fee.copy()
         
-        datetime, timestamp = _resolve_times([datetime, timestamp])
-
+        if fee_dict is not None and 'rate' not in fee_dict:
+            fee_dict['rate'] = fee_rate
+            
+        if fee_dict is not None and 'cost' not in fee_dict:
+            fee_dict['cost'] = cost
+        
+        if cost is None and fee_dict is not None and 'cost' in fee_dict:
+            cost = fee_dict['cost']
+        
+        if fee_dict is not None and 'currency' not in fee_dict:
+            fee_dict['currency'] = self.api.get_fee_quotation(side, as_str=False)
+        
+        datetime, timestamp = resolve_times([datetime, timestamp])
+        
         f = dict(
             {'id': id,
              'symbol': symbol,
+             'timestamp': timestamp,
+             'datetime': datetime,
+             'type': type,
              'side': side,
              'price': price,
              'amount': amount,
-             'fee_mp': fee_mp,
-             'timestamp': timestamp,
-             'datetime': datetime,
-             'oid': oid,
-             'fee': fee_entry
-            }, **params)
-
-        if oid is None:
-            insert_fill(f)
-            return
+             'takerOrMaker': takerOrMaker,
+             'fee': fee_dict,
+             'cost': cost,
+             'order': order,
+            }, **dict(kw, **params))
         
-        try: o = self.orders[oid]
-        except KeyError:
-            tlogger.debug('{} - adding {} to unprocessed_fills'.format(
-                self.name,(id,symbol,side,price,amount,fee_mp,timestamp,oid,payout)))
-            self.unprocessed_fills[oid].append(
-                (id,symbol,side,price,amount,fee_mp,timestamp,oid,payout,fee,datetime))
-        else:
-            if symbol is None: f['symbol'] = symbol = o['symbol']
-            if side is None: f['side'] = side = o['side']
+        if order is None:
             insert_fill(f)
+        
+        elif order in self.orders:
+            o = self.orders[order]
+            if symbol is None:
+                f['symbol'] = symbol = o['symbol']
+            if side is None:
+                f['side'] = side = o['side']
+            if type is None:
+                f['type'] = type = o['type']
+                
+            insert_fill(f)
+            o_params = {}
+            
             if self.order['update_filled_on_fill']:
-                o['filled'] += amount
+                o_params['filled'] = o['filled'] + amount
+            
             if self.order['update_payout_on_fill']:
-                payout = self.api.calc_payout(symbol,o['side'],amount,price,fee_mp,fee=fee) \
+                payout = self.api.calc_payout(symbol,o['side'],amount,price,fee_rate,fee=fee) \
                     if payout is None else payout
-                o['payout'] += payout
-            #if not self.has_got('order') and not self.has_got('account','order'):
+                o_params['payout'] = o['payout'] + payout
+            
             if self.order['update_remaining_on_fill']:
-                self.update_order(oid,o['remaining']-amount,set_event=False)
-            if any([self.order['update_filled_on_fill'], self.order['update_payout_on_fill'],
-                    self.order['update_remaining_on_fill']]):
-                _set_event(self.events['order'], oid)
-                _set_event(self.events['order'], -1)
+                o_params['remaining'] = o['remaining'] - amount
+            
+            if o_params:
+                self.update_order(order, **o_params, set_event=set_order_event)
+        
+        else:
+            tlogger.debug('{} - adding {} to unprocessed_fills'.format(
+                self.name,(id,symbol,type,side,price,amount,order)))
+            self.unprocessed_fills[order].append(
+                dict(
+                {'id': id, 'symbol': symbol, 'side': side, 'price': price, 'amount': amount,
+                 'fee_rate': fee_rate, 'timestamp': timestamp, 'order': order, 'payout': payout,
+                 'fee': fee, 'datetime': datetime, 'type': type, 'takerOrMaker': takerOrMaker,
+                 'cost': cost, 'info': info, 'params': params, 'set_event': set_event,
+                 'set_order_event': set_order_event}, **kw))
     
     
     def _fetch_callback_list(self, channel, symbol=None):
@@ -635,19 +812,22 @@ class ExchangeSocket(WSClient):
         l = self._fetch_callback_list(channel, symbol)
         l.append(cb)
     
+    
     def remove_callback(self, cb, channel, symbol=None):
         l = self._fetch_callback_list(channel, symbol)
         try: l.remove(cb)
         except ValueError: 
             return None
-        else: return True
-        
+        else:
+            return True
+    
+    
     def exec_callbacks(self, data, channel, symbol=None):
         callbacks = self._fetch_callback_list(channel, symbol)
         for cb in callbacks:
             cb(data)
-        
-        
+    
+    
     def fetch_data(self, s, prev_state):
         #If subsciption has been enabled, fetch all data
         # (except for orderbook, that is handled by .orderbook_maintainer)
@@ -663,8 +843,8 @@ class ExchangeSocket(WSClient):
             corofunc = getattr(self, attr)
             tlogger.debug('Fetching data for {}'.format(s))
             call_via_loop(corofunc, s.id_tuple[1:2], loop=self.loop)
-            
-            
+    
+    
     def delete_data(self, s, prev_state):
         _map = {
             'all_tickers': ['tickers'],
@@ -696,8 +876,8 @@ class ExchangeSocket(WSClient):
                 if delete:
                     try: del container[s.id_tuple[-1]]
                     except KeyError: pass
-            
-            
+    
+    
     def get_markets_with_active_tickers(self, last=True, bidAsk=True):
         has_tAll = self.has_got('all_tickers')
         has_tAll_bidAsk = self.has_got('all_tickers','bid') and self.has_got('all_tickers','ask')
@@ -734,90 +914,130 @@ class ExchangeSocket(WSClient):
                      if all(not enabled or s in lists[n] for n,enabled in checks.items()))
 
         return unique(satisfied, astype=list)
-            
-                    
+    
+     
     def subscribe_to_ticker(self, symbol, params={}):
-        return self.sh.add_subscription(self.ip.extend({
-            '_': 'ticker',
-            'symbol': self.merge(symbol)}, params))
-
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'ticker',
+                'symbol': self.merge(symbol),
+            }, params))
+    
+    
     def unsubscribe_to_ticker(self, symbol):
-        return self.sh.remove_subscription({
-            '_': 'ticker',
-            'symbol': symbol})
+        return self.sh.remove_subscription(
+            {
+                '_': 'ticker',
+                'symbol': symbol,
+            })
+    
     
     def subscribe_to_all_tickers(self, params={}):
         #Fetch all tickers before enabling state
-        return self.sh.add_subscription(self.ip.extend({
-            '_': 'all_tickers'}, params))
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'all_tickers',
+            }, params))
+    
     
     def unsubscribe_to_all_tickers(self):
-        return self.sh.remove_subscription({
-            '_': 'all_tickers'})
-                
+        return self.sh.remove_subscription(
+            {
+                '_': 'all_tickers',
+            })
+    
+    
     def subscribe_to_orderbook(self, symbol, params={}):
-        return self.sh.add_subscription(self.ip.extend({
-            '_': 'orderbook',
-            'symbol': self.merge(symbol)}, params))
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'orderbook',
+                'symbol': self.merge(symbol),
+            }, params))
+    
     
     def unsubscribe_to_orderbook(self, symbol):
-        return self.sh.remove_subscription({
-            '_': 'orderbook',
-            'symbol': symbol})
-        
+        return self.sh.remove_subscription(
+            {
+                '_': 'orderbook',
+                'symbol': symbol,
+            })
+    
+    
     def subscribe_to_trades(self, symbol, params={}):
-        return self.sh.add_subscription(self.ip.extend({
-            '_': 'trades',
-            'symbol': self.merge(symbol)}, params))
-        
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'trades',
+                'symbol': self.merge(symbol),
+            }, params))
+    
+    
     def unsubscribe_to_trades(self, symbol):
-        return self.sh.remove_subscription({
-            '_': 'trades',
-            'symbol': symbol})
-        
+        return self.sh.remove_subscription(
+            {
+                '_': 'trades',
+                'symbol': symbol,
+            })
+    
+    
     def subscribe_to_ohlcv(self, symbol, timeframe='1m', params={}):
-        return self.sh.add_subscription(self.ip.extend({
-            '_': 'ohlcv',
-            'symbol': self.merge(symbol),
-            'timeframe': timeframe}, params))
-        
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'ohlcv',
+                'symbol': self.merge(symbol),
+                'timeframe': timeframe,
+            }, params))
+    
+    
     def unsubscribe_to_ohlcv(self, symbol):
-        return self.sh.remove_subscription({
-            '_': 'ohlcv',
-            'symbol': symbol})
+        return self.sh.remove_subscription(
+            {
+                '_': 'ohlcv',
+                'symbol': symbol,
+            })
+    
     
     def subscribe_to_account(self, params={}):
-        return self.sh.add_subscription(self.ip.extend({
-            '_': 'account'}, params))
-                
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'account',
+            }, params))
+    
+    
     def unsubscribe_to_account(self):
-        return self.sh.remove_subscription({
-            '_': 'account'})
-        
+        return self.sh.remove_subscription(
+            {
+                '_': 'account',
+            })
+    
+    
     def subscribe_to_match(self, symbol, params={}):
         if self.has_got('account','match'):
             if not self.sh.is_subscribed_to({'_': 'account'}):
                 return self.subscribe_to_account()
         else:
-            """if self.match_is_subset_of_trades and self.sh.is_subscribed_to(
-                    {'_':'market', 'symbol':symbol}):
-                return None"""
-            return self.sh.add_subscription(self.ip.extend({
-                '_': 'match',
-                'symbol': self.merge(symbol)}, params))
-        
+            return self.sh.add_subscription(
+                self.ip.extend({
+                    '_': 'match',
+                    'symbol': self.merge(symbol),
+                }, params))
+    
+    
     def unsubscribe_to_match(self, symbol):
         if not self.has_got('account','match'):
-            return self.sh.remove_subscription({
-                '_': 'match',
-                'symbol': symbol})
-            
+            return self.sh.remove_subscription(
+                {
+                    '_': 'match',
+                    'symbol': symbol,
+                })
+    
+    
     async def fetch_balance(self):
         balances = await poll.fetch(self.api,'balances',0)
         self.update_balances(
             [(cy,y['free'],y['used']) for cy,y in balances.items()
              if cy not in ('free','used','total','info')])
         return balances
+    
     
     async def fetch_order_book(self, symbol, *limit): #limit=None,params={}
         """This method must be overriden if .orderbook_maintainer is .orderbook_maintainer
@@ -830,16 +1050,19 @@ class ExchangeSocket(WSClient):
         ob['nonce'] = ob.get('nonce')
         return ob
     
+    
     async def fetch_tickers(self):
         tickers = await poll.fetch(self.api,'tickers',0)
         self.update_tickers(
             [y for x,y in tickers.items() if x!='info'])
         return tickers
     
+    
     async def fetch_ticker(self, symbol):
         ticker = await poll.fetch(self.api,('ticker',symbol),0)
         self.update_tickers([ticker])
         return ticker
+    
     
     async def fetch_trades(self, symbol, since=None, limit=None, params={}):
         kwargs = {'since': since, 'limit': limit, 'params': params}
@@ -847,11 +1070,13 @@ class ExchangeSocket(WSClient):
         self.update_trades([{'symbol': symbol, 'trades': trades}])
         return trades
     
+    
     async def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
         kwargs = {'since': since, 'limit': limit, 'params': params}
         ohlcv = await poll.fetch(self.api,('ohlcv',symbol,timeframe),0,kwargs=kwargs)
         self.update_ohlcv([{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': ohlcv}])
         return ohlcv
+    
     
     async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         """[{'id': '1a8eedf7-18cf-d779-0d15-3199ad677dc8', 'timestamp': 1564361280061,
@@ -868,7 +1093,8 @@ class ExchangeSocket(WSClient):
             except Exception as e:
                 logger.exception(e)
         return orders
-            
+    
+    
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         amount = self.api.round_amount(symbol, amount)
         direction = as_direction(side)
@@ -890,15 +1116,19 @@ class ExchangeSocket(WSClient):
                 self.add_fill(**f)
         #TODO: add market and stop order support to self.orders
         return r
-            
+    
+    
     async def create_limit_order(self, symbol, side, amount, price, *args):
         return await self.create_order(symbol, 'limit', side, amount, price, *args)
     
+    
     async def create_limit_buy_order(self, symbol, amount, price, *args):
         return await self.create_order(symbol, 'limit', 'buy', amount, price, *args)
-        
+    
+    
     async def create_limit_sell_order(self, symbol, amount, price, *args):
         return await self.create_order(symbol, 'limit', 'sell', amount, price, *args)
+    
     
     async def cancel_order(self, id, symbol=None, params={}):
         error = None
@@ -914,11 +1144,14 @@ class ExchangeSocket(WSClient):
             raise error
         return r
     
+    
     async def edit_order(self, id, symbol, *args):
         return await self.api.edit_order(id, symbol, *args)
     
+    
     def parse_ccxt_order(self, r):
         return {'order': {}, 'fills': []}
+    
     
     def is_order_auto_canceling_enabled(self):
         coa = self.order['cancel_automatically']
@@ -932,12 +1165,14 @@ class ExchangeSocket(WSClient):
                 return True
         else:
             return bool(coa)
-        
+    
+    
     def is_order_conflicting(self, symbol, side, price):
         fill_side = as_ob_fill_side(side)
         sc = get_stop_condition(as_ob_fill_side(side), closed=False)
         return any(sc(price,o['price']) for o in self.open_orders.values() 
                         if o['symbol']==symbol and o['side']==fill_side)
+    
     
     async def wait_on_order(self, id, cb=None, stream_deltas=[], defaults={}):
         """cb: a callback function accepting args: (order, changes); called on every update
@@ -959,8 +1194,14 @@ class ExchangeSocket(WSClient):
                 prev = {x: o[x] for x in stream_deltas}
                 cb(o,changes)
     
+    
     def convert_cy(self, currency, direction=1):
-        #0: ex to ccxt 1: ccxt to ex
+        """
+        :param direction:
+             (currency_id is exchange-specific, commonCurrency is universal)
+             0: currency_id to commonCurrency
+             1: commonCurrency to currency_id
+        """
         try:
             if hasattr(currency, '__iter__') and not isinstance(currency, str):
                 cls = list if not self.is_param_merged(currency) else self.merge
@@ -972,9 +1213,15 @@ class ExchangeSocket(WSClient):
         finally:
             if isinstance(sys.exc_info()[1], KeyError):
                 self._reload_markets(sys.exc_info()[1])
-        
+    
+    
     def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt 1: ccxt to ex
+        """
+        :param direction:
+            (currency_id is exchange-specific, commonCurrency is universal)
+             0: currency_id to commonCurrency
+             1: commonCurrency to currency_id
+        """
         try:
             if hasattr(symbol, '__iter__') and not isinstance(symbol, str):
                 cls = list if not self.is_param_merged(symbol) else self.merge
@@ -986,7 +1233,8 @@ class ExchangeSocket(WSClient):
         finally:
             if isinstance(sys.exc_info()[1], KeyError):
                 self._reload_markets(sys.exc_info()[1])
-        
+    
+    
     def convert_cnx_params(self, params):
         def _lower(s):
             cls = list if not self.is_param_merged(s) else self.merge
@@ -1007,6 +1255,82 @@ class ExchangeSocket(WSClient):
             self._last_markets_loaded_ts = time.time()
             asyncio.ensure_future(self.api.poll_load_markets(limit=0), loop=self.loop)
     
+    
+    def encode_symbols(self, symbols, topics):
+        if symbols is None:
+            symbols = []
+        elif isinstance(symbols, str):
+            symbols = [symbols]
+        symbols = [self.convert_symbol(s,1) for s in symbols]
+        
+        with_symbol = [t for t in topics if '<symbol>' in t]
+        without_symbol = [t for t in topics if '<symbol>' not in t]
+        
+        args = without_symbol[:]
+        
+        for s in symbols:
+            args += [t.replace('<symbol>',s) for t in with_symbol]
+        
+        return args
+    
+    
+    def safe_set_event(self, _, id, *broadcast, via_loop=None, op='set'):
+        events = self.events[_]
+        if events is None:
+            return
+        try: event = events[id]
+        except KeyError:
+            events[id] = event = asyncio.Event(loop=via_loop)
+        #print('Setting {}'.format(id))
+        func = getattr(event,op)
+        if via_loop is None:
+            func()
+        else:
+            via_loop.call_soon_threadsafe(func)
+        for b in broadcast:
+            self.broadcast_event(id, b)
+    
+    
+    @staticmethod
+    def dict_update(new, prev, info=True):
+        """Returns a copy of prev dict with added/overwritten values from new.
+           If `info`==True, then does the same for new['info'] ~ prev['info']"""
+        if not isinstance(prev, dict) or not isinstance(new, dict):
+            return _copy.copy(new)
+        else:
+            prev_info = prev.get('info')
+            new_dict = dict(prev, **new)
+            if info and isinstance(prev_info, dict) and 'info' in new and isinstance(new['info'], dict):
+                new_dict['info'] = ExchangeSocket.dict_update(new['info'], prev_info, False)
+            return new_dict
+    
+    
+    @staticmethod
+    def dict_changes(new, prev):
+        """Determine the diff between two dicts"""
+        if not isinstance(prev, dict) or not isinstance(new, dict):
+            return _copy.copy(new)
+        else:
+            return {k: v for k,v in new.items() if k not in prev or prev[k]!=v}
+    
+    
+    @staticmethod
+    def list_new_only(new_seq, prev_seq, timestamp_key, sort=False):
+        """Selects items from new_seq which's timestamp is newer than last timestamp in prev_seq.
+           For this to be effective new_seq (and prev_seq) must be sorted"""
+        if sort:
+            new_seq = sorted(new_seq, key=lambda x: x[timestamp_key])
+        try:
+            last_ts = prev_seq[-1][timestamp_key]
+        except IndexError:
+            pass
+        else:
+            from_i = next((i for i,x in enumerate(new_seq) if x[timestamp_key]>last_ts), len(new_seq))
+            if from_i:
+                new_seq = new_seq[from_i:]
+        
+        return new_seq
+
 
 
 def _resolve_auth(exchange, config):
@@ -1015,7 +1339,7 @@ def _resolve_auth(exchange, config):
     elif isinstance(auth, str):
         auth = {'id': auth}
     token_kwds = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange, [])
-        
+    
     for k in token_kwds:
         value = ''
         if k in config:
@@ -1026,35 +1350,5 @@ def _resolve_auth(exchange, config):
     """if not auth['apiKey']:
         relevant = {x:y for x,y in auth.items() if x not in token_kwds}
         auth = get_auth2(**relevant)"""
-        
+    
     return auth
-
-
-def _set_event(events, id, via_loop=None, op='set'):
-    if events is None: return
-    try: event = events[id]
-    except KeyError:
-        events[id] = event = asyncio.Event(loop=via_loop)
-    #print('Setting {}'.format(id))
-    func = getattr(event,op)
-    if via_loop is None:
-        func()
-    else:
-        via_loop.call_soon_threadsafe(func)
-#TODO: if cy/symbol/id not found, force self.api to reload-markets
-
-
-def _new_only(new_seq, prev_seq, timestamp_key, sort=False):
-    """For this to be effective new_seq (and prev_seq) must be sorted"""
-    if sort:
-        new_seq = sorted(new_seq, key=lambda x: x[timestamp_key])
-    try:
-        last_ts = prev_seq[-1][timestamp_key]
-    except IndexError:
-        pass
-    else:
-        from_i = next((i for i,x in enumerate(new_seq) if x[timestamp_key]>last_ts), len(new_seq))
-        if from_i:
-            new_seq = new_seq[from_i:]
-            
-    return new_seq

@@ -53,9 +53,12 @@ class binance(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'_': True, 'delta': False},
+        'balance': {'_': True},
         'all_tickers': True,
-        'ticker': True,
+        'ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+                   'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': True,
+                   'change': True, 'percentage': True, 'average': True, 'vwap': True,
+                   'baseVolume': True, 'quoteVolume': True, 'active': False},
         'orderbook': True,
         'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
                    'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
@@ -65,7 +68,7 @@ class binance(ExchangeSocket):
                                  '1d', '3d', '1w', '1M'],
                   'open': True, 'high': True, 'low': True, 'close': True,
                   'volume': True},
-        'account': {'balance': True, 'order': True, 'match': True},
+        'account': {'balance': True, 'order': True, 'fill': False},
         'fetch_tickers': {
             'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False, 
             'high': True, 'low': True, 'open': True, 'close': True, 
@@ -75,6 +78,7 @@ class binance(ExchangeSocket):
         'fetch_order_book': True,
         'fetch_balance': True,
     }
+    has['all_tickers'] = has['ticker'].copy()
     connection_defaults = {
         #'ping': lambda: {},
         #'ping': lambda: {'ping': nonce_ms()},
@@ -98,10 +102,14 @@ class binance(ExchangeSocket):
                 self.on_balance(r)
             elif type in ('executionReport','listStatus'):
                 self.on_order(r)
-            elif type == 'trade':
+            elif type in ('trade','aggTrade'):
                 self.on_trade(r)
             elif type == 'kline':
                 self.on_ohlcv(r)
+            elif type == 'ACCOUNT_UPDATE':
+                self.on_futures_account(r)
+            elif type == 'ORDER_TRADE_UPDATE':
+                self.on_futures_order(r)
             #elif r == {} or 'ping' in r:
             #    print('Received ping response? : {}'.format(r))
             #    cnx = self.cm.connections[R.id]
@@ -133,20 +141,21 @@ class binance(ExchangeSocket):
     
     
     def on_ticker(self, r):
-        """{
+        """Spot and futures:
+        {
           "e": "24hrTicker",  // Event type
           "E": 123456789,     // Event time
           "s": "BNBBTC",      // Symbol
           "p": "0.0015",      // Price change
           "P": "250.00",      // Price change percent
           "w": "0.0018",      // Weighted average price
-          "x": "0.0009",      // First trade(F)-1 price (first trade before the 24hr rolling window)
+          "x": "0.0009",      // First trade(F)-1 price (first trade before the 24hr rolling window) [spot]
           "c": "0.0025",      // Last price
           "Q": "10",          // Last quantity
-          "b": "0.0024",      // Best bid price
-          "B": "10",          // Best bid quantity
-          "a": "0.0026",      // Best ask price
-          "A": "100",         // Best ask quantity
+          "b": "0.0024",      // Best bid price [spot]
+          "B": "10",          // Best bid quantity [spot]
+          "a": "0.0026",      // Best ask price [spot]
+          "A": "100",         // Best ask quantity [spot]
           "o": "0.0010",      // Open price
           "h": "0.0025",      // High price
           "l": "0.0010",      // Low price
@@ -157,7 +166,9 @@ class binance(ExchangeSocket):
           "F": 0,             // First trade ID
           "L": 18150,         // Last trade Id
           "n": 18151          // Total number of trades
-        }"""
+        }
+        #The update interval is 1000ms for spot and 3000ms for futures.
+        """
         map = {
             'symbol': 's',
             'timestamp': 'E',
@@ -176,7 +187,7 @@ class binance(ExchangeSocket):
             'change': 'p',
             'percentage': 'P',
         }
-        params = {p: r[m] for p,m in map.items()}
+        params = {p: r[m] for p,m in map.items() if m in r}
         params['symbol'] = self.convert_symbol(params['symbol'], 0)
         params['lastVolume'] = float(r['Q']) if isinstance(r['Q'],str) else None
         
@@ -185,12 +196,15 @@ class binance(ExchangeSocket):
         
     
     def on_orderbook_update(self, r):
-        """{
+        """Spot and futures:
+        {
           "e": "depthUpdate", // Event type
           "E": 123456789,     // Event time
+          "T": 123456788,     // transaction time  [futures only]
           "s": "BNBBTC",      // Symbol
           "U": 157,           // First update ID in event
           "u": 160,           // Final update ID in event
+          "pu": 149,          // last update Id in last stream(ie "u" in last stream) [futures only]
           "b": [              // Bids to be updated
             [
               "0.0024",       // Price level to be updated
@@ -204,18 +218,21 @@ class binance(ExchangeSocket):
             ]
           ]
         }"""
+        #While listening to the stream, each new event's pu should be equal to the previous event's u,
+        #otherwise fetch new order book.
         update = {
             'symbol': self.convert_symbol(r['s'], 0),
             'timestamp': r['E'],
             'bids': [[float(y) for y in x] for x in r['b']],
             'asks': [[float(y) for y in x] for x in r['a']],
-            'nonce': (r['U'],r['u']),
+            'nonce': (r['U'],r['u']) if 'pu' not in r else (r['pu']+1,r['u']),
         }
         self.orderbook_maintainer.send_update(update)
         
         
     def on_trade(self, r):
-        """{
+        """Spot:
+        {
           "e": "trade",     // Event type
           "E": 123456789,   // Event time
           "s": "BNBBTC",    // Symbol
@@ -227,9 +244,24 @@ class binance(ExchangeSocket):
           "T": 123456785,   // Trade time
           "m": true,        // Is the buyer the market maker?
           "M": true         // Ignore
+        }
+        Spot and futures:
+        {
+          "e": "aggTrade",  // Event type
+          "E": 123456789,   // Event time
+          "s": "BTCUSDT",    // Symbol
+          "a": 5933014,     // Aggregate trade ID
+          "p": "0.001",     // Price
+          "q": "100",       // Quantity
+          "f": 100,         // First trade ID
+          "l": 105,         // Last trade ID
+          "T": 123456785,   // Trade time
+          "m": true,        // Is the buyer the market maker?
+          "M": true         // Ignore [spot only]
         }"""
+        
         symbol = self.convert_symbol(r['s'], 0)
-        id = r['t']
+        id = r['t'] if r['e']=='trade' else r['a'] 
         price = r['p']
         amount = r['q']
         ts = r['T']
@@ -242,7 +274,8 @@ class binance(ExchangeSocket):
         
         
     def on_ohlcv(self, r):
-        """{
+        """Spot and futures:
+        {
           "e": "kline",     // Event type
           "E": 123456789,   // Event time
           "s": "BNBBTC",    // Symbol
@@ -324,7 +357,7 @@ class binance(ExchangeSocket):
         
         
     def on_order(self, r):
-        print(r)
+        tlogger.debug(r)
         if r['e'] == 'listStatus':
             return
         """{
@@ -360,28 +393,42 @@ class binance(ExchangeSocket):
           "Z": "0.00000000",             // Cumulative quote asset transacted quantity
           "Y": "0.00000000"              // Last quote asset transacted quantity (i.e. lastPrice * lastQty)
         }"""
+        
+        price = float(r['p'])
+        stop = float(r['P'])
+        
         d = {
             'id': str(r['i']), #ccxt parses to str
             'symbol': self.convert_symbol(r['s'], 0),
+            'type': r['o'].lower(),
             'side': r['S'].lower(),
-            'price': float(r['p']),
+            'price': price if price else None,
             'amount': float(r['q']),
             'timestamp': r['E'],
+            'stop': stop if stop else None,
             'filled': float(r['z']),
         }
-        d['remaining'] = d['amount'] - d['filled'] if r['X'] not in ('CANCELED','REJECTED','EXPIRED') else 0
-        d['payout'] = d['filled'] if d['side'] == 'buy' else float(r['Z'])
+        
+        #STOP ORDER will first send
+        #EXPIRED, then NEW (as it turns into MARKET/LIMIT order), then FILLED
+        
+        if r['X'] in ('CANCELED','REJECTED') or r['X']=='EXPIRED' and not d['stop']:
+            d['remaining'] = 0
+        else:
+            d['remaining'] = d['amount'] - d['filled']
+            
+        d['payout'] = d['filled'] if d['side']=='buy' else float(r['Z'])
         
         o = None
         try: o = self.orders[d['id']]
         except KeyError: pass
         
         if o is None:
-            #(self, id, symbol, side, price, amount, timestamp, remaining=None, filled=None, payout=0)
             self.add_order(**d)
         else:
-            d['remaining'] = min(d['remaining'],o['remaining'])
-            self.update_order(d['id'], d['remaining'], d['filled'], d['payout'])
+            # include extra just in case edit_order functionality will be added
+            extra = {k:v for k,v in d.items() if k in ['type','side','price','stop','amount']}
+            self.update_order(d['id'], d['remaining'], d['filled'], d['payout'], params=extra)
     
     
     def create_url(self, url_factory):
@@ -391,9 +438,10 @@ class binance(ExchangeSocket):
         timeframe = params.get('timeframe')
         if isinstance(symbol, str):
             symbol = [symbol]
+        is_spot = self.exchange=='binance'
         suffixes = {'ticker': '@ticker',
                     'orderbook': '@depth',
-                    'trades': '@trade',
+                    'trades': '@trade' if is_spot else '@aggTrade',
                     'ohlcv': '@kline_{}'.format(timeframe)}
         suffix = suffixes[channel]
         return '/'.join(['{}{}'.format(s,suffix) for s in symbol])
@@ -403,10 +451,15 @@ class binance(ExchangeSocket):
         """{
             "listenKey": "pqia91ma19a5s61cv6a81va65sdf19v8a65a1a5s61cv6a81va65sdf19v8a65a1"
         }"""
+        is_spot = self.exchange=='binance'
+        method = 'publicPostUserDataStream' if is_spot else 'fapiPublicPostListenKey'
+        params = {}
+        
         async def fetch_key():
             #The method isn't asynchronous itself (it just returns coro)
             # thus it can't be used directly on call_via_loop
-            return await self.api.publicPostUserDataStream()
+            return await getattr(self.api, method)(params)
+
         #url = 'https://api.binance.com/api/v1/userDataStream'
         #api.fetch2(self, path, api='public', method='GET', params={}, headers=None, body=None):
                 
@@ -427,8 +480,12 @@ class binance(ExchangeSocket):
     
     
     async def prolong_listen_key_expiry(self, listen_key):
+        is_spot = self.exchange=='binance'
+        method = 'publicPutUserDataStream' if is_spot else 'fapiPublicPutListenKey'
+        params = {'listenKey': listen_key}
+        
         async def prolong_key():
-            return await self.api.publicPutUserDataStream({'listenKey': listen_key})
+            return await getattr(self.api, method)(params)
         
         logger.debug('{} - prolonging listen key'.format(self.name))
         

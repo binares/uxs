@@ -89,6 +89,7 @@ class OrderbookMaintainer:
             tlogger.debug('{} - creating orderbook {}.'.format(self.xs.name, symbol))
             #self.orderbooks[symbol] = await self.xs.api.fetch_order_book(symbol)
             fetched = await self.xs.fetch_order_book(symbol,*args)
+            print('fetched ob {} nonce: {}'.format(symbol, fetched.get('nonce')))
             ob = dict({'symbol': symbol}, **fetched)
         except Exception as e:
             logger2.error(e)

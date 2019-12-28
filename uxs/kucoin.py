@@ -42,7 +42,7 @@ class kucoin(ExchangeSocket):
         'ticker': {}, #same as all_tickers
         'orderbook': True,
         'trades': {'match': True},
-        'account': {'balance': True, 'order': False, 'match': False},
+        'account': {'balance': True, 'order': False, 'fill': False},
         'match': True,
         'fetch_tickers': True,
         'fetch_ticker': True,
@@ -77,10 +77,10 @@ class kucoin(ExchangeSocket):
     def handle(self, response):
         r = response.data
         if r['type'] == 'ack':
-            print(r)
+            logger.debug(r)
             self.handle_subscription_ack(r['id'])
         elif r['type'] != 'message': 
-            print(r)
+            logger.debug(r)
         elif r['topic'].startswith('/market/ticker:'):
             self.on_ticker(r)
         elif r['topic'].startswith('/market/level2:'):
@@ -246,7 +246,8 @@ class kucoin(ExchangeSocket):
         fee_mp = takerOrMaker #0.002
         
         if order is not None:
-            self.add_fill(d['tradeId'], symbol, side, price, amount, fee_mp, ts, order['id'])
+            self.add_fill(id=d['tradeId'], symbol=symbol, side=side, price=price, amount=amount,
+                          takerOrMaker=takerOrMaker, timestamp=ts, order=order['id'])
         
         if is_subbed_to_trades:
             e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=d['tradeId'],

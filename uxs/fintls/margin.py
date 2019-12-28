@@ -2,10 +2,10 @@ from copy import deepcopy
 
 
 class Position:
-    __slots__ = ['symbol','amount','entry','leverage',
+    __slots__ = ['symbol','amount','price','leverage',
                  'liquidation_price','bankrupt_price','params']
     
-    def __init__(self, api, symbol, amount=0, entry=None, leverage=None,
+    def __init__(self, api, symbol, amount=0, price=None, leverage=None,
                  liquidation_price=None, bankrupt_price=None, params=None):
         """
         :type api: ccxtWrapper
@@ -14,7 +14,7 @@ class Position:
         self.api = api
         self.symbol = symbol
         self.amount = amount
-        self.entry = entry
+        self.price = price
         self.leverage = leverage
         self.params = params if params is not None else {}
             
@@ -28,19 +28,19 @@ class Position:
         return None
     
     def calc_liquidation_price(self):
-        self.liquidation_price = None if self.entry is None else self._calc_liquidation_price()
+        self.liquidation_price = None if self.price is None else self._calc_liquidation_price()
         return self.liquidation_price
     
     def _calc_bankrupt_price(self):
         return None
     
     def calc_bankrupt_price(self):
-        self.bankrupt_price = None if self.entry is None else self._calc_bankrupt_price()
+        self.bankrupt_price = None if self.price is None else self._calc_bankrupt_price()
         return self.bankrupt_price
     
     
     @staticmethod
-    def calc_new(amount, entry, leverage, current_avg_entry=None, current_amount=0, current_avg_leverage=None):
+    def calc_new(amount, price, leverage, current_avg_price=None, current_amount=0, current_avg_leverage=None):
         # Currently this should only be used with static leverage, as the new average leverage calculation
         # may not be accurate enough (a test placed the liquidation price farther than it actually should have been,
         # which is more dangerous than if it were nearer)
@@ -48,42 +48,52 @@ class Position:
         new_amount = current_amount + amount
         new_direction = new_amount > 0
         
-        if current_avg_entry is None:
-            new_avg_entry = entry
+        if current_avg_price is None:
+            new_avg_price = price
             new_avg_lev = leverage
         elif not new_amount:
-            new_avg_entry = None
+            new_avg_price = None
             new_avg_lev = None
         elif direction != new_direction:
-            new_avg_entry, new_avg_lev = current_avg_entry, current_avg_leverage \
+            new_avg_price, new_avg_lev = current_avg_price, current_avg_leverage \
                                             if abs(current_amount) > abs(amount) else \
-                                         entry, leverage
+                                         price, leverage
         else:
             ratios = [abs(amount / new_amount), abs(current_amount / new_amount)]
-            new_avg_entry = (entry * ratios[0]) + (current_avg_entry * ratios[1])
+            new_avg_price = (price * ratios[0]) + (current_avg_price * ratios[1])
             #Is this right?
             new_avg_lev = new_amount / (amount/leverage + current_amount/current_avg_leverage)
         
         
-        return new_amount, new_avg_entry, new_avg_lev
+        return new_amount, new_avg_price, new_avg_lev
 
     
     def __add__(self, other):
         if self.symbol != other.symbol:
             raise ValueError('Different symbols: {}, {}'.format(self.symbol, other.symbol))
-        new_amount, new_avg_entry, new_avg_lev = \
-            self.calc_new(self.amount, self.entry, self.leverage, other.entry, other.amount, other.leverage)
-        return self.__class__(self.api, self.symbol, new_amount, new_avg_entry, new_avg_lev, params=deepcopy(self.params))
+        new_amount, new_avg_price, new_avg_lev = \
+            self.calc_new(self.amount, self.price, self.leverage, other.price, other.amount, other.leverage)
+        return self.__class__(self.api, self.symbol, new_amount, new_avg_price, new_avg_lev, params=deepcopy(self.params))
     
     
     def __iadd__(self, other):
         if self.symbol != other.symbol:
             raise ValueError('Different symbols: {}, {}'.format(self.symbol, other.symbol))
-        new_amount, new_avg_entry, new_avg_lev = \
-            self.calc_new(self.amount, self.entry, self.leverage, other.entry, other.amount, other.leverage)
+        new_amount, new_avg_price, new_avg_lev = \
+            self.calc_new(self.amount, self.price, self.leverage, other.price, other.amount, other.leverage)
         self.amount = new_amount
-        self.entry = new_avg_entry
+        self.price = new_avg_price
         self.leverage = new_avg_lev
         self.liquidation_price = self.calc_liquidation_price()
         self.bankrupt_price = self.calc_bankrupt_price()
         return self
+    
+    @property
+    def liq_price(self):
+        return self.liquidation_price
+    @liq_price.setter
+    def liq_price(self, value):
+        self.liquidation_price = value
+    @liq_price.deleter
+    def liq_price(self):
+        del self.liquidation_price
