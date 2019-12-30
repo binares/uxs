@@ -13,7 +13,7 @@ setup(
    url='https://github.com/binares/uxs',
    author='binares',
    author_email='binares@protonmail.com',
-   packages=find_packages(exclude=['test']),
+   packages=find_packages(exclude=['examples','test']),
    python_requires='>=3.5',
    install_requires=[
        'aiohttp>=3.0',
