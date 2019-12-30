@@ -56,7 +56,7 @@ class bitmex(ExchangeSocket):
                         'change': True, 'percentage': True, 'average': False, 'vwap': True,
                         'baseVolume': True, 'quoteVolume': True, 'active': True},
         'orderbook': True,
-        'account': {'balance': True, 'order': True, 'fill': True},
+        'account': {'balance': True, 'order': True, 'fill': True, 'position': True},
         'fetch_tickers': True,
         'fetch_ticker': True,
         'fetch_order_book': True,

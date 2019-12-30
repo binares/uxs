@@ -392,7 +392,7 @@ def save(items):
         if not os.path.exists(_dir):
             make_dirpath(_dir)
             
-        path = _dir + '\\{}'.format(fn)
+        path = os.path.join(_dir, fn)
         
         with SafeFileLock(path, 0.01):
             with open(path, 'w', encoding='utf-8') as f:
@@ -648,9 +648,13 @@ def clear_cache(exchanges=None, types=None):
 def load_profile(profile, exchange, type='markets'):
     now = dt.utcnow()
     profiles_dir = get_setting('profiles_dir')
-    dir = '{}\\{}'.format(profiles_dir, profile)
     
-    if not profiles_dir or not os.path.isdir(dir):
+    if profiles_dir is None:
+        return []
+    
+    dir = os.path.join(profiles_dir, profile)
+    
+    if not os.path.isdir(dir):
         return []
     
     files = os.listdir(dir)

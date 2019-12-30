@@ -12,7 +12,7 @@ class OrderbookMaintainer:
         """:type xs: ExchangeSocket"""
         self.xs = xs
         def cache_item():
-            return {'updates': [], 'last_create_execution': None}
+            return {'updates': [], 'last_create_execution': None, 'last_warned': None}
         self.cache = defaultdict(cache_item)
                 
         cfg = xs.connection_defaults
@@ -29,6 +29,7 @@ class OrderbookMaintainer:
                 cfg['on_activate'].append(self._init_orderbooks)
                 
         self.ids_count = defaultdict(int)
+        self.is_synced = defaultdict(bool)
     
     
     def send_orderbook(self, orderbook):
@@ -89,7 +90,7 @@ class OrderbookMaintainer:
             tlogger.debug('{} - creating orderbook {}.'.format(self.xs.name, symbol))
             #self.orderbooks[symbol] = await self.xs.api.fetch_order_book(symbol)
             fetched = await self.xs.fetch_order_book(symbol,*args)
-            print('fetched ob {} nonce: {}'.format(symbol, fetched.get('nonce')))
+            tlogger.debug('fetched ob {} nonce {}'.format(symbol, fetched.get('nonce')))
             ob = dict({'symbol': symbol}, **fetched)
         except Exception as e:
             logger2.error(e)
@@ -106,20 +107,21 @@ class OrderbookMaintainer:
         #Should the differences between old and new ob be sent to callbacks?
         self.xs.orderbooks[symbol] = ob
         #print('nonce: {}'.format(nonce))
+        self.is_synced[symbol] = True
         is_synced, performed_update = self._push_cache(symbol)
         if is_synced and not performed_update:
             #To notify that the orderbook was in fact updated (created)
             self.xs.update_orderbooks([{'symbol': symbol,
                                         'bids': [],
                                         'asks': [],
-                                        'nonce': ob['nonce']}])
-        if is_synced:
-            self._change_status(symbol, 1)
+                                        'nonce': ob['nonce']}],
+                                      enable_sub=True)
     
     
     def _change_status(self, symbol, status):
         if self.xs.sh.is_subscribed_to(('orderbook',symbol)):
-            self.xs.sh.change_subscription_state(('orderbook',symbol), status)
+            # This will also delete the orderbook (assuming delete_data_on_unsub=True)
+            self.xs.sh.change_subscription_state(('orderbook',symbol), status, True)
     
     
     def _resolve_hold(self, update, holds):
@@ -199,7 +201,7 @@ class OrderbookMaintainer:
         if up_to is not None:
             eligible = eligible[:up_to]
         
-        is_synced = True
+        is_synced = self.is_synced[symbol]
         
         def _is_synced(n0, cur_nonce, n1):
             return n0 <= cur_nonce + 1 <= n1
@@ -210,13 +212,14 @@ class OrderbookMaintainer:
                 continue
             #print('({}) {} {}'.format(cur_nonce,n0,n1))
             if uses_nonce and not _is_synced(n0, cur_nonce, n1):
-                is_synced = False
+                self.is_synced[symbol] = is_synced = False
+                self._warn(symbol)
                 #print(cur_nonce,(n0,n1),u)
-                logger.debug('{} - orderbook {} nonce is unsynced with cache'.format(self.xs.name, symbol))
                 self._change_status(symbol, 0)
                 if self._is_orderbook_reload_time(symbol):
                     logger.debug('{} - reloading orderbook {} due to unsynced nonce.'.format(self.xs.name, symbol))
                     self._schedule_orderbook_creation(symbol)
+                return False, False
             for side in ('bids','asks'):
                 to_push[side] += u[side]
             cur_nonce = n1
@@ -227,7 +230,7 @@ class OrderbookMaintainer:
         #If not synced should the orderbook be updated?
         if cur_nonce != ob['nonce'] or to_push.get('bids') or to_push.get('asks'):
             performed_update = True
-            self.xs.update_orderbooks([to_push])
+            self.xs.update_orderbooks([to_push], enable_sub=is_synced)
         #print(ob['nonce'])
         
         if not uses_nonce:
@@ -252,8 +255,17 @@ class OrderbookMaintainer:
     
     def _is_orderbook_reload_time(self, symbol):
         future = self.cache[symbol]['last_create_execution']
-        #return future is None or time.time() > future.t_created + self.xs.ob['reload_after']
-        return future is None or future.done() and time.time() > future.t_created + self.xs.ob['reload_after']
+        if not self.xs.is_subscribed_to(('orderbook',symbol), active=None):
+            return False
+        #return future is None or time.time() > future.t_created + self.xs.ob['reload_interval']
+        return future is None or future.done() and time.time() > future.t_created + self.xs.ob['reload_interval']
+    
+    
+    def _warn(self, symbol):
+        t = self.cache[symbol]['last_warned']
+        if t is None or time.time() > t + self.xs.ob['reload_interval']:
+            self.cache[symbol]['last_warned'] = time.time()
+            logger.debug('{} - orderbook {} nonce is unsynced with cache'.format(self.xs.name, symbol))
     
     
     async def _init_orderbooks(self, cnx):

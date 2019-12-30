@@ -4,8 +4,8 @@ __pycache__/
 *$py.class
 
 # Eclipse
-#/.project
-#/.pydevproject
+/.project
+/.pydevproject
 
 # User commands
 #/commands.txt

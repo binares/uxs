@@ -255,8 +255,8 @@ class kucoin(ExchangeSocket):
             self.update_trades([{'symbol': symbol, 'trades': [e]}])
         
         
-    async def create_connection_url(self):#, auth=True):
-        auth = True
+    async def create_connection_url(self):
+        auth = bool(self.apiKey)
         """{
             "code": "200000",
             "data": {
@@ -357,8 +357,8 @@ class kucoin(ExchangeSocket):
         
         
     def ping(self):
-        return json.dumps({
-            'id': ctime_ms(),
-            'type': 'ping',
-        })
+        return {
+            "id": str(ctime_ms()),
+            "type": "ping",
+        }
 

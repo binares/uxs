@@ -128,6 +128,8 @@ def _read_ordinary(tokens_path):
     wait_filelock(tokens_path)
     with open(tokens_path, encoding='utf-8') as f:
         tokens = yaml.safe_load(f)
+    if tokens is None:
+        tokens = {}
         
     return tokens
 
@@ -204,8 +206,8 @@ def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=N
     
     #Log the id of the matched entry and what function and module requested it
     #(for potential security purposes)
-    logger.debug("Retrieved auth id '{}' (called from '\\{}:{}')".format(
-        entry.get('id'), '\\'.join(f.f_code.co_filename.split('\\')[-3:]), f.f_code.co_name))
+    logger.debug("Retrieved auth id '{}' (called from '/{}:{}')".format(
+        entry.get('id'), '/'.join(f.f_code.co_filename.split(os.sep)[-3:]), f.f_code.co_name))
     
     return entry
 
@@ -336,6 +338,9 @@ def _read_encrypted(tokens_path, password=None):
     
     with BytesIO(decrypted) as stream:
         tokens = yaml.safe_load(stream)
+    
+    if tokens is None:
+        tokens = {}
     
     #Remember the password in-app 
     cache_password(password)

@@ -9,9 +9,9 @@ import uxs.base.auth as auth
 from uxs.base.auth import read_tokens, get_auth2, encrypt_tokens, decrypt_tokens, _read_ordinary, _undo_file_path_creation
 
 test_dir, settings_test_path = _init()
-tokens_path = test_dir + '\\tokens.yaml'
-tokens_encrypted_path = test_dir + '\\tokens.yaml_encrypted'
-tokens_path2 = test_dir + '\\tokens.yaml(2)'
+tokens_path = os.path.join(test_dir, 'tokens.yaml')
+tokens_encrypted_path = os.path.join(test_dir, 'tokens.yaml_encrypted')
+tokens_path2 = os.path.join(test_dir, 'tokens.yaml(2)')
 password = 'HB05tU3WL9'
 tokens_original = None
 tokens_original_txt = None
@@ -91,16 +91,19 @@ def test_cache_password():
     
 
 ufpc_data = [
-    ['C:\\x.yaml_encrypted','_encrypted','C:\\x.yaml'],
-    ['C:\\x.yaml_ENCRYPTED','_eNcRyPteD','C:\\x.yaml'],
-    ['C:\\x.yaml_encrypted(2)','_encrypted','C:\\x.yaml(2)'],
-    ['C:\\x.yaml_encrypted((2)','_encrypted','C:\\x.yaml_encrypted((2)'],
-    ['C:\\x.yaml_','','C:\\x.yaml_'],
+    ['x.yaml_encrypted','_encrypted','x.yaml'],
+    ['x.yaml_ENCRYPTED','_eNcRyPteD','x.yaml'],
+    ['x.yaml_encrypted(2)','_encrypted','x.yaml(2)'],
+    ['x.yaml_encrypted((2)','_encrypted','x.yaml_encrypted((2)'],
+    ['x.yaml_','','x.yaml_'],
 ]
 
-@pytest.mark.parametrize('path, ending, expected', ufpc_data)
-def test__undo_file_path_creation(path, ending, expected):
-    assert _undo_file_path_creation(path, ending) == expected
+@pytest.mark.parametrize('fname, ending, expected_fname', ufpc_data)
+def test__undo_file_path_creation(fname, ending, expected_fname):
+    dirn = 'aDirectory'
+    fpath = os.path.join(dirn, fname)
+    expected_path = os.path.join(dirn, expected_fname)
+    assert _undo_file_path_creation(fpath, ending) == expected_path
     
 #---------------------------------------------------------
 
@@ -117,7 +120,7 @@ def test_encrypt_tokens():
     
     #Verify that the file contains only code
     with open(tokens_encrypted_path, 'rb') as f:
-        txt = yaml.load(f)
+        txt = yaml.safe_load(f)
         assert isinstance(txt, str)
         assert ' ' not in txt
         assert 'binance' not in txt

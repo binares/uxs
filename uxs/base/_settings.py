@@ -1,5 +1,4 @@
 import os
-import sys
 import yaml
 from copy import deepcopy
 
@@ -21,7 +20,7 @@ _DEFAULT_CACHE_EXPIRY = {
 }
 
 APPDATA_DIR = get_appdata_dir('uxs-python', make=True)
-SETTINGS_PATH = APPDATA_DIR + '\\settings.yaml'
+SETTINGS_PATH = os.path.join(APPDATA_DIR, 'settings.yaml')
 SETTINGS = {
     'TOKENS_PATH': None,
     'ENCRYPTED': False,
@@ -45,6 +44,8 @@ def read_settings(update_globals=True):
         wait_filelock(SETTINGS_PATH)
         with open(SETTINGS_PATH, encoding='utf-8') as f:
             settings = yaml.safe_load(f)
+            if settings is None:
+                settings = {}
             settings = {k: (v if v is not None else deepcopy(_SETTINGS_INITIAL[k]))
                         for k,v in settings.items()}
     except FileNotFoundError:
@@ -64,7 +65,9 @@ def load_settings_from_file(pth, make_permanent=False):
     wait_filelock(SETTINGS_PATH)
     with open(pth, encoding='utf-8') as f:
         data = yaml.safe_load(f)
-        
+    if data is None:
+        data = {}
+    
     return set(data, make_permanent)
      
 

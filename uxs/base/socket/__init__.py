@@ -34,7 +34,7 @@ class ExchangeSocket(WSClient):
        
     exchange = None
     
-    #Used on .subscribe_to_{x} , raises ValueError when doesn't have
+    # Used on .subscribe_to_{x} , raises ValueError when doesn't have
     has = dict.fromkeys([
          'all_tickers', 'ticker', 'orderbook', 'trades',
          'ohlcv', 'account', 'match', 'balance',
@@ -46,15 +46,15 @@ class ExchangeSocket(WSClient):
         'cnx_params_converter': 'm$convert_cnx_params',
         'delete_data_on_unsub': True,
     }
-    #If 'is_private' is set to True, .sign() is called on the specific output to server
-    #if 'ubsub' is set to False, .remove_subscription raises ExchangeSocketError on that channel
+    # If 'is_private' is set to True, .sign() is called on the specific output to server
+    # if 'ubsub' is set to False, .remove_subscription raises ExchangeSocketError on that channel
     channels = {
         'account': {
             'required': [],
             'is_private': True,
-            #In channel_defaults this is set to True
-            #If set to True then it deletes "balances" and "positions"
-            #when unsubscribed (including lost connection)
+            # In channel_defaults this is set to True
+            # If set to True then it deletes "balances" and "positions"
+            # when unsubscribed (including lost connection)
             'delete_data_on_unsub': False,
             'merge_option': False,
         },
@@ -71,6 +71,7 @@ class ExchangeSocket(WSClient):
         },
         'orderbook': {
             'required': ['symbol'],
+            'auto_activate': False,
         },
         'trades': {
             'required': ['symbol'],
@@ -83,32 +84,32 @@ class ExchangeSocket(WSClient):
     OrderbookMaintainer_cls = OrderbookMaintainer
     
     ob = {
-        #the time after which all not-already-auto-created
+        # the time after which all not-already-auto-created
         # orderbooks (on 1st .send_update) will be force created
         # on (each) connection (re-)activation. Set to `None` to disable.
         'force_create': 15,
-        #minimal interval between two .fetch_order_book(a_symbol)
-        'reload_after': 15,
-        #reload orderbook if new_nonce > prev_nonce + nonce_delta 
+        # minimal interval between two reload (fetch) attempts (unsynced nonce)
+        'reload_interval': 15,
+        # reload orderbook if new_nonce > prev_nonce + nonce_delta 
         #'reload_on_nonce_delta': 2,
-        #the number of latest updates to be kept in cache
-        'cache_size': 30,
+        # the number of latest updates to be kept in cache
+        'cache_size': 50,
         'uses_nonce': True,
         'receives_snapshot': False,
         'assert_integrity': False,
-        #whether or not bid and ask of ticker if modified on orderbook update
+        # whether or not bid and ask of ticker if modified on orderbook update
         'sends_bidAsk': False,
     }
     order = {
-        #these two don't matter if the websocket itself
+        # these two don't matter if the websocket itself
         # receives new order/cancel order updates
         'add_automatically': True,
         'cancel_automatically': True,
-        #almost all send remaining. some send filled.
+        # almost all send remaining. some send filled.
         'update_remaining_on_fill': False,
         'update_filled_on_fill': False,
-        #usually payouts are not sent with order updates
-        #automatically calculate it from each fill
+        # usually payouts are not sent with order updates
+        # automatically calculate it from each fill
         'update_payout_on_fill': True,
     }
     
@@ -117,7 +118,7 @@ class ExchangeSocket(WSClient):
     match_is_subset_of_trades = False
     reload_markets_on_keyerror = 150
     
-    #since socket interpreter may clog due to high CPU usage,
+    # since socket interpreter may clog due to high CPU usage,
     # maximum lengths for the queues are set, and if full,
     # previous items are removed one-by-one to make room for new ones
     queue_maxsizes = {
@@ -133,7 +134,7 @@ class ExchangeSocket(WSClient):
         'send': 100,
     }
     
-    #The accepted age for retrieving cached markets,currencies,balances etc...
+    # The accepted age for retrieving cached markets,currencies,balances etc...
     api_attr_limits = {
         'markets': None,
         #'currencies': None,
@@ -239,7 +240,7 @@ class ExchangeSocket(WSClient):
         print('{} - unknown response: {}'.format(self.name, str(r)[:max_chars]))
     
     
-    def update_tickers(self, data, *, action='update', set_event=True):
+    def update_tickers(self, data, *, action='update', set_event=True, enable_sub=False):
         """
         :param data:
             [
@@ -257,7 +258,10 @@ class ExchangeSocket(WSClient):
             'update': add/overwrite prev dict values
             'replace': replace prev dict entirely
         """
+        enable_individual = bool(enable_sub) and enable_sub!='all_tickers'
+        enable_all = enable_sub=='all_tickers'
         cb_data = []
+        
         for d in data:
             #subscribe_to_all_tickers may suddenly receive new markets when they are added
             # to the exchange. Ignore them because we don't want to cause KeyError or other unexpectancies.
@@ -266,6 +270,8 @@ class ExchangeSocket(WSClient):
                 continue
             prev = self.tickers.get(symbol)
             self.tickers[symbol] = self.dict_update(d, prev if action=='update' else None)
+            if enable_individual:
+                self.change_subscription_state(('ticker', symbol), 1, True)
             if set_event:
                 self.safe_set_event('ticker', symbol, {'symbol': symbol})
             cb_input = {'_': 'ticker',
@@ -276,12 +282,14 @@ class ExchangeSocket(WSClient):
         
         self.api.tickers = self.tickers
         if cb_data:
+            if enable_all:
+                self.change_subscription_state(('all_tickers',), 1, True)
             if set_event:
                 self.safe_set_event('ticker', -1)
             self.exec_callbacks(cb_data, 'ticker', -1)
     
     
-    def create_orderbooks(self, data, *, set_event=True): 
+    def create_orderbooks(self, data, *, set_event=True, enable_sub=False): 
         """
         :param data:
             [
@@ -297,6 +305,8 @@ class ExchangeSocket(WSClient):
         for ob in data:
             symbol = ob['symbol']
             self.orderbooks[symbol] = new = create_orderbook(ob)
+            if enable_sub:
+                self.change_subscription_state(('orderbook', symbol), 1, True)
             if set_event:
                 self.safe_set_event('orderbook', symbol, {'symbol': symbol,
                                                           'bids_count': len(new['bids']),
@@ -307,7 +317,7 @@ class ExchangeSocket(WSClient):
             self.safe_set_event('orderbook', -1)
     
     
-    def update_orderbooks(self, data, *, set_event=True):
+    def update_orderbooks(self, data, *, set_event=True, enable_sub=False):
         """
         :param data:
             [
@@ -344,6 +354,9 @@ class ExchangeSocket(WSClient):
             prev_nonce = self.orderbooks[symbol].get('nonce')
             if 'nonce' in d:
                 self.orderbooks[symbol]['nonce'] = d['nonce']
+            
+            if enable_sub:
+                self.change_subscription_state(('orderbook', symbol), 1, True)
             
             if set_event:
                 self.safe_set_event('orderbook', symbol, {'symbol': symbol,
@@ -387,7 +400,7 @@ class ExchangeSocket(WSClient):
         self.update_tickers(data, set_event=set_event)
     
     
-    def update_trades(self, data, key=None, *, set_event=True):
+    def update_trades(self, data, key=None, *, set_event=True, enable_sub=False):
         """
         :param data: 
             [{'symbol': symbol, 'trades': trades}, ...]
@@ -411,6 +424,9 @@ class ExchangeSocket(WSClient):
             trades = sorted(trades, key=key)
             sequence_insert(trades, add_to, key=key, duplicates='drop')
             
+            if enable_sub:
+                self.change_subscription_state(('trades', symbol), 1, True)
+            
             if set_event:
                 self.safe_set_event('trades', symbol, {'symbol': symbol})
             
@@ -426,7 +442,7 @@ class ExchangeSocket(WSClient):
             self.exec_callbacks(cb_data, 'trades', -1)
     
     
-    def update_ohlcv(self, data, *, set_event=True):
+    def update_ohlcv(self, data, *, set_event=True, enable_sub=False):
         """
         :param data: [{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': ohlcv}, ...]
                      ohlcv: [[timestamp_ms, o, h, l, c, quoteVolume], ... increasing timestamp]
@@ -450,6 +466,9 @@ class ExchangeSocket(WSClient):
             ohlcv = sorted(ohlcv, key=key)
             sequence_insert(ohlcv, add_to, key=key, duplicates='drop')
             
+            if enable_sub:
+                self.change_subscription_state(('ohlcv', symbol, timeframe), 1, True)
+            
             if set_event:
                 self.safe_set_event('ohlcv', symbol, {'symbol': symbol})
             
@@ -466,7 +485,7 @@ class ExchangeSocket(WSClient):
             self.exec_callbacks(cb_data, 'ohlcv', -1)
     
     
-    def update_positions(self, data, *, set_event=True):
+    def update_positions(self, data, *, set_event=True, enable_sub=False):
         """
         :param data: [position0, position1, ...]
         """
@@ -488,12 +507,14 @@ class ExchangeSocket(WSClient):
             cb_data.append(cb_input)
         
         if cb_data:
+            if enable_sub:
+                self.change_subscription_state(('account',), 1, True)
             if set_event:
                 self.safe_set_event('position', -1)
             self.exec_callbacks(cb_data, 'position', -1)
     
     
-    def update_balances(self, data, *, set_event=True):
+    def update_balances(self, data, *, set_event=True, enable_sub=False):
         """
         :param data: [entry_0, entry_1, ...]
                      entry:
@@ -553,6 +574,8 @@ class ExchangeSocket(WSClient):
             cb_data.append(cb_input)
         
         if cb_data:
+            if enable_sub:
+                self.change_subscription_state(('account',), 1, True)
             if set_event:
                 self.safe_set_event('balance', -1)
             self.exec_callbacks(cb_data, 'balance', -1)
@@ -585,7 +608,8 @@ class ExchangeSocket(WSClient):
     
     def add_order(self, id, symbol, side, price, amount, timestamp, 
                   remaining=None, filled=None, payout=0, datetime=None,
-                  type='limit', stop=None, params={}, *, set_event=True):
+                  type='limit', stop=None, params={}, *, set_event=True,
+                  enable_sub=False):
         if remaining is None:
             remaining = amount
         if filled is None and remaining is not None:
@@ -615,6 +639,9 @@ class ExchangeSocket(WSClient):
         if remaining:
             self.open_orders[id] = o
         
+        if enable_sub:
+            self.change_subscription_state(('account',), 1, True)
+                
         if set_event:
             self.safe_set_event('order', id, {'symbol': symbol, 'id': id})
             self.safe_set_event('order', -1)
@@ -628,7 +655,7 @@ class ExchangeSocket(WSClient):
     
     
     def update_order(self, id, remaining=None, filled=None, payout=None, params={}, *,
-                     set_event=True):
+                     set_event=True, enable_sub=False):
         try: o = self.orders[id]
         except KeyError:
             logger2.error('{} - not recognized order: {}'.format(self.name, id))
@@ -679,6 +706,9 @@ class ExchangeSocket(WSClient):
             except KeyError:
                 pass
         
+        if enable_sub:
+            self.change_subscription_state(('account',), 1, True)
+        
         if set_event:
             self.safe_set_event('order', id, {'symbol': o['symbol'], 'id': id})
             self.safe_set_event('order', -1)
@@ -688,7 +718,7 @@ class ExchangeSocket(WSClient):
                  datetime=None, order=None, type=None, payout=None,
                  fee=None, fee_rate=None, takerOrMaker=None, cost=None,
                  info=None, params={}, *, set_event=True, set_order_event=True,
-                 **kw):
+                 enable_sub=False, **kw):
         """
         args 'symbol' and 'side' can be left undefined (None) if order is given
         """
@@ -791,6 +821,9 @@ class ExchangeSocket(WSClient):
                  'fee': fee, 'datetime': datetime, 'type': type, 'takerOrMaker': takerOrMaker,
                  'cost': cost, 'info': info, 'params': params, 'set_event': set_event,
                  'set_order_event': set_order_event}, **kw))
+            
+        if enable_sub:
+            self.change_subscription_state(('account',), 1, True)
     
     
     def _fetch_callback_list(self, channel, symbol=None):
@@ -876,6 +909,10 @@ class ExchangeSocket(WSClient):
                 if delete:
                     try: del container[s.id_tuple[-1]]
                     except KeyError: pass
+        
+        if s.channel == 'orderbook':
+            symbol = s.id_tuple[1]
+            self.orderbook_maintainer.is_synced[symbol] = False
     
     
     def get_markets_with_active_tickers(self, last=True, bidAsk=True):
@@ -1174,10 +1211,34 @@ class ExchangeSocket(WSClient):
                         if o['symbol']==symbol and o['side']==fill_side)
     
     
+    async def wait_on(self, stream, id=-1):
+        """
+        Wait on a stream event.
+        :param stream: the stream name
+        :param id: symbol, currency, order_id, -1
+        List of stream names:
+            ticker, orderbook, ohlcv, trades, order, fill, balance, position
+        Examples:
+            wait_on('orderbook', -1) -> waits till any orderbook is updated
+            wait_on('orderbook', 'BTC/USDT') -> till orderbook BTC/USDT is updated
+            wait_on('order', -1) -> till any order is updated
+            wait_on('order', 'a8f1e2dc52e9c') -> till order with id 'a8f1e2dc52e9c' is updated
+            wait_on('balance', -1) -> till any balance is updated
+            wait_on('balance', 'BTC') -> till BTC balance is updated
+            wait_on('fill', -1) -> till any fill is added
+            wait_on('fill', 'a8f1e2dc52e9c') -> till a fill of order 'a8f1e2dc52e9c' is added
+        """
+        event = self.events[stream][id]
+        await event.wait()
+        event.clear()
+    
+    
     async def wait_on_order(self, id, cb=None, stream_deltas=[], defaults={}):
-        """cb: a callback function accepting args: (order, changes); called on every update
-           stream_deltas: list of order params which changes are monitored and sent through cb
-           defaults: if given, changes are also sent before first update"""
+        """
+        :param cb: a callback function accepting args: (order, changes); called on every update
+        :param stream_deltas: list of order params which changes are monitored and sent through cb
+        :param defaults: if given, changes are also sent before first update
+        """
         o = self.orders[id]
         e = self.events['order'][id]
         prev = {x: o[x] for x in stream_deltas}

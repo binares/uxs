@@ -1,9 +1,29 @@
+"""
+This module allows to test an exchange stream.
+python -m uxs.test_xc <exchange> <stream1> <stream2> ... <param1>
+Streams:
+    ticker             : all_tickers
+    ticker=<symbols>
+    ob=<symbols>
+    trades=<symbols>
+    ohlcv=<symbols>
+    account            [for bitmex account=<symbols>]
+    position=<symbols>
+    order             : shows order updates
+    order+            : -||- and attempts to place one small order
+    order+-           : -||- and attempts to cancel the order
+    
+<symbols> are spaceless comma separated: BTC/USDT,XRP/BTC
+
+Params:
+    d / display: prints all payloads received from the server
+
+"""
 import asyncio
 import functools
 import itertools
 import time
 import sys
-from eth_account import account
 
 DEFAULT_EXCHANGE = 'bittrex'
 DEFAULT_DISPLAY = ['ob']

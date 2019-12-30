@@ -1,39 +1,39 @@
-python -m uxs.base.test_xc binance ob=ETH/BTC d
-python -m uxs.base.test_xc binance ob=ETH/BTC -unsub 5 -resub 2 d
-python -m uxs.base.test_xc binance ob=ETH/BTC,BTC/USDT -unsub 5 -resub 2
-python -m uxs.base.test_xc binance ob=ETH/BTC,BTC/USDT m -unsub 5 -resub 2
-python -m uxs.base.test_xc binance ticker=ETH/BTC,BTC/USDT u r s
-python -m uxs.base.test_xc binance ticker=ETH/BTC,BTC/USDT m u r s
-python -m uxs.base.test_xc binance trades=ETH/BTC,BTC/USDT m u r s
-python -m uxs.base.test_xc binance ohlcv=ETH/BTC,BTC/USDT m u r s
-python -m uxs.base.test_xc binance order -c 4
-python -m uxs.base.test_xc binance order+
-python -m uxs.base.test_xc binance ticker=ETH/BTC,BTC/USDT m ob=ETH/BTC order+ u r s
-python -m uxs.base.test_xc bittrex tickers u r s
-python -m uxs.base.test_xc bittrex ob=ETH/BTC order u r s
-python -m uxs.base.test_xc bittrex ob=ETH/BTC order c
-python -m uxs.base.test_xc hitbtc ob d
-python -m uxs.base.test_xc hitbtc ob=ETH/BTC,BTC/USDT -unsub 3 -resub 2
-python -m uxs.base.test_xc hitbtc tickers=ETH/BTC,BTC/USDT -unsub 3 -resub 2
-python -m uxs.base.test_xc hitbtc order+
-python -m uxs.base.test_xc hitbtc order+ETH/BTC,0.01,0.018501,buy
-python -m uxs.base.test_xc hitbtc order+ETH/BTC,0.01,0.01,sell
-python -m uxs.base.test_xc hitbtc ticker=ETH/BTC,XRP/USDT ob=XRP/USDT order+ u r s
-python -m uxs.base.test_xc kucoin ticker=XRP/BTC ob order -unsub 6 -resub 2 s
-python -m uxs.base.test_xc poloniex tickers u r s
-python -m uxs.base.test_xc poloniex ob order u r s
-python -m uxs.base.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d
-python -m uxs.base.test_xc bitmex ob=BTC/USD d
-python -m uxs.base.test_xc bitmex ob=BTC/USD ob_extent=10 d
-python -m uxs.base.test_xc bitmex ob=BTC/USD ob_extent=25 d
-python -m uxs.base.test_xc bitmex tickers d
-python -m uxs.base.test_xc binancefu order position d
-python -m uxs.base.test_xc binancefu ob=BTC/USDT d
-python -m uxs.base.test_xc binancefu ticker=BTC/USDT,ETH/USDT m d
-python -m uxs.base.test_xc binancefu trades=BTC/USDT,ETH/USDT m d
-python -m uxs.base.test_xc binancefu ohlcv=BTC/USDT d
+python -m uxs.test_xc binance ob=ETH/BTC d
+python -m uxs.test_xc binance ob=ETH/BTC -unsub 5 -resub 2 d
+python -m uxs.test_xc binance ob=ETH/BTC,BTC/USDT -unsub 5 -resub 2
+python -m uxs.test_xc binance ob=ETH/BTC,BTC/USDT m -unsub 5 -resub 2
+python -m uxs.test_xc binance ticker=ETH/BTC,BTC/USDT u r s
+python -m uxs.test_xc binance ticker=ETH/BTC,BTC/USDT m u r s
+python -m uxs.test_xc binance trades=ETH/BTC,BTC/USDT m u r s
+python -m uxs.test_xc binance ohlcv=ETH/BTC,BTC/USDT m u r s
+python -m uxs.test_xc binance order -c 4
+python -m uxs.test_xc binance order+
+python -m uxs.test_xc binance ticker=ETH/BTC,BTC/USDT m ob=ETH/BTC order+ u r s
+python -m uxs.test_xc bittrex tickers u r s
+python -m uxs.test_xc bittrex ob=ETH/BTC order u r s
+python -m uxs.test_xc bittrex ob=ETH/BTC order c
+python -m uxs.test_xc hitbtc ob d
+python -m uxs.test_xc hitbtc ob=ETH/BTC,BTC/USDT -unsub 3 -resub 2
+python -m uxs.test_xc hitbtc tickers=ETH/BTC,BTC/USDT -unsub 3 -resub 2
+python -m uxs.test_xc hitbtc order+
+python -m uxs.test_xc hitbtc order+ETH/BTC,0.01,0.018501,buy
+python -m uxs.test_xc hitbtc order+ETH/BTC,0.01,0.01,sell
+python -m uxs.test_xc hitbtc ticker=ETH/BTC,XRP/USDT ob=XRP/USDT order+ u r s
+python -m uxs.test_xc kucoin ticker=XRP/BTC ob order -unsub 6 -resub 2 s
+python -m uxs.test_xc poloniex tickers u r s
+python -m uxs.test_xc poloniex ob order u r s
+python -m uxs.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d
+python -m uxs.test_xc bitmex ob=BTC/USD d
+python -m uxs.test_xc bitmex ob=BTC/USD ob_extent=10 d
+python -m uxs.test_xc bitmex ob=BTC/USD ob_extent=25 d
+python -m uxs.test_xc bitmex tickers d
+python -m uxs.test_xc binancefu order position d
+python -m uxs.test_xc binancefu ob=BTC/USDT d
+python -m uxs.test_xc binancefu ticker=BTC/USDT,ETH/USDT m d
+python -m uxs.test_xc binancefu trades=BTC/USDT,ETH/USDT m d
+python -m uxs.test_xc binancefu ohlcv=BTC/USDT d
 
-python -m uxs.base.tools.ccxt
+python -m uxs.tools.ccxt
 
 python -m pytest
 python -m pytest test/test_auth.py -vv -ss

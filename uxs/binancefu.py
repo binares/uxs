@@ -24,6 +24,7 @@ class binancefu(binance):
         #'ping_timeout': 5, #is it ponged?
     }
     has = {
+        'account': {'position': True},
         'ticker': {'bid': False, 'ask': False, 'bidVolume': False,
                    'askVolume': False, 'previousClose': False},
     }

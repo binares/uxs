@@ -6,7 +6,7 @@ import uxs.base._settings as _settings
 from uxs.base._settings import (SETTINGS, _SETTINGS_INITIAL, APPDATA_DIR,
                                 read_settings, set_cache_dir)
 
-test_dir = APPDATA_DIR + '\\test'
+test_dir = os.path.join(APPDATA_DIR, 'test')
 
 #Execute this once per module
 #Fixtures defined in conftest.py can be accessed in any test function
@@ -38,7 +38,7 @@ def _init():
     
 def init_settings_path():
     _settings.SETTINGS_PATH = settings_test_path = \
-        test_dir + '\\settings_test.yaml'
+        os.path.join(test_dir, 'settings_test.yaml')
         
     #overwrite any previous content
     with open(settings_test_path,'w'):

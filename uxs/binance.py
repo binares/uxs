@@ -128,9 +128,12 @@ class binance(ExchangeSocket):
     def on_all_tickers(self, r):
         """[...]"""
         reload_markets = False
+        entries = []
         
         for x in r:
-            try: self.on_ticker(x)
+            try: 
+                entries.append(
+                    self.on_ticker(x, send=False))
             except KeyError as e:
                 reload_markets = True
                 
@@ -138,9 +141,13 @@ class binance(ExchangeSocket):
             logger2.error('{} - reloading markets due to KeyError'.format(self.name))
             asyncio.ensure_future(self.api.poll_load_markets(limit=60))
             self._markets_last_reloaded = time.time()
+        
+        enable_sub = 'all_tickers' if not reload_markets else False
+        
+        self.update_tickers(entries, enable_sub=enable_sub)
     
     
-    def on_ticker(self, r):
+    def on_ticker(self, r, *, send=True):
         """Spot and futures:
         {
           "e": "24hrTicker",  // Event type
@@ -192,8 +199,12 @@ class binance(ExchangeSocket):
         params['lastVolume'] = float(r['Q']) if isinstance(r['Q'],str) else None
         
         entry = self.api.ticker_entry(**params)
-        self.update_tickers([entry])
         
+        if send:
+            self.update_tickers([entry], enable_sub=True)
+        
+        return entry
+    
     
     def on_orderbook_update(self, r):
         """Spot and futures:
@@ -270,7 +281,7 @@ class binance(ExchangeSocket):
         e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=id,
                                  side=side, price=price, amount=amount)
         
-        self.update_trades([{'symbol': symbol, 'trades': [e]}])
+        self.update_trades([{'symbol': symbol, 'trades': [e]}], enable_sub=True)
         
         
     def on_ohlcv(self, r):
@@ -304,7 +315,7 @@ class binance(ExchangeSocket):
         e = self.api.ohlcv_entry(timestamp=rr['t'], open=rr['o'], high=rr['h'],
                                  low=rr['l'], close=rr['c'], volume=rr['q'])
         
-        self.update_ohlcv([{'symbol': symbol, 'timeframe': rr['i'], 'ohlcv': [e]}])
+        self.update_ohlcv([{'symbol': symbol, 'timeframe': rr['i'], 'ohlcv': [e]}], enable_sub=True)
         
     
     def on_balance(self, r):
@@ -353,7 +364,7 @@ class binance(ExchangeSocket):
                 float(x['l']),
             ) for x in r['B']
         ]
-        self.update_balances(updates)
+        self.update_balances(updates, enable_sub=True)
         
         
     def on_order(self, r):

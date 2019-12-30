@@ -11,6 +11,9 @@ from fons.crypto import nonce_ms, sign
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
+CURRENCY_PAIR_IDS_PATH = os.path.join(os.path.dirname(__file__), '_data', 'poloniex_currency_pair_ids.txt')
+CURRENCY_IDS_PATH = os.path.join(os.path.dirname(__file__), '_data', 'poloniex_currency_ids.txt')
+
 currencies = {}
 currency_pairs = {}
 currency_pairs_ccxt = {}
@@ -27,12 +30,12 @@ def _decode_ids(txt):
 
 def read_currency_pairs():
     global currency_pairs
-    with open(os.path.dirname(__file__)+'\\_data\\poloniex_currency_pair_ids.txt') as f:
+    with open(CURRENCY_PAIR_IDS_PATH, encoding='utf-8') as f:
         currency_pairs = _decode_ids(f.read())
-        
+
 def read_currencies():
     global currencies
-    with open(os.path.dirname(__file__)+'\\_data\\poloniex_currency_ids.txt') as f:
+    with open(CURRENCY_IDS_PATH, encoding='utf-8') as f:
         currencies = _decode_ids(f.read())
         
 read_currency_pairs()
