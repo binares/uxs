@@ -4,7 +4,7 @@ from fons.os import make_dirpath
 import pytest
 
 from .conftest import _init, cleanup
-from uxs import get_tokens_path, set_tokens_path, get_encrypted, set_encrypted, cache_password
+from uxs import get_tokens_path, set_tokens_path, cache_password
 import uxs.base.auth as auth
 from uxs.base.auth import read_tokens, get_auth2, encrypt_tokens, decrypt_tokens, _read_ordinary, _undo_file_path_creation
 
@@ -113,10 +113,11 @@ def _read_txt(pth):
 
 
 def test_encrypt_tokens():
-    encrypt_tokens(password)
-    assert get_tokens_path() == tokens_encrypted_path
-    assert get_encrypted() == True
+    _encryped_path = encrypt_tokens(password)
+    assert _encryped_path == tokens_encrypted_path
     assert auth._password == password
+    
+    set_tokens_path(tokens_encrypted_path, True)
     
     #Verify that the file contains only code
     with open(tokens_encrypted_path, 'rb') as f:
@@ -134,9 +135,9 @@ def test_encrypt_tokens():
 
 def test_decrypt_tokens():
     cache_password(password)
-    decrypt_tokens()
-    assert get_tokens_path() == tokens_path2
-    assert get_encrypted() == False
+    _decrypted_path = decrypt_tokens()
+    assert _decrypted_path == tokens_path2
+    set_tokens_path(tokens_path2, True)
     
     tokens = read_tokens()
     

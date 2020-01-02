@@ -23,7 +23,6 @@ APPDATA_DIR = get_appdata_dir('uxs-python', make=True)
 SETTINGS_PATH = os.path.join(APPDATA_DIR, 'settings.yaml')
 SETTINGS = {
     'TOKENS_PATH': None,
-    'ENCRYPTED': False,
     'PROFILES_DIR': None,
     'CACHE_DIR': APPDATA_DIR,
     'ENABLE_CACHING': {},

@@ -109,10 +109,10 @@ def _strip_id_from_descriptors(id):
 
 def read_tokens(password=None):
     tokens_path = get_setting('TOKENS_PATH')
-    encrypted = get_setting('ENCRYPTED')
     
     if tokens_path is not None:
-        if not encrypted:
+        is_encrypted = tokens_path.endswith('_encrypted')
+        if not is_encrypted:
             data = _read_ordinary(tokens_path)
         else:
             data = _read_encrypted(tokens_path, password)
@@ -137,7 +137,7 @@ def _read_ordinary(tokens_path):
 def get_auth(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
     exchange, id = _interpret_exchange(exchange, id)
     required = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange.lower(),[])
-    auth2 = get_auth2(exchange, info, trade, withdraw, id, user, active, **kw)
+    auth2 = get_auth2(exchange, id, info=info, trade=trade, withdraw=withdraw, user=user, active=active, **kw)
     
     return {x:y for x,y in auth2.items() if x in required}
     
@@ -281,7 +281,7 @@ def _fetch_tokens_path():
     return tokens_path
     
 
-def encrypt_tokens(password, destination_dir=None, make_permanent=True,  **kw):
+def encrypt_tokens(password, destination_dir=None, **kw):
     """
     Encrypts the file against the password. Output file will be named as 
     "{original_name}_encrypted", and saved in the same directory, unless
@@ -322,9 +322,6 @@ def encrypt_tokens(password, destination_dir=None, make_permanent=True,  **kw):
             os.remove(write_path)
         raise OSError('The destination file was damaged in the process')
         
-    if make_permanent:
-        _set({'TOKENS_PATH': write_path, 'ENCRYPTED': True}, True)
-        
     return write_path
 
 
@@ -348,7 +345,7 @@ def _read_encrypted(tokens_path, password=None):
     return tokens
 
 
-def decrypt_tokens(password=None, destination_dir=None, make_permanent=True):
+def decrypt_tokens(password=None, destination_dir=None):
     """
     Decrypts the file. Output file will be named as "{file_name}"
     with its "_enrypted" ending stripped, and saved in the same directory,
@@ -358,9 +355,10 @@ def decrypt_tokens(password=None, destination_dir=None, make_permanent=True):
     """
     tokens_path = os.path.realpath(_fetch_tokens_path())
     password = _fetch_password(password)
-    encrypted = get_setting('ENCRYPTED')
+    #encrypted = get_setting('ENCRYPTED')
+    is_encrypted = tokens_path.endswith('_encrypted')
     
-    if not encrypted:
+    if not is_encrypted:
         raise ValueError('File "{}" is not encrypted.'.format(tokens_path))
     
     _pth = os.path.join(destination_dir, os.path.basename(tokens_path)) \
@@ -382,9 +380,6 @@ def decrypt_tokens(password=None, destination_dir=None, make_permanent=True):
         
     #Remember the password in-app
     cache_password(password)
-    
-    if make_permanent:
-        _set({'TOKENS_PATH': new_path, 'ENCRYPTED': False}, True)
         
     return new_path
     

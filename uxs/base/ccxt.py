@@ -60,10 +60,9 @@ _exchanges_async = {}
 
 class ccxtWrapper:
     """Wraps any ccxt exchange"""
-    _try = {'attempts': 2, 'sleep': 0.5}
     Position = Position
-    
-    def __init__(self, config={}, load_currencies=None, load_markets=None, *, profile=None, auth=None):
+        
+    def __init__(self, config={}, *, load_cached_markets=None, profile=None, auth=None):
         import uxs.base.poll as poll
         if config is None: config = {}
         else: config = config.copy()
@@ -84,38 +83,36 @@ class ccxtWrapper:
         self.COST_LIMIT_WITH_FEE = self._custom_name in COST_LIMIT_WITH_FEE
         currencies = markets = None
         
-        if load_currencies is not False:
-            try: currencies = poll.load(xc,'currencies',load_currencies,1)[0].data
+        if load_cached_markets is not False:
+            try: currencies = poll.load(xc,'currencies',load_cached_markets,1)[0].data
             except (IndexError, json.JSONDecodeError) as e:
                 logger.error('{} - could not (init)load currencies.'.format(xc))
                 
-        if load_markets is not False:
-            try: markets = poll.load(xc,'markets',load_markets,1)[0].data
+        if load_cached_markets is not False:
+            try: markets = poll.load(xc,'markets',load_cached_markets,1)[0].data
             except (IndexError, json.JSONDecodeError) as e:
                 logger.error('{} - could not (init)load markets.'.format(xc))
         
         if markets:
             self.set_markets(markets, currencies)
         self.cy_graph = self.load_cy_graph() if markets else None
-            
-
-    def repeatedTry(self, f, args=None, kw=None, attempts=None, sleep=None):
-        if attempts is None: attempts = self._try['attempts']
-        if sleep is None: sleep = self._try['sleep']
+    
+    
+    def repeatedTry(self, f, args=None, kwargs=None, attempts=2, sleep=0.5):
         if isinstance(f,str): f = getattr(self,f)
         if args is None: args = tuple()
-        if kw is None: kw = {}
+        if kwargs is None: kwargs = {}
             
         for i in range(attempts):
-            try: return f(*args,**kw)
+            try: return f(*args,**kwargs)
             except ccxt.ExchangeError as e:
                 raise e
             except Exception as e:
                 logger.exception(e)
                 time.sleep(sleep)
                 if i == attempts-1: raise e
-                
-                
+    
+    
     def set_markets(self, markets, currencies=None):
         import uxs.base.poll as poll
         super().set_markets(markets,currencies)
@@ -943,9 +940,6 @@ class ccxtWrapper:
     
 class asyncCCXTWrapper(ccxtWrapper):
     
-    _try = {'attempts': 2, 'sleep': 0.5}
-    
-    
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         direction = as_direction(side)
         side = ['sell','buy'][direction]
@@ -1100,13 +1094,7 @@ def list_exchanges():
             exchanges.append(attr)
     return exchanges
         
-        
-class tempManager:
-    def update_balances(self):
-        self.balances = self.repeatedTry(self.api.fetchBalances)
 
-
-  
 #Notes:
 #If you create_limit_buy_order(symbol, x_amount, y_price),
 # do you get x_amount*(1-fee) or x_amount?
