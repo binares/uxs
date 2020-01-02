@@ -7,8 +7,8 @@ __pycache__/
 /.project
 /.pydevproject
 
-# User commands
-#/commands.txt
+# Vscode
+/.vscode/
 
 # C extensions
 *.so

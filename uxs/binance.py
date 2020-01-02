@@ -198,7 +198,7 @@ class binance(ExchangeSocket):
         params['symbol'] = self.convert_symbol(params['symbol'], 0)
         params['lastVolume'] = float(r['Q']) if isinstance(r['Q'],str) else None
         
-        entry = self.api.ticker_entry(**params)
+        entry = self.api.ticker_entry(**params, info=r)
         
         if send:
             self.update_tickers([entry], enable_sub=True)
@@ -279,7 +279,8 @@ class binance(ExchangeSocket):
         side = ['buy','sell'][r['m']]
         
         e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=id,
-                                 side=side, price=price, amount=amount)
+                                 side=side, price=price, amount=amount,
+                                 params={'info': r})
         
         self.update_trades([{'symbol': symbol, 'trades': [e]}], enable_sub=True)
         
@@ -358,11 +359,13 @@ class binance(ExchangeSocket):
             }
           ]
         }"""
-        updates = [(
-                self.convert_cy(x['a'], 0),
-                float(x['f']),
-                float(x['l']),
-            ) for x in r['B']
+        updates = [
+            {
+                'cy': self.convert_cy(x['a'], 0),
+                'free': float(x['f']),
+                'used': float(x['l']),
+                'info': x,
+            } for x in r['B']
         ]
         self.update_balances(updates, enable_sub=True)
         
@@ -429,6 +432,7 @@ class binance(ExchangeSocket):
             d['remaining'] = d['amount'] - d['filled']
             
         d['payout'] = d['filled'] if d['side']=='buy' else float(r['Z'])
+        d['params'] = {'info': r}
         
         o = None
         try: o = self.orders[d['id']]

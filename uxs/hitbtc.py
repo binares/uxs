@@ -1,7 +1,8 @@
+from copy import deepcopy
+from dateutil.parser import parse as parsedate
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
-from dateutil.parser import parse as parsedate
 
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
 from uxs.fintls.basics import as_direction
@@ -26,6 +27,8 @@ class hitbtc(ExchangeSocket):
         'orderbook': {
             'auto_activate': False,
         },
+        # fetch_balance, newOrder and cancelOrder will evoke
+        # socket authentication, if not already done so
         'fetch_balance': {
             'type': 'fetch',
             'required': [],
@@ -139,11 +142,12 @@ class hitbtc(ExchangeSocket):
             'timestamp': '2019-08-21T11:14:02.123Z', 
             'symbol': 'BTCUSD'
         }"""
-        r = r.copy()
-        r['baseVolume'] = r.pop('volume')
-        r['datetime'] = r.pop('timestamp')
-        r['symbol'] = self.convert_symbol(r['symbol'], 0)
-        e = self.api.ticker_entry(**r)
+        d = r.copy()
+        d['info'] = r
+        d['baseVolume'] = d.pop('volume')
+        d['datetime'] = d.pop('timestamp')
+        d['symbol'] = self.convert_symbol(d['symbol'], 0)
+        e = self.api.ticker_entry(**d)
         self.update_tickers([e])
 
     def on_orderbook(self, r):
@@ -205,11 +209,13 @@ class hitbtc(ExchangeSocket):
     def on_balance(self, r):
         #print('Updating balances')
         result = r['result']
-        balances_formatted = [(
-                self.convert_cy(x['currency'],0),
-                float(x['available']),
-                float(x['reserved'])
-            ) for x in result
+        balances_formatted = [
+            {
+                'cy': self.convert_cy(x['currency'],0),
+                'free': float(x['available']),
+                'used': float(x['reserved']),
+                'info': x,
+            } for x in result
         ]
         self.update_balances(balances_formatted)
         
@@ -233,22 +239,23 @@ class hitbtc(ExchangeSocket):
             dto = parsedate(rr['createdAt']).replace(tzinfo=None)
             ts = timestamp_ms(dto)
             price = float(rr['price'])
-            self.add_order(id,symbol,side,price,amount,ts,remaining,filled)
+            self.add_order(id=id, symbol=symbol, side=side, price=price, amount=amount, timestamp=ts,
+                           remaining=remaining, filled=filled, params={'info': rr})
         else:
-            #Can the server send "canceled"/replaced message twice, in response
+            # Can the server send "canceled"/replaced message twice, in response
             # to both cancelOrder/cancelReplaceOrder and subscribeReports?
-            #Worse yet, the "expired" may arrive sooner than update,
+            # Worse yet, the "expired" may arrive sooner than update,
             # thus have to check that remaining is smaller than previous, and filled larger
-            remaining = min(remaining,o['remaining'])
-            filled = max(filled,o['filled'])
+            remaining = min(remaining, o['remaining'])
+            filled = max(filled, o['filled'])
             if status in ('canceled','filled','suspended','expired'):
-                self.update_order(id,0,filled)
+                self.update_order(id, 0, filled, params={'info': rr})
                 #logger.error('{} - received unregistered order {}'.format(self.name,id))
             elif status in ('partiallyFilled','new'):
-                self.update_order(id,remaining,filled)
+                self.update_order(id, remaining, filled, params={'info': rr})
             else:
                 #order 
-                logger2.info('{} - received unknown order status. r: {}'.format(self.name,rr))
+                logger2.info('{} - received unknown order status. r: {}'.format(self.name, rr))
         
         if rtype == 'trade':
             tid = rr['tradeId']
@@ -260,13 +267,18 @@ class hitbtc(ExchangeSocket):
             #NB! fee is always in payout currency
             fee = float(rr['tradeFee'])
             self.add_fill(id=tid, symbol=symbol, side=side, price=tprice, amount=tamount,
-                          timestamp=tts, order=id, fee=fee)
+                          timestamp=tts, order=id, fee=fee, params={'info': rr.copy()})
             
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
-        #side: buy/sell
+        if not self.is_active():
+            return await super().create_order(symbol, type, side, amount, price, params)
+        # side: buy/sell
         direction = as_direction(side)
         side = ['sell','buy'][direction]
-        order_id = _nonce(32,uppers=False)        
+        order_id = _nonce(32,uppers=False)
+        amount = self.api.round_amount(symbol, amount)
+        if price is not None:
+            price = self.api.round_price(symbol, price, side)
         out = dict(params,**{
             "_": "newOrder",
             "clientOrderId": order_id,
@@ -279,18 +291,23 @@ class hitbtc(ExchangeSocket):
             out['price'] = str(price)
         r = (await self.send(out,True)).data
         self.check_errors(r)
-        o = self.orders[order_id]
+        o = deepcopy(self.orders[order_id])
         return o #{'id': order_id, 'price': o['price'], 'amount': o['amount']}
-                        
+        
     async def cancel_order(self, id, symbol=None, params={}):
+        if not self.is_active():
+            return await super().cancel_order(id, symbol, params)
         out = dict(params,**{
             "_": "cancelOrder",
             "clientOrderId": id,
         })
         r = (await self.send(out,True)).data
         self.check_errors(r)
-        o = self.orders[id]
+        o = deepcopy(self.orders[id])
         return o #{'id': id, 'price': o['price'], 'amount'}
+    
+    # TODO: fetch_open_orders, edit_order
+    # https://api.hitbtc.com/#socket-trading
     
     async def fetch_balance(self):
         r = (await self.send({'_':'fetch_balance'},True)).data

@@ -14,7 +14,9 @@ setup(
    author='binares',
    author_email='binares@protonmail.com',
    packages=find_packages(exclude=['examples','test']),
-   python_requires='>=3.5',
+   # 3.5.3 is required by aiphttp>=3.0, which in turn
+   # is required by ccxt
+   python_requires='>=3.5.3',
    install_requires=[
        'aiohttp>=3.0',
        'ccxt>=1.20.81',

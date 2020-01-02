@@ -98,7 +98,7 @@ def test_exchange_init():
 
 async def async_main():
     api = get_exchange({'exchange': 'bittrex', 
-                        'kwargs': {'load_markets': None, 'load_currencies': None}
+                        'kwargs': {'load_cached_markets': None}
                         })
     test_update_markets(api)
     market = 'DGB/USD'

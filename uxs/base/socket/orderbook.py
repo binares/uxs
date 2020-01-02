@@ -104,19 +104,34 @@ class OrderbookMaintainer:
         
         if 'nonce' not in ob:
             ob['nonce'] = None
-        #Should the differences between old and new ob be sent to callbacks?
-        self.xs.orderbooks[symbol] = ob
+        # Should the differences between old and new ob be sent to callbacks?
+        self.xs.orderbooks[symbol] = self._deep_overwrite(ob)
         #print('nonce: {}'.format(nonce))
         self.is_synced[symbol] = True
         is_synced, performed_update = self._push_cache(symbol)
         if is_synced and not performed_update:
-            #To notify that the orderbook was in fact updated (created)
+            # To notify that the orderbook was in fact updated (created)
             self.xs.update_orderbooks([{'symbol': symbol,
                                         'bids': [],
                                         'asks': [],
                                         'nonce': ob['nonce']}],
                                       enable_sub=True)
     
+    
+    def _deep_overwrite(self, new_ob):
+        # This ensures that the id() of orderbook dict and its bids/asks lists
+        # never change, even if `del self.xs.orderbooks[symbol]` has been evoked
+        prev = self.xs._orderbooks[new_ob['symbol']]
+        prev.update({k:v for k,v in new_ob.items() if k not in ('bids','asks')})
+        for k in ('bids','asks'):
+            if prev.get(k) is not None:
+                prev[k].clear()
+            else:
+                prev[k] = []
+            prev[k] += new_ob[k]
+            
+        return prev
+        
     
     def _change_status(self, symbol, status):
         if self.xs.sh.is_subscribed_to(('orderbook',symbol)):
@@ -166,7 +181,7 @@ class OrderbookMaintainer:
                                   and proceeds from there (or from beginning if not found)
                                   as `force_till_id=None`
         """
-        #Nonce of update entry may be given as closed range [start_nonce, end_nonce]
+        # Nonce of update entry may be given as closed range [start_nonce, end_nonce]
         ob = self.xs.orderbooks.get(symbol)
         if ob is None:
             return False, False
@@ -190,7 +205,7 @@ class OrderbookMaintainer:
             id_loc = next((i for i,u in enumerate(eligible) if u['__id__']==force_till_id), -1)
         
         if force_till_id != -1:
-            #Include all that come after the id and are not held / are expired
+            # Include all that come after the id and are not held / are expired
             include = next((i for i,u in enumerate(eligible[id_loc+1:])
                             if '__hold_until__' in u and u['__hold_until__'] > now), None)
             up_to = include
@@ -227,14 +242,14 @@ class OrderbookMaintainer:
         to_push['nonce'] = cur_nonce
         performed_update = False
         
-        #If not synced should the orderbook be updated?
+        # If not synced should the orderbook be updated?
         if cur_nonce != ob['nonce'] or to_push.get('bids') or to_push.get('asks'):
             performed_update = True
             self.xs.update_orderbooks([to_push], enable_sub=is_synced)
         #print(ob['nonce'])
         
         if not uses_nonce:
-            #Not dropping them would result in them being re-counted as "eligible_nonce" afterwards
+            # Not dropping them would result in them being re-counted as "eligible_nonce" afterwards
             self.cache[symbol]['updates'] = eligible_nonce[up_to:] if up_to is not None else []
         
         return is_synced, performed_update

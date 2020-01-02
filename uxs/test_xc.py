@@ -76,10 +76,15 @@ async def _crash(params, delay=0):
             
 async def _print_changed(channel, attr=None, clear_first=False, from_index=None, key=None):
     if attr is None: attr = channel
+    excl_chars = None
+    if channel in ('fill','order'):
+        excl_chars = '/'
+    def _is_valid(x):
+        return not isinstance(x, tuple) and (excl_chars is None or not isinstance(x,str) or excl_chars not in x)
     if clear_first:
-        [xs.events[channel][x].clear() for x in xs.events[channel]]
+        [xs.events[channel][x].clear() for x in xs.events[channel] if _is_valid(x)]
     await xs.events[channel][-1].wait()
-    were_set = [x for x,y in xs.events[channel].items() if y.is_set()]
+    were_set = [x for x,y in xs.events[channel].items() if y.is_set() and _is_valid(x)]
     if key is None:
         key = lambda x,y: y
     changes = {x: key(x, getattr(xs,attr,{}).get(x)) for x in were_set if x!=-1}

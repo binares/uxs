@@ -74,9 +74,11 @@ class ExchangeSocket(WSClient):
             'auto_activate': False,
         },
         'trades': {
+            'delete_data_on_unsub': False,
             'required': ['symbol'],
         },
         'ohlcv': {
+            'delete_data_on_unsub': False,
             'required': ['symbol','timeframe'],
         }
     }
@@ -135,9 +137,8 @@ class ExchangeSocket(WSClient):
     }
     
     # The accepted age for retrieving cached markets,currencies,balances etc...
-    api_attr_limits = {
+    fetch_limits = {
         'markets': None,
-        #'currencies': None,
         'balances': None,
     }
     __properties__ = \
@@ -146,13 +147,14 @@ class ExchangeSocket(WSClient):
          ['apiKey','api.apiKey'],
          ['secret','api.secret'],
          ['auth_info','api._auth_info'],
+         ['profile','api._profile_name'],
          ['fetch_orderbook','fetch_order_book'],
          ['subscribe_to_ob','subscribe_to_orderbook'],
          ['unsubscribe_to_ob','unsubscribe_to_orderbook'],
          ['sub_to_ob','subscribe_to_orderbook'],
          ['unsub_to_ob','unsubscribe_to_orderbook'],]
     
-    __extend_attrs__ = ['api_attr_limits','order','ob']
+    __extend_attrs__ = ['fetch_limits','order','ob']
     __deepcopy_on_init__ = __extend_attrs__[:]
     
     
@@ -160,16 +162,19 @@ class ExchangeSocket(WSClient):
         
         config = config.copy()
         auth = _resolve_auth(self.exchange, config)
+        ccxt_config = config.pop('ccxt_config', {})
+        load_cached_markets = config.pop('load_cached_markets', None)
+        profile = config.pop('profile', None)
         
         super().__init__(config)
         
         self.api = get_exchange({
             'exchange':self.exchange,
             'async':True,
+            'args': (ccxt_config,),
             'kwargs': {
-                'load_currencies':None,
-                'load_markets':None,
-                'profile': getattr(self,'profile',None),},
+                'load_cached_markets': load_cached_markets,
+                'profile': profile,},
             'auth': auth,
         })
         
@@ -189,7 +194,8 @@ class ExchangeSocket(WSClient):
         self._init_events()
         
         self.callbacks = {x: {} for x in ['orderbook','ticker','trades',
-                                          'ohlcv','position','balance']}
+                                          'ohlcv','position','balance',
+                                          'order','fill']}
         self.tickers = {}
         self.balances = {'free': {}, 'used': {}, 'total': {}}
         self.orderbooks = {}
@@ -201,17 +207,24 @@ class ExchangeSocket(WSClient):
         self.fills = {}
         self.positions = {}
         
+        # These are backups of the above to ensure that the id()-s of the content
+        # objects are never changed. As soon as `del` op is envoked
+        # (sub becomes inactive: ticker, orderbook) on one of the content items,
+        # it is restored (in cleared form) from the backup on the next
+        # .update_tickers / .update_orderbooks
+        for attr in ('tickers','balances','orderbooks','positions'):
+            setattr(self, '_'+attr, defaultdict(dict))
+        self._balances.update(self.balances)
+        
         self.orderbook_maintainer = self.OrderbookMaintainer_cls(self)
         self._last_markets_loaded_ts = 0
     
     
-    async def _init_api_attrs(self):
-        limit = self.api_attr_limits['markets']
+    async def _init_markets(self):
+        limit = self.fetch_limits['markets']
         await self.api.poll_load_markets(limit)
-        if len(self.balances) < 5 and self.apiKey: #info,free,used,total
-            self.balances = await poll.fetch(self.api,'balances',self.api_attr_limits['balances'])
         self._init_events()
-        self._init_api_attrs_done = True
+        self._init_markets_done = True
     
     
     def _init_events(self):
@@ -229,10 +242,10 @@ class ExchangeSocket(WSClient):
                     self.events[x][cy] = asyncio.Event(loop=self.loop)
     
     
-    async def on_start(self):    
-        #TODO: make _init_api_attrs safe?
-        if not getattr(self,'_init_api_attrs_done',None):
-            await self._init_api_attrs()
+    async def on_start(self):
+        #TODO: make _init_markets safe?
+        if not getattr(self,'_init_markets_done',None):
+            await self._init_markets()
         self._init_events()
     
     
@@ -268,12 +281,21 @@ class ExchangeSocket(WSClient):
             symbol = d['symbol']
             if symbol not in self.api.markets:
                 continue
-            prev = self.tickers.get(symbol)
-            self.tickers[symbol] = self.dict_update(d, prev if action=='update' else None)
+            try:
+                prev = self.tickers[symbol]
+                if action != 'update':
+                    self.dict_clear(prev)
+            except KeyError:
+                prev = self.dict_clear(self._tickers[symbol])
+            
+            self.tickers[symbol] = self.dict_update(d, prev)
+            
             if enable_individual:
                 self.change_subscription_state(('ticker', symbol), 1, True)
+            
             if set_event:
-                self.safe_set_event('ticker', symbol, {'symbol': symbol})
+                self.safe_set_event('ticker', symbol, {'_': 'ticker', 'symbol': symbol})
+            
             cb_input = {'_': 'ticker',
                         'symbol': symbol,
                         'data': self.dict_changes(d, prev)}
@@ -304,11 +326,13 @@ class ExchangeSocket(WSClient):
         """
         for ob in data:
             symbol = ob['symbol']
-            self.orderbooks[symbol] = new = create_orderbook(ob)
+            self.orderbooks[symbol] = new = \
+                self.orderbook_maintainer._deep_overwrite(create_orderbook(ob))
             if enable_sub:
                 self.change_subscription_state(('orderbook', symbol), 1, True)
             if set_event:
-                self.safe_set_event('orderbook', symbol, {'symbol': symbol,
+                self.safe_set_event('orderbook', symbol, {'_': 'orderbook',
+                                                          'symbol': symbol,
                                                           'bids_count': len(new['bids']),
                                                           'aks_count': len(new['asks'])})
             if self.ob['assert_integrity']:
@@ -359,7 +383,8 @@ class ExchangeSocket(WSClient):
                 self.change_subscription_state(('orderbook', symbol), 1, True)
             
             if set_event:
-                self.safe_set_event('orderbook', symbol, {'symbol': symbol,
+                self.safe_set_event('orderbook', symbol, {'_': 'orderbook',
+                                                          'symbol': symbol,
                                                           'bids_count': len(d['bids']),
                                                           'aks_count': len(d['asks'])})
             
@@ -428,7 +453,7 @@ class ExchangeSocket(WSClient):
                 self.change_subscription_state(('trades', symbol), 1, True)
             
             if set_event:
-                self.safe_set_event('trades', symbol, {'symbol': symbol})
+                self.safe_set_event('trades', symbol, {'_': 'trades', 'symbol': symbol})
             
             cb_input = {'_': 'trades',
                         'symbol': symbol,
@@ -470,12 +495,16 @@ class ExchangeSocket(WSClient):
                 self.change_subscription_state(('ohlcv', symbol, timeframe), 1, True)
             
             if set_event:
-                self.safe_set_event('ohlcv', symbol, {'symbol': symbol})
+                self.safe_set_event('ohlcv', (symbol, timeframe), {'_': 'ohlcv',
+                                                                   'symbol': symbol,
+                                                                   'timeframe': timeframe})
+                self.safe_set_event('ohlcv', symbol)
             
             cb_input = {'_': 'ohlcv',
                         'symbol': symbol,
                         'timeframe': timeframe,
                         'data': [x.copy() for x in ohlcv]}
+            self.exec_callbacks(cb_input, 'ohlcv', (symbol, timeframe))
             self.exec_callbacks(cb_input, 'ohlcv', symbol)
             cb_data.append(cb_input)
         
@@ -493,12 +522,15 @@ class ExchangeSocket(WSClient):
         
         for d in data:
             symbol = d['symbol']
-            prev = self.positions.get(symbol)
+            try:
+                prev = self.positions[symbol]
+            except KeyError:
+                prev = self.dict_clear(self._positions[symbol])
             
             self.positions[symbol] = self.dict_update(d, prev)
             
             if set_event:
-                self.safe_set_event('position', symbol, {'symbol': symbol})
+                self.safe_set_event('position', symbol, {'_': 'position', 'symbol': symbol})
             
             cb_input = {'_': 'position',
                         'symbol': symbol,
@@ -516,10 +548,11 @@ class ExchangeSocket(WSClient):
     
     def update_balances(self, data, *, set_event=True, enable_sub=False):
         """
-        :param data: [entry_0, entry_1, ...]
-                     entry:
-                      {'cy': <str>, 'free': <float>, 'used': <float>}
-                      (cy, free, used)
+        :param data:
+            [entry_0, entry_1, ...]
+            entry:
+                {'cy': <str>, 'free': <float>, 'used': <float>}
+                (cy, free, used)
         """
         cb_data = []
         
@@ -552,23 +585,27 @@ class ExchangeSocket(WSClient):
                 cy,free,used = x
                 new = {'free': free, 'used': used, 'total': free+used}
             
-            prev = self.balances.get(cy)
-            new_dict = self.dict_update(new, prev)
+            try:
+                cy_prev = self.balances[cy]
+            except KeyError:
+                cy_prev = self.dict_clear(self._balances[cy])
+            
+            cy_prev_updated = self.dict_update(new, cy_prev)
             
             for k in ['free','used','total']:
-                if k not in new_dict:
-                    new_dict[k] = None
-                self.balances[k][cy] = new_dict[k]
+                if k not in cy_prev_updated:
+                    cy_prev_updated[k] = None
+                self.balances[k][cy] = cy_prev_updated[k]
             
-            self.balances[cy] = new_dict
+            self.balances[cy] = cy_prev_updated
             
             if set_event:
-                self.safe_set_event('balance', cy, {'currency': cy})
+                self.safe_set_event('balance', cy, {'_': 'balance', 'currency': cy})
             
             cb_input = {
                 '_': 'balance',
-                'cy': cy,
-                'data': self.dict_changes(new, prev)
+                'currency': cy,
+                'data': self.dict_changes(new, cy_prev)
             }
             self.exec_callbacks(cb_input, 'balance', cy)
             cb_data.append(cb_input)
@@ -614,11 +651,14 @@ class ExchangeSocket(WSClient):
             remaining = amount
         if filled is None and remaining is not None:
             filled = amount - remaining
-            
-        if id in self.orders:
-            return self.update_order(id, remaining, filled, payout)
         
         datetime, timestamp = resolve_times([datetime, timestamp])
+        
+        if id in self.orders:
+            params = dict({'type': type, 'side': side, 'price': price,
+                           'amount': amount, 'stop': stop, 'timestamp': timestamp,
+                           'datetime': datetime}, **params)
+            return self.update_order(id, remaining, filled, payout, params)
         
         o = dict(
             {'id': id,
@@ -643,8 +683,19 @@ class ExchangeSocket(WSClient):
             self.change_subscription_state(('account',), 1, True)
                 
         if set_event:
-            self.safe_set_event('order', id, {'symbol': symbol, 'id': id})
+            self.safe_set_event('order', id, {'_': 'order', 'symbol': symbol, 'id': id})
+            self.safe_set_event('order', symbol)
             self.safe_set_event('order', -1)
+            
+        cb_input = {
+            '_': 'order',
+            'symbol': symbol,
+            'id': id,
+            'data': o.copy(),
+        }
+        self.exec_callbacks(cb_input, 'order', id)
+        self.exec_callbacks(cb_input, 'order', symbol)
+        self.exec_callbacks([cb_input], 'order', -1)
         
         if id in self.unprocessed_fills:
             for kwargs in self.unprocessed_fills[id]:
@@ -661,12 +712,14 @@ class ExchangeSocket(WSClient):
             logger2.error('{} - not recognized order: {}'.format(self.name, id))
             return
         
+        o_prev = o.copy()
+        
         if params.get('amount') is not None and o['amount'] is not None:
             amount_difference = params['amount'] - o['amount']
         else:
             amount_difference = None
         
-        o.update(params)
+        self.dict_update(params, o)
         
         if remaining is not None:
             remaining = max(0, remaining)
@@ -710,15 +763,26 @@ class ExchangeSocket(WSClient):
             self.change_subscription_state(('account',), 1, True)
         
         if set_event:
-            self.safe_set_event('order', id, {'symbol': o['symbol'], 'id': id})
+            self.safe_set_event('order', id, {'_': 'order', 'symbol': o['symbol'], 'id': id})
+            self.safe_set_event('order', o['symbol'])
             self.safe_set_event('order', -1)
+            
+        cb_input = {
+            '_': 'order',
+            'symbol': o['symbol'],
+            'id': id,
+            'data': self.dict_changes(o, o_prev),
+        }
+        self.exec_callbacks(cb_input, 'order', id)
+        self.exec_callbacks(cb_input, 'order', o['symbol'])
+        self.exec_callbacks([cb_input], 'order', -1)
     
     
     def add_fill(self, id, symbol, side, price, amount, timestamp=None,
                  datetime=None, order=None, type=None, payout=None,
                  fee=None, fee_rate=None, takerOrMaker=None, cost=None,
-                 info=None, params={}, *, set_event=True, set_order_event=True,
-                 enable_sub=False, **kw):
+                 params={}, *, set_event=True, set_order_event=True,
+                 enable_sub=False):
         """
         args 'symbol' and 'side' can be left undefined (None) if order is given
         """
@@ -741,8 +805,22 @@ class ExchangeSocket(WSClient):
         def insert_fill(f):
             o_fills.append(f)
             if set_event:
-                self.safe_set_event('fill', order, {'order': order, 'id': order})
+                self.safe_set_event('fill', order, {'_': 'fill',
+                                                    'symbol': symbol,
+                                                    'order': order,
+                                                    'id': id})
+                self.safe_set_event('fill', symbol)
                 self.safe_set_event('fill', -1)
+            cb_input = {
+                '_': 'fill', 
+                'symbol': symbol,
+                'order': order,
+                'id': id,
+                'data': f.copy(),
+            }
+            self.exec_callbacks(cb_input, 'trade', order)
+            self.exec_callbacks(cb_input, 'trade', symbol)
+            self.exec_callbacks([cb_input], 'trade', -1)
         
         if fee_rate is None and takerOrMaker is not None:
             fee_rate = self.api.markets[symbol][takerOrMaker]
@@ -780,7 +858,7 @@ class ExchangeSocket(WSClient):
              'fee': fee_dict,
              'cost': cost,
              'order': order,
-            }, **dict(kw, **params))
+            }, **params)
         
         if order is None:
             insert_fill(f)
@@ -815,39 +893,47 @@ class ExchangeSocket(WSClient):
             tlogger.debug('{} - adding {} to unprocessed_fills'.format(
                 self.name,(id,symbol,type,side,price,amount,order)))
             self.unprocessed_fills[order].append(
-                dict(
                 {'id': id, 'symbol': symbol, 'side': side, 'price': price, 'amount': amount,
                  'fee_rate': fee_rate, 'timestamp': timestamp, 'order': order, 'payout': payout,
                  'fee': fee, 'datetime': datetime, 'type': type, 'takerOrMaker': takerOrMaker,
-                 'cost': cost, 'info': info, 'params': params, 'set_event': set_event,
-                 'set_order_event': set_order_event}, **kw))
+                 'cost': cost, 'params': params, 'set_event': set_event,
+                 'set_order_event': set_order_event})
             
         if enable_sub:
             self.change_subscription_state(('account',), 1, True)
     
     
-    def _fetch_callback_list(self, channel, symbol=None):
-        try: d = self.callbacks[channel]
+    def _fetch_callback_list(self, stream, id=-1):
+        try: d = self.callbacks[stream]
         except KeyError:
-            raise ValueError(channel)
-        if isinstance(d,dict) and symbol is None:
-            raise TypeError('{} requires symbol to be specified'.format(channel))
-        elif isinstance(d,list) and symbol is not None:
-            raise TypeError('{} doesn\'t accept symbol'.format(channel))
-        if symbol is None:
+            raise ValueError(stream)
+        if isinstance(d,dict) and id is None:
+            raise TypeError('{} requires id to be specified'.format(stream))
+        elif isinstance(d,list) and id is not None:
+            raise TypeError('{} doesn\'t accept id'.format(stream))
+        if id is None:
             return d
-        if symbol not in d:
-            d[symbol] = []
-        return d[symbol]
+        if id not in d:
+            d[id] = []
+        return d[id]
     
     
-    def add_callback(self, cb, channel, symbol=None):
-        l = self._fetch_callback_list(channel, symbol)
+    def add_callback(self, cb, stream, id=-1):
+        """
+        :param cb: A function accepting one argument.
+        :param stream: stream name
+        :param id: symbol, currency, (symbol, timeframe), order_id, -1
+        List of stream names:
+            ticker, orderbook, ohlcv, trades, order, fill, balance, position
+        Id -1 receives all updates of the stream in list form: [update1, ..., updateN]
+        See method .wait_on docstring for stream + id combination examples.
+        """
+        l = self._fetch_callback_list(stream, id)
         l.append(cb)
     
     
-    def remove_callback(self, cb, channel, symbol=None):
-        l = self._fetch_callback_list(channel, symbol)
+    def remove_callback(self, cb, stream, id=-1):
+        l = self._fetch_callback_list(stream, id)
         try: l.remove(cb)
         except ValueError: 
             return None
@@ -855,27 +941,28 @@ class ExchangeSocket(WSClient):
             return True
     
     
-    def exec_callbacks(self, data, channel, symbol=None):
-        callbacks = self._fetch_callback_list(channel, symbol)
+    def exec_callbacks(self, data, stream, id=-1, copy=True):
+        callbacks = self._fetch_callback_list(stream, id)
         for cb in callbacks:
-            cb(data)
+            _data = data if not copy else _copy.deepcopy(data)
+            cb(_data)
     
     
     def fetch_data(self, s, prev_state):
         #If subsciption has been enabled, fetch all data
         # (except for orderbook, that is handled by .orderbook_maintainer)
-        _map2 = {'all_tickers': 'fetch_tickers',
-                 'ticker': 'fetch_ticker',
-                 'trades': 'fetch_trades',
-                 'ohlcv': 'fetch_ohlcv',
-                 'account': 'fetch_balance',}
+        _map = {'all_tickers': 'fetch_tickers',
+                'ticker': 'fetch_ticker',
+                'trades': 'fetch_trades',
+                'ohlcv': 'fetch_ohlcv',
+                'account': 'fetch_balance',}
         
-        attr = _map2.get(s.channel)
+        attr = _map.get(s.channel)
         if (s.state and not prev_state and
                 attr is not None and self.has_got(attr)):
             corofunc = getattr(self, attr)
             tlogger.debug('Fetching data for {}'.format(s))
-            call_via_loop(corofunc, s.id_tuple[1:2], loop=self.loop)
+            call_via_loop(corofunc, args=s.id_tuple[1:], loop=self.loop)
     
     
     def delete_data(self, s, prev_state):
@@ -885,9 +972,10 @@ class ExchangeSocket(WSClient):
             'account': ['balances','positions'],
             'orderbook': ['orderbooks'],
         }
-        containers = [getattr(self, x) for x in _map.get(s.channel, [s.channel])]
+        attrs = _map.get(s.channel, [s.channel])
         
-        for container in containers:
+        for attr in attrs:
+            container = getattr(self, attr)
             #All containers are assumed to be dicts or lists
             if isinstance(container, (list,deque)):
                 while True:
@@ -896,9 +984,16 @@ class ExchangeSocket(WSClient):
                         break
             elif not isinstance(container, dict):
                 pass
+            # ('account',) / ('all_tickers',)
             elif len(s.id_tuple) == 1:
-                for x in list(container.keys()):
-                    del container[x]
+                if attr != 'balances':
+                    container.clear()
+                else:
+                    for k in list(container.keys()):
+                        if k in ('free','used','total'):
+                            container[k].clear()
+                        else:
+                            del container[k]
             else:
                 delete = True
                 for key in s.id_tuple[1:-1]:
@@ -1076,8 +1171,8 @@ class ExchangeSocket(WSClient):
         return balances
     
     
-    async def fetch_order_book(self, symbol, *limit): #limit=None,params={}
-        """This method must be overriden if .orderbook_maintainer is .orderbook_maintainer
+    async def fetch_order_book(self, symbol, *limit):
+        """This method must be overriden if .orderbook_maintainer
            is used to keep the nonce in sync AND the .api.fetch_order_book doesn't return
            orderbook in correct format (i.e. doesn't include (correct!) nonce value under "nonce").
            Some exchanges may offer websocket method for retrieving the full orderbook."""
@@ -1125,8 +1220,13 @@ class ExchangeSocket(WSClient):
         orders = await self.api.fetch_open_orders(symbol, since, limit, params)
         for o in orders:
             try:
+                keywords = ['id','symbol','side','price','amount','timestamp',
+                            'remaining','filled','datetime','type','stop']
+                params = {k:v for k,v in o.items() if k not in keywords}
                 self.add_order(o['id'], o['symbol'], o['side'], o['price'], o['amount'],
-                               o.get('timestamp'), remaining=o.get('remaining'), filled=o.get('filled'))
+                               o.get('timestamp'), remaining=o.get('remaining'), filled=o.get('filled'),
+                               type=o.get('type'), datetime=o.get('datetime'), stop=o.get('stop'),
+                               params=params)
             except Exception as e:
                 logger.exception(e)
         return orders
@@ -1146,8 +1246,9 @@ class ExchangeSocket(WSClient):
             try: self.orders[r['id']]
             except KeyError:
                 kw = {'id': r['id'], 'symbol': symbol,
-                      'side': side, 'price': price, 
-                      'amount': amount,'timestamp': int(time.time()*1000)}
+                      'side': side, 'price': price,
+                      'type': type, 'amount': amount,
+                      'timestamp': int(time.time()*1000)}
                 self.add_order(**dict(kw,**parsed.get('order',{})))
             for f in parsed.get('fills',[]):
                 self.add_fill(**f)
@@ -1183,6 +1284,14 @@ class ExchangeSocket(WSClient):
     
     
     async def edit_order(self, id, symbol, *args):
+        # amount
+        if len(args) >= 3:
+            args = args[:2] + (self.api.round_amount(symbol, args[2]),) + args[3:]
+        # price
+        if len(args) >= 4:
+            if args[3] is not None:
+                args = args[:3] + (self.api.round_price(symbol, args[3], args[1]),) + args[4:]
+        
         return await self.api.edit_order(id, symbol, *args)
     
     
@@ -1215,18 +1324,24 @@ class ExchangeSocket(WSClient):
         """
         Wait on a stream event.
         :param stream: the stream name
-        :param id: symbol, currency, order_id, -1
+        :param id: symbol, currency, (symbol, timeframe), order_id, -1
         List of stream names:
             ticker, orderbook, ohlcv, trades, order, fill, balance, position
+        Id -1 waits till *any* update under the stream occurs.
         Examples:
             wait_on('orderbook', -1) -> waits till any orderbook is updated
             wait_on('orderbook', 'BTC/USDT') -> till orderbook BTC/USDT is updated
+            wait_on('ohlcv', -1) -> till any ohlcv is updated
+            wait_on('ohlcv', symbol) -> till ohlcv BTC/USDT with any timeframe is updated
+            wait_on('ohlcv', (symbol, timeframe)) -> till ohlcv BTC/USDT with specific timeframe is updated
             wait_on('order', -1) -> till any order is updated
             wait_on('order', 'a8f1e2dc52e9c') -> till order with id 'a8f1e2dc52e9c' is updated
+            wait_on('order', 'BTC/USDT') -> till any order with symbol 'BTC/USDT' is updated
             wait_on('balance', -1) -> till any balance is updated
             wait_on('balance', 'BTC') -> till BTC balance is updated
             wait_on('fill', -1) -> till any fill is added
             wait_on('fill', 'a8f1e2dc52e9c') -> till a fill of order 'a8f1e2dc52e9c' is added
+            wait_on('fill', 'BTC/USDT') -> till any fill with symbol 'BTC/USDT' is added
         """
         event = self.events[stream][id]
         await event.wait()
@@ -1353,18 +1468,32 @@ class ExchangeSocket(WSClient):
     
     
     @staticmethod
-    def dict_update(new, prev, info=True):
-        """Returns a copy of prev dict with added/overwritten values from new.
+    def dict_update(new, prev, info=True, copy=False):
+        """Returns (a copy of) prev dict with added/overwritten values from new.
            If `info`==True, then does the same for new['info'] ~ prev['info']"""
         if not isinstance(prev, dict) or not isinstance(new, dict):
-            return _copy.copy(new)
+            return _copy.copy(new) if copy else new
         else:
             prev_info = prev.get('info')
-            new_dict = dict(prev, **new)
+            if copy:
+                new_dict = dict(prev, **new)
+            else:
+                new_dict = prev
+                new_dict.update(new)
             if info and isinstance(prev_info, dict) and 'info' in new and isinstance(new['info'], dict):
-                new_dict['info'] = ExchangeSocket.dict_update(new['info'], prev_info, False)
+                new_dict['info'] = ExchangeSocket.dict_update(new['info'], prev_info, False, copy)
             return new_dict
     
+    
+    @staticmethod
+    def dict_clear(d, info=True):
+        had_info = 'info' in d
+        prev_info = d.get('info')
+        d.clear()
+        if info and had_info and isinstance(prev_info, dict):
+            prev_info.clear()
+            d['info'] = prev_info
+        return d
     
     @staticmethod
     def dict_changes(new, prev):

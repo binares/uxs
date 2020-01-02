@@ -208,9 +208,12 @@ class bittrex(ExchangeSocket):
         self.orderbook_maintainer.send_update(d)
     
     
-    async def fetch_order_book(self, symbol): #limit=None,params={}
-        id = 'fetch_order_book+{}'.format(symbol)
-        return await self.send({'_': 'fetch_order_book', 'symbol': symbol}, True, id=id)
+    async def fetch_order_book(self, symbol, *limit):
+        if self.is_active():
+            id = 'fetch_order_book+{}'.format(symbol)
+            return await self.send({'_': 'fetch_order_book', 'symbol': symbol}, True, id=id)
+        else:
+            return await super().fetch_order_book(symbol, *limit)
     
     
     def on_query_summary_state(self, r):
@@ -280,15 +283,19 @@ class bittrex(ExchangeSocket):
                 'percentage': None, 
                 'average': None,
                 'baseVolume': x['V'],
-                'quoteVolume': x['m'], 
+                'quoteVolume': x['m'],
+                'info': x,
                 }]
             )
         if activate:
             self.change_subscription_state({'_': 'all_tickers'}, 1)
             
     
-    async def fetch_tickers(self): #symbols=None,params={}
-        return await self.send({'_': 'fetch_tickers'}, True, id='fetch_tickers')
+    async def fetch_tickers(self):
+        if self.is_active():
+            return await self.send({'_': 'fetch_tickers'}, True, id='fetch_tickers')
+        else:
+            return await super().fetch_tickers()
             
             
     def on_order(self, e):
@@ -341,15 +348,12 @@ class bittrex(ExchangeSocket):
                   
         is_open = o['i']
         if not is_open:
-            remaining = 0
+            remaining = 0.0
         #print('on_order:',id,symbol,side,price,amount,timestamp,remaining,filled,payout)
-        try: self.orders[id]
-        except ValueError:
-            self.add_order(id, symbol, side, price, amount, timestamp, remaining, filled, payout)
-        else:
-            self.update_order(id, remaining, filled, payout)
-            
-        self.change_subscription_state({'_': 'account'}, 1)
+        # If already exists then it will update it
+        self.add_order(id=id, symbol=symbol, side=side, price=price, amount=amount,
+                       timestamp=timestamp, remaining=remaining, filled=filled,
+                       payout=payout, params={'info': o}, enable_sub=True)
         
         
     def on_balance(self, e):
@@ -372,9 +376,7 @@ class bittrex(ExchangeSocket):
         cy = self.convert_cy(d['c'],0)
         free = d['a']
         used = d['b']- free
-        self.update_balances([(cy,free,used)])
-        
-        self.change_subscription_state({'_': 'account'}, 1)
+        self.update_balances([{'cy': cy, 'free': free, 'used': used, 'info': d}], enable_sub=True)
     
     
     def encode(self, rq, sub=None):

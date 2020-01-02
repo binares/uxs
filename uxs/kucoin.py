@@ -34,7 +34,7 @@ class kucoin(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'delta': False},
+        'balance': {'_': True},
         'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
                         'high': False, 'low': False, 'open': False,' close': True, 'previousClose': False,
                         'change': False, 'percentage': False, 'average': False, 'vwap': False,
@@ -116,7 +116,7 @@ class kucoin(ExchangeSocket):
             'bid': bid, 'bidVolume': bidVolume,'ask': ask, 'askVolume': askVolume,
             'baseVolume': None, 'quoteVolume': None,
             'previousClose': None, 'change': None, 'percentage': None, 
-            'average': None, 'vwap': None,}])
+            'average': None, 'vwap': None, 'info': d}])
             
             
     async def fetch_order_book(self, symbol):
@@ -140,7 +140,7 @@ class kucoin(ExchangeSocket):
         return {
             'symbol': symbol, 'bids': ob['bids'], 'asks': ob['asks'],
             'timestamp': ob['timestamp'], 'datetime': ob['datetime'],
-            'nonce': nonce,
+            'nonce': nonce, 'info': response,
         }  
         
         
@@ -198,7 +198,10 @@ class kucoin(ExchangeSocket):
         data = r['data']
         #print(data)
         cy = self.convert_cy(data['currency'], 0)
-        balances_formatted = [(cy, float(data['available']), float(data['hold']))]
+        balances_formatted = [{'cy': cy,
+                               'free': float(data['available']),
+                               'used': float(data['hold']),
+                               'info': data}]
         self.update_balances(balances_formatted)
         
         
@@ -243,15 +246,14 @@ class kucoin(ExchangeSocket):
         amount = float(d['size'])
         price = float(d['price'])
         side = d['side']
-        fee_mp = takerOrMaker #0.002
         
         if order is not None:
             self.add_fill(id=d['tradeId'], symbol=symbol, side=side, price=price, amount=amount,
-                          takerOrMaker=takerOrMaker, timestamp=ts, order=order['id'])
+                          takerOrMaker=takerOrMaker, timestamp=ts, order=order['id'], params={'info': d})
         
         if is_subbed_to_trades:
             e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=d['tradeId'],
-                                     price=price, amount=amount, side=side)
+                                     price=price, amount=amount, side=side, info=d)
             self.update_trades([{'symbol': symbol, 'trades': [e]}])
         
         
