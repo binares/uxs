@@ -809,16 +809,16 @@ class bitmex(ExchangeSocket):
         elif sub is False:
             op = 'unsubscribe'
         
-        extent = params.get('extent')
+        limit = params.get('limit')
         throttled = params.get('throttled')
         if throttled is None:
             throttled = True
         
-        if extent is None or extent > 25:
+        if limit is None or limit > 25:
             orderbook = ['orderBookL2:<symbol>']
-        elif extent <= 10 and throttled:
+        elif limit <= 10 and throttled:
             orderbook = ['orderBook10:<symbol>']
-        elif extent <= 25:
+        elif limit <= 25:
             orderbook = ['orderBookL2_25:<symbol>']
         
         channel_ids = self.channel_ids[channel] if channel != 'orderbook' else orderbook

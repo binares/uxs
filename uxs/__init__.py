@@ -25,7 +25,7 @@ from uxs.binancefu import binancefu
 from uxs.bitmex import bitmex
 from uxs.bittrex import bittrex
 from uxs.hitbtc import hitbtc
-#from uxs.kraken import kraken
+from uxs.kraken import kraken
 from uxs.kucoin import kucoin
 from uxs.poloniex import poloniex
 

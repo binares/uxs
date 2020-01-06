@@ -144,9 +144,9 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
     
     _symbols = symbols if not merge else [symbols]
     for symbol in _symbols:
-        params = {'_': 'orderbook', 'symbol': symbol}
-        if sub and unsub: asyncio.ensure_future(_unsub(params, unsub, merge))
-        if sub and resub: asyncio.ensure_future(_resub(params, resub, merge))
+        params2 = dict({'_': 'orderbook', 'symbol': symbol}, **params)
+        if sub and unsub: asyncio.ensure_future(_unsub(params2, unsub, merge))
+        if sub and resub: asyncio.ensure_future(_resub(params2, resub, merge))
         
     if _print == 'changes':
         xs.add_callback(_print_ob_changes, 'orderbook', symbols[0])
@@ -359,12 +359,12 @@ def main():
         
     if ob_param:
         ob_symbols, ob_merge = _get_items(ob_param)
-        extent = p.get('ob_extent')
+        ob_limit = p.get('ob_limit')
         ob_params = {}
-        if extent:
-            try: extent = int(extent)
+        if ob_limit:
+            try: ob_limit = int(ob_limit)
             except ValueError: pass
-            ob_params['extent'] = extent
+            ob_params['limit'] = ob_limit
         if 'changes' not in p:
             ob_print = 4
         else:

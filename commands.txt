@@ -19,13 +19,21 @@ python -m uxs.test_xc hitbtc order+
 python -m uxs.test_xc hitbtc order+ETH/BTC,0.01,0.018501,buy
 python -m uxs.test_xc hitbtc order+ETH/BTC,0.01,0.01,sell
 python -m uxs.test_xc hitbtc ticker=ETH/BTC,XRP/USDT ob=XRP/USDT order+ u r s
+python -m uxs.test_xc kraken ticker=BTC/EUR,XRP/EUR m u r d
+python -m uxs.test_xc kraken ob=BTC/EUR changes d
+python -m uxs.test_xc kraken ob=BTC/EUR changes ob_limit=20 u r d
+python -m uxs.test_xc kraken ohlcv=BTC/EUR u r d
+python -m uxs.test_xc kraken trades=BTC/EUR d
+python -m uxs.test_xc kraken order test d
+python -m uxs.test_xc kraken order+-XRP/EUR,32.8,0.26,sell
+python -m uxs.test_xc kraken "order-INSERT_ORDER_ID||XRP/EUR" test d
 python -m uxs.test_xc kucoin ticker=XRP/BTC ob order -unsub 6 -resub 2 s
 python -m uxs.test_xc poloniex tickers u r s
 python -m uxs.test_xc poloniex ob order u r s
 python -m uxs.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d
 python -m uxs.test_xc bitmex ob=BTC/USD d
-python -m uxs.test_xc bitmex ob=BTC/USD ob_extent=10 d
-python -m uxs.test_xc bitmex ob=BTC/USD ob_extent=25 d
+python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=10 d
+python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=25 d
 python -m uxs.test_xc bitmex tickers d
 python -m uxs.test_xc binancefu order position d
 python -m uxs.test_xc binancefu ob=BTC/USDT d
