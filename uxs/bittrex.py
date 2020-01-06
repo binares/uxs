@@ -47,7 +47,6 @@ class bittrex(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'_': True},
         'all_tickers': {
             'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
             'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False, 
@@ -63,6 +62,7 @@ class bittrex(ExchangeSocket):
         #'feed': {'balance':True}
     }
     has['fetch_tickers'].update(has['all_tickers'])
+    has['fetch_ticker'] = has['all_tickers'].copy()
     connection_defaults = {
         'signalr': True,
         'hub_name': 'c2',
@@ -75,6 +75,11 @@ class bittrex(ExchangeSocket):
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
         'update_payout_on_fill': False,
+    }
+    symbol = {
+        'quote_ids': ['BTC','ETH','USDT','USD'],
+        'sep': '-',
+        'startswith': 'quote',
     }
     
     
@@ -412,15 +417,3 @@ class bittrex(ExchangeSocket):
             sig = sign(self.secret, out[1], 'sha512')
             out = ['Authenticate', self.apiKey, sig]
         return out
-        
-        
-    def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt 1: ccxt to ex
-        try: return super().convert_symbol(symbol, direction)
-        except KeyError: pass
-        
-        if not direction:
-            return '/'.join(self.convert_cy(x,0) for x in symbol.split('-')[::-1])
-        else:
-            return '-'.join(self.convert_cy(x,1) for x in symbol.split('/')[::-1])
-    

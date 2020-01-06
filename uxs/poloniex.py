@@ -84,6 +84,11 @@ class poloniex(ExchangeSocket):
         'update_payout_on_fill': True,
         'update_remaining_on_fill': False,
     }
+    symbol = {
+        'quote_ids': ['BTC', 'USDT', 'ETH', 'USDC', 'XMR', 'LTC'],
+        'sep': '_',
+        'startswith': 'quote',
+    }
     
     
     def handle(self, response):
@@ -224,7 +229,8 @@ class poloniex(ExchangeSocket):
         try: self.orders[oid]
         except KeyError:
             #set filled to 0 because filled (and payout) is updated by trades
-            self.add_order(oid, symbol, side, price, amount, ts, remaining, 0)
+            self.add_order(id=oid, symbol=symbol, side=side, price=price, amount=amount,
+                           timestamp=ts, remaining=remaining, filled=0)
         else:
             self.update_order(oid, remaining)
     
@@ -326,16 +332,6 @@ class poloniex(ExchangeSocket):
         out['payload'] = "nonce={}".format(nonce_ms())
         out['sign'] = sign(self.secret, out['payload'], 'sha512')
         return out
-    
-    def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt 1: ccxt to ex
-        try: return super().convert_symbol(symbol, direction)
-        except KeyError: pass
-        
-        if not direction:
-            return '/'.join(self.convert_cy(x,0) for x in symbol.split('_')[::-1])
-        else:
-            return '_'.join(self.convert_cy(x,1) for x in symbol.split('/')[::-1])
     
     def id_to_cy(self, id):
         try: return next(x for x,y in self.api.currencies.items() if y['info'].get('id')==id)

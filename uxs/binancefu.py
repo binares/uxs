@@ -30,8 +30,10 @@ class binancefu(binance):
     }
     has['all_tickers'] = has['ticker'].copy()
     
-    message_id_keyword = 'id'
-    
+    message = {
+        'id': {'key': 'id'},
+        'error': {},
+    }
     
     def on_futures_account(self, r):
         """{

@@ -27,26 +27,10 @@ class hitbtc(ExchangeSocket):
         'orderbook': {
             'auto_activate': False,
         },
-        # fetch_balance, newOrder and cancelOrder will evoke
-        # socket authentication, if not already done so
-        'fetch_balance': {
-            'type': 'fetch',
-            'required': [],
-            'is_private': True,
-        },
-        'newOrder': {
-            'type': 'post',
-            'required': ['symbol','side','price','quantity'],
-            'is_private': True,
-        },
-        'cancelOrder': {
-            'type': 'post',
-            'required': ['clientOrderId'],
-            'is_private': True,
-        },
+        # fetch_balance, create_order, edit_order and cancel_order will
+        # evoke socket authentication, if not already done so
     }
     has = {
-        'balance': {'_': False},
         'all_tickers': False,
         'ticker': {
             'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
@@ -54,24 +38,26 @@ class hitbtc(ExchangeSocket):
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True},
         'orderbook': True,
+        #'ohlcv': '?',
+        #'trades': True, # yet to be implemented
         'account': {'balance': False, 'order': True, 'fill': True},
         'fetch_tickers': {
             'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False, 
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True},
-        'fetch_ticker': True,
-        'fetch_order_book': True,
         'fetch_balance': {'ws': True},
-        #'feed': {'balance':True}
+        'create_order': {'ws': True},
+        'cancel_order': {'ws': True},
+        #'edit_order': {'ws': True},
     }
+    has['fetch_ticker'] = has['fetch_tickers'].copy()
     connection_defaults = {
         'subscription_push_rate_limit': 0.12,
         'max_subscriptions': 95,
         'rate_limit': (1, 0.12),
     }
-    has['fetch_ticker'] = has['fetch_tickers'].copy()
-    message_id_keyword = 'id'
+    message = {'id': {'key': 'id'}}
     ob = {
         'force_create': None,
         'receives_snapshot': True,
@@ -81,6 +67,12 @@ class hitbtc(ExchangeSocket):
         'update_filled_on_fill': False,
         'update_payout_on_fill': True,
     }
+    symbol = {
+        'quote_ids': ['BTC','ETH','DAI','TUSD','GUSD','USDC',
+                      'USDT','USD','EURS','EOS','EOSDT','PAX'],
+        'sep': '',
+    }
+    
     
     def handle(self, R):
         """:type r: Response"""
@@ -89,7 +81,7 @@ class hitbtc(ExchangeSocket):
         if 'method' in r:
             method = r['method']
             if method in ('snapshotOrderbook','updateOrderbook'):
-                self.on_orderbook(r)
+                self.on_orderbook2(r)
             elif method == 'activeOrders':
                 for item in r['params']: 
                     self.on_order(item)
@@ -120,14 +112,16 @@ class hitbtc(ExchangeSocket):
             logger2.error(r)
         else:
             logger2.error('{} - unknown response: {}'.format(self.name,r))
-            
+    
+    
     def check_errors(self, r):
-        try: re = r['error']
-        except KeyError: return
-        ss = self.api.safe_string
-        dict = {x: ss(re,x,'') for x in ('message','description','code')}
-        msg = '{message}; {description}; code: {code}'.format(**dict)
+        if 'error' not in r:
+            return
+        e = r['error']
+        d = {x: self.api.safe_string(e,x,'') for x in ('message','description','code')}
+        msg = '{message}; {description}; code: {code}'.format(**d)
         raise ExchangeSocketError(msg)
+    
     
     def on_ticker(self, r):
         """{
@@ -149,7 +143,8 @@ class hitbtc(ExchangeSocket):
         d['symbol'] = self.convert_symbol(d['symbol'], 0)
         e = self.api.ticker_entry(**d)
         self.update_tickers([e])
-
+    
+    
     def on_orderbook(self, r):
         ob = self._prepare_orderbook(r)
         nonce_0 = self.orderbooks.get(ob['symbol'],{}).get('nonce')
@@ -178,14 +173,16 @@ class hitbtc(ExchangeSocket):
             self.orderbook_maintainer._change_status(ob['symbol'], 0)
             self.unsubscribe_to_orderbook(ob['symbol'])
             self.subscribe_to_orderbook(ob['symbol'])
-            
+    
+    
     def on_orderbook2(self, r):
         ob = self._prepare_orderbook(r)
         if r['method'] == 'snapshotOrderbook':
             self.orderbook_maintainer.send_orderbook(ob)
         else:
             self.orderbook_maintainer.send_update(ob)
-            
+    
+    
     def _prepare_orderbook(self, r):
         decode = lambda branch: [[float(x['price']),float(x['size'])] for x in branch]
         p = r['params']
@@ -196,6 +193,7 @@ class hitbtc(ExchangeSocket):
         ob['nonce'] = p['sequence']
         return ob
     
+    
     def _deal_with_BitcoinCashUSDT(self, ob):
         try: bid0 = self.orderbooks['Bitcoin Cash/USDT']['bids'][0][0]
         except IndexError: return ob
@@ -205,6 +203,7 @@ class hitbtc(ExchangeSocket):
             min_price = bid0*0.95
         ob['bids'] = [x for x in ob['bid'] if x[0]>min_price]
         return ob
+    
     
     def on_balance(self, r):
         #print('Updating balances')
@@ -218,7 +217,8 @@ class hitbtc(ExchangeSocket):
             } for x in result
         ]
         self.update_balances(balances_formatted)
-        
+    
+    
     def on_order(self, rr):
         tlogger.debug(rr)
         #rr = r['result']
@@ -268,86 +268,70 @@ class hitbtc(ExchangeSocket):
             fee = float(rr['tradeFee'])
             self.add_fill(id=tid, symbol=symbol, side=side, price=tprice, amount=tamount,
                           timestamp=tts, order=id, fee=fee, params={'info': rr.copy()})
-            
-    async def create_order(self, symbol, type, side, amount, price=None, params={}):
-        if not self.is_active():
-            return await super().create_order(symbol, type, side, amount, price, params)
-        # side: buy/sell
-        direction = as_direction(side)
-        side = ['sell','buy'][direction]
-        order_id = _nonce(32,uppers=False)
-        amount = self.api.round_amount(symbol, amount)
-        if price is not None:
-            price = self.api.round_price(symbol, price, side)
-        out = dict(params,**{
-            "_": "newOrder",
-            "clientOrderId": order_id,
-            "symbol": self.convert_symbol(symbol,1),
-            "side": side,
-            "type": type,
-            "quantity": str(amount)
-          })
-        if type in ('limit','stopLimit'):
-            out['price'] = str(price)
-        r = (await self.send(out,True)).data
-        self.check_errors(r)
-        o = deepcopy(self.orders[order_id])
-        return o #{'id': order_id, 'price': o['price'], 'amount': o['amount']}
-        
-    async def cancel_order(self, id, symbol=None, params={}):
-        if not self.is_active():
-            return await super().cancel_order(id, symbol, params)
-        out = dict(params,**{
-            "_": "cancelOrder",
-            "clientOrderId": id,
-        })
-        r = (await self.send(out,True)).data
-        self.check_errors(r)
-        o = deepcopy(self.orders[id])
-        return o #{'id': id, 'price': o['price'], 'amount'}
+    
     
     # TODO: fetch_open_orders, edit_order
     # https://api.hitbtc.com/#socket-trading
+    
     
     async def fetch_balance(self):
         r = (await self.send({'_':'fetch_balance'},True)).data
         self.check_errors(r)
         return self.balances
     
+    
     def encode(self, request, sub=None):
-        config = request.params
-        channel = config['_']
+        p = request.params
+        channel = request.channel
         unsub = sub is False
-        params = {}
-        if channel == 'account':
-            method = 'subscribeReports' if not unsub else 'unsubscribeReports'
-        elif channel in ('orderbook','ticker','market'):
-            method = {'orderbook': 'subscribeOrderbook',
-                      'ticker': 'subscribeTicker',
-                      'trades': 'subscribeTrades'}[channel]
-            if unsub:
-                method = 'un'+method
-            #symbol=self.comma_separate(config['symbol'],self.convert_symbol)
-            symbol = self.convert_symbol(config['symbol'],1)
-            params = {'symbol': symbol}
-        elif channel == 'fetch_balance':
-            method = 'getTradingBalance'
-        else:
-            method = channel
-            params = {x:y for x,y in config.items() if x!='_'}
-            
-        uid = None
-        if channel in ('account','orderbook','ticker','market'):
-            #try: uid = self.sh.get_subscription_uid(config)
-            #except KeyError: pass
-            uid = request.uid
-        message_id = self.ip.generate_message_id(uid,unsub)
+        symbol = None if 'symbol' not in p else self.convert_symbol(p['symbol'], 1)
+        p_out = {}
         
-        req = {'method': method,
-               'params': params,
-               'id': message_id}
+        channel_ids = {
+            'account': 'subscribeReports',
+            'orderbook': 'subscribeOrderbook',
+            'ticker': 'subscribeTicker',
+            'trades': 'subscribeTrades',
+            'fetch_balance': 'getTradingBalance',
+            'create_order': 'newOrder',
+            'cancel_order': 'cancelOrder',
+        }
+        
+        method = channel_ids[channel]
+        if unsub:
+            method = 'un' + method
+        
+        if symbol is not None and channel != 'cancel_order':
+            p_out['symbol'] = symbol
+        
+        if channel == 'create_order':
+            order_id = _nonce(32, uppers=False)        
+            p_out.update({
+                'clientOrderId': order_id,
+                'side': p['side'],
+                'type': p['type'],
+                'quantity': str(p['amount']),
+              })
+            if type in ('limit','stopLimit'):
+                p_out['price'] = str(p['price'])
+        
+        if channel == 'cancel_order':
+            p_out['clientOrderId'] = p['id']
+        
+        uid = None
+        if channel in ('account','orderbook','ticker','trades'):
+            uid = request.uid
+        message_id = self.ip.generate_message_id(uid, unsub)
+        
+        req = {
+            'method': method,
+            'params': p_out,
+            'id': message_id
+        }
+        
         return (req, message_id)
-
+    
+    
     def sign(self, out=None):
         nonce = _nonce(15)
         sig = sign(self.secret,nonce,'sha256')
@@ -360,16 +344,3 @@ class hitbtc(ExchangeSocket):
             "signature": sig
           }
         }
-        
-    def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt #1: ccxt to ex
-        try: return super().convert_symbol(symbol, direction)
-        except KeyError: pass
-        
-        if not direction:
-            quotes = ['BTC','ETH','DAI','TUSD','GUSD','USDC','USDT',
-                      'USD','EURS','EOS','EOSDT','PAX']
-            ln = next(len(q) for q in quotes if symbol.endswith(q))
-            return '/'.join([self.convert_cy(x,0) for x in (symbol[:-ln],symbol[-ln:])])
-        else:
-            return ''.join([self.convert_cy(x,1) for x in symbol.split('/')])

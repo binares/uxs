@@ -10,7 +10,7 @@ dt = datetime.datetime
 td = datetime.timedelta
 
 from ..auth import get_auth2, EXTRA_TOKEN_KEYWORDS
-from ..ccxt import get_exchange
+from ..ccxt import get_exchange, _ccxtWrapper
 from .. import poll
 from .orderbook import OrderbookMaintainer
 from .errors import (ExchangeSocketError, ConnectionLimit)
@@ -21,6 +21,8 @@ from wsclient import WSClient
 
 import fons.log
 from fons.aio import call_via_loop
+from fons.dict_ops import deep_update
+from fons.func import get_arg_count
 from fons.iter import unique, sequence_insert
 
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
@@ -28,18 +30,26 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 
 class ExchangeSocket(WSClient):
-    """Override these methods: handle, encode, auth
-       Some exchanges provide socket methods: create_order, cancel_order, fetch_balance
-       And attributes of your choosing."""
-       
+    """
+    Override these methods: handle, encode, sign, setup_test_env
+    May want to override: on_start, extract_message_id, extract_errors, create_error_args
+    And attributes of your choosing.
+    """
+    
+    # Class name
     exchange = None
+    
+    # If True, .setup_test_env(config) will be called on init
+    test = False
     
     # Used on .subscribe_to_{x} , raises ValueError when doesn't have
     has = dict.fromkeys([
          'all_tickers', 'ticker', 'orderbook', 'trades',
          'ohlcv', 'account', 'match', 'balance',
-         'fetch_balance', 'fetch_tickers', 'fetch_ticker',
-         'fetch_order_book', 'fetch_ohlcv',
+         'fetch_tickers', 'fetch_ticker', 'fetch_order_book',
+         'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
+         'fetch_orders', 'fetch_order', 'fetch_open_orders',
+         'create_order', 'edit_order', 'cancel_order',
         ], False)
     
     channel_defaults = {
@@ -49,6 +59,7 @@ class ExchangeSocket(WSClient):
     # If 'is_private' is set to True, .sign() is called on the specific output to server
     # if 'ubsub' is set to False, .remove_subscription raises ExchangeSocketError on that channel
     channels = {
+        # Subscriptions
         'account': {
             'required': [],
             'is_private': True,
@@ -80,8 +91,99 @@ class ExchangeSocket(WSClient):
         'ohlcv': {
             'delete_data_on_unsub': False,
             'required': ['symbol','timeframe'],
-        }
+        },
+        # Fetch
+        'fetch_tickers': {
+            'type': 'fetch',
+            'required': ['symbols'],
+            'is_private': False,
+        },
+        'fetch_ticker': {
+            'type': 'fetch',
+            'required': ['symbol'],
+            'is_private': False,
+        },
+        'fetch_order_book': {
+            'type': 'fetch',
+            'required': ['symbol','limit'],
+            'is_private': False,
+        },
+        'fetch_ohlcv': {
+            'type': 'fetch',
+            'required': ['symbol','timeframe'],
+            'is_private': False,
+        },
+        'fetch_trades': {
+            'type': 'fetch',
+            'required': ['symbol'],
+            'is_private': False,
+        },
+        'fetch_balance': {
+            'type': 'fetch',
+            'required': [],
+            'is_private': True,
+        },
+        'fetch_order': {
+            'type': 'fetch',
+            'required': ['id','symbol'],
+            'is_private': True,
+        },
+        'fetch_orders': {
+            'type': 'fetch',
+            'required': ['symbol', 'since', 'limit'],
+            'is_private': True,
+        },
+        'fetch_open_orders': {
+            'type': 'fetch',
+            'required': ['symbol','since', 'limit'],
+            'is_private': True,
+        },
+        'fetch_my_trades': {
+            'type': 'fetch',
+            'required': ['symbol', 'since', 'limit'],
+            'is_private': True,
+        },
+        # Post
+        'create_order': {
+            'type': 'post',
+            'required': ['symbol','type','side','amount','price'],
+            'is_private': True,
+        },
+        'edit_order': {
+            'type': 'post',
+            'required': ['id','symbol','type','side','amount','price'],
+            'is_private': True,
+        },
+        'cancel_order': {
+            'type': 'post',
+            'required': ['id','symbol'],
+            'is_private': True,
+        },
     }
+    ORDER_KEYWORDS = ('id', 'symbol', 'side', 'price', 'amount', 'timestamp', 
+                      'remaining', 'filled', 'payout', 'datetime',
+                      'type', 'stop',)
+    FILL_KEYWORDS = ('id', 'symbol', 'side', 'price', 'amount', 'timestamp',
+                     'datetime', 'order', 'type', 'payout',
+                     'fee', 'fee_rate', 'takerOrMaker', 'cost',)
+    symbol = {
+        # List of quote currency ids
+        'quote_ids': [],
+        # By which a symbol id is separated
+        'sep': '/',
+        # Usually symbol id starts with base, but some exchanges start with quote
+        'startswith': 'base',
+        # Default 'force' arg value in .convert_symbol()
+        'force': True,
+        # If KeyError occurs in .convert_symbol(), markets are automatically reloaded
+        # by this interval. Set it to `None` to not reload markets.
+        'reload_markets_on_KeyError': 150,
+    }
+    exceptions = {
+        '__default__': ccxt.ExchangeError,
+    }
+    # Optional, for reference in .encode
+    channel_ids = {}
     
     OrderbookMaintainer_cls = OrderbookMaintainer
     
@@ -114,11 +216,14 @@ class ExchangeSocket(WSClient):
         # automatically calculate it from each fill
         'update_payout_on_fill': True,
     }
-    
-    store_trades = 1000
-    store_ohlcv = 1000
+    trade = {
+        'sort_by': lambda x: int(x['id']),
+    }
+    store = {
+        'trades': 1000,
+        'ohlcv': 1000,
+    }
     match_is_subset_of_trades = False
-    reload_markets_on_keyerror = 150
     
     # since socket interpreter may clog due to high CPU usage,
     # maximum lengths for the queues are set, and if full,
@@ -148,26 +253,59 @@ class ExchangeSocket(WSClient):
          ['secret','api.secret'],
          ['auth_info','api._auth_info'],
          ['profile','api._profile_name'],
+         ['convert_currency','convert_cy'],
          ['fetch_orderbook','fetch_order_book'],
          ['subscribe_to_ob','subscribe_to_orderbook'],
          ['unsubscribe_to_ob','unsubscribe_to_orderbook'],
          ['sub_to_ob','subscribe_to_orderbook'],
-         ['unsub_to_ob','unsubscribe_to_orderbook'],]
+         ['unsub_to_ob','unsubscribe_to_orderbook'],
+         ['subscribe_to_L2','subscribe_to_orderbook'],
+         ['unsubscribe_to_L2','unsubscribe_to_orderbook'],
+         ['sub_to_L2','subscribe_to_orderbook'],
+         ['unsub_to_L2','unsubscribe_to_orderbook'],
+         ['fetchTicker','fetch_ticker'],
+         ['fetchTickers','fetch_tickers'],
+         ['fetchOrderBook','fetch_order_book'],
+         ['fetchOHLCV','fetch_ohlcv'],
+         ['fetchMyTrades','fetch_my_trades'],
+         ['fetchBalance','fetch_balance'],
+         ['fetchOrder','fetch_order'],
+         ['fetchOrders','fetch_orders'],
+         ['fetchMyTrades','fetch_my_trades'],
+         ['createOrder','create_order'],
+         ['editOrder','edit_order'],
+         ['cancelOrder','cancel_order'],]
     
-    __extend_attrs__ = ['fetch_limits','order','ob']
+    __extend_attrs__ = [
+        'fetch_limits',
+        'channel_ids',
+        'ob',
+        'order',
+        'store',
+        'symbol',
+        'trade',
+    ]
     __deepcopy_on_init__ = __extend_attrs__[:]
     
     
     def __init__(self, config={}):
-        
+        """:type api: _ccxtWrapper"""
         config = config.copy()
+        
+        is_test = 'test' in config and config['test'] or 'test' not in config and self.test
+        if is_test:
+            _args = [config] if get_arg_count(self.setup_test_env) else []
+            _config = self.setup_test_env(*_args)
+            if _config is not None:
+                deep_update(config, _config)
+        
         auth = _resolve_auth(self.exchange, config)
-        ccxt_config = config.pop('ccxt_config', {})
+        ccxt_config = config.pop('ccxt_config', {}).copy()
         load_cached_markets = config.pop('load_cached_markets', None)
         profile = config.pop('profile', None)
         
         super().__init__(config)
-        
+                
         self.api = get_exchange({
             'exchange':self.exchange,
             'async':True,
@@ -177,6 +315,9 @@ class ExchangeSocket(WSClient):
                 'profile': profile,},
             'auth': auth,
         })
+        
+        self._init_has()
+        self._init_exceptions()
         
         if getattr(self.api,'markets',None) is None:
             self.api.markets =  {}
@@ -242,6 +383,59 @@ class ExchangeSocket(WSClient):
                     self.events[x][cy] = asyncio.Event(loop=self.loop)
     
     
+    def _init_has(self):
+        def to_camelcase(x):
+            spl = x.split('_')
+            return spl[0].lower() + ''.join(w.lower().capitalize() for w in spl[1:])
+        
+        map = {'fetch_ohlcv': 'fetchOHLCV'}
+        
+        for x in ['fetch_tickers', 'fetch_ticker', 'fetch_order_book',
+                  'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
+                  'fetch_orders', 'fetch_order', 'fetch_open_orders',
+                  'create_order', 'edit_order', 'cancel_order']:
+            camel = map.get(x, to_camelcase(x))
+            ccxt_has = self.api.has[camel]
+            self_has = self.has_got(x)
+            any_has = ccxt_has or self_has
+            
+            if not isinstance(self.has[x], dict):
+                self.has[x] = {'_': any_has}
+            else:
+                self.has[x]['_'] = any_has
+            
+            if 'ccxt' not in self.has[x]:
+                self.has[x]['ccxt'] = ccxt_has
+            
+            self.has[camel] = _copy.deepcopy(self.has[x])
+        
+        for x in ['balance','order','fill','position']:
+            self.has[x] = self.has_got('account', x)
+    
+    
+    def _init_exceptions(self):
+        ccxt_e = self.api.exceptions
+        exclude = self.exceptions.get('__exclude__')
+        
+        if exclude is None:
+            pass
+        elif exclude in ('all', True):
+            ccxt_e = {}
+        elif hasattr(exclude, '__iter__'):
+            exclude = list(exclude) 
+            ccxt_e = {k: v for k,v in ccxt_e if k not in exclude}
+        
+        self.exceptions = dict(ccxt_e, **self.exceptions)
+    
+    
+    def setup_test_env(self, *args):
+        """
+        Modify the config, e.g. change channel urls to test urls.
+        If has args, config will be passed as first argument. In that case the config MAY be modified.
+        Or you can return a new dict that will deep extend the config."""
+        raise NotImplementedError
+    
+    
     async def on_start(self):
         #TODO: make _init_markets safe?
         if not getattr(self,'_init_markets_done',None):
@@ -251,6 +445,10 @@ class ExchangeSocket(WSClient):
     
     def notify_unknown(self, r, max_chars=500):
         print('{} - unknown response: {}'.format(self.name, str(r)[:max_chars]))
+    
+    
+    def check_errors(self, r):
+        pass
     
     
     def update_tickers(self, data, *, action='update', set_event=True, enable_sub=False):
@@ -436,7 +634,10 @@ class ExchangeSocket(WSClient):
         """
         cb_data = []
         if key is None:
-            key = lambda x: int(x['id'])
+            key = self.trade['sort_by']
+        if not hasattr(key, '__call__') and key is not None:
+            _key = key
+            key = lambda x: x[_key]
         
         for d in data:
             symbol = d['symbol']
@@ -444,7 +645,7 @@ class ExchangeSocket(WSClient):
             try: 
                 add_to = self.trades[symbol]
             except KeyError: 
-                add_to = self.trades[symbol] = deque(maxlen=self.store_trades)
+                add_to = self.trades[symbol] = deque(maxlen=self.store['trades'])
             
             trades = sorted(trades, key=key)
             sequence_insert(trades, add_to, key=key, duplicates='drop')
@@ -486,7 +687,7 @@ class ExchangeSocket(WSClient):
             try:
                 add_to = by_timeframes[timeframe]
             except KeyError:
-                add_to = by_timeframes[timeframe] = deque(maxlen=self.store_ohlcv)
+                add_to = by_timeframes[timeframe] = deque(maxlen=self.store['ohlcv'])
             
             ohlcv = sorted(ohlcv, key=key)
             sequence_insert(ohlcv, add_to, key=key, duplicates='drop')
@@ -643,7 +844,7 @@ class ExchangeSocket(WSClient):
         self.update_balances(data, **kw)
     
     
-    def add_order(self, id, symbol, side, price, amount, timestamp, 
+    def add_order(self, id, symbol, side, amount, price=None, timestamp=None, 
                   remaining=None, filled=None, payout=0, datetime=None,
                   type='limit', stop=None, params={}, *, set_event=True,
                   enable_sub=False):
@@ -653,6 +854,9 @@ class ExchangeSocket(WSClient):
             filled = amount - remaining
         
         datetime, timestamp = resolve_times([datetime, timestamp])
+        
+        if price == 0:
+            price = None
         
         if id in self.orders:
             params = dict({'type': type, 'side': side, 'price': price,
@@ -705,12 +909,38 @@ class ExchangeSocket(WSClient):
             self.unprocessed_fills.pop(id)
     
     
+    def add_order_from_dict(self, d, *, set_event=True, enable_sub=False, drop=None):
+        if d['id'] in self.orders:
+            return self.update_order_from_dict(d, set_event=set_event,
+                                               enable_sub=enable_sub, drop=drop)
+        if drop is not None:
+            d = self.drop(d, drop)
+        kw = {k: d[k] for k in self.ORDER_KEYWORDS if k in d}
+        params = {k: d[k] for k in d if k not in self.ORDER_KEYWORDS}
+        
+        self.add_order(**kw, params=params, set_event=set_event, enable_sub=enable_sub)
+    
+    
+    def update_order_from_dict(self, d, *, set_event=True, enable_sub=False, drop=None):
+        if drop is not None:
+            d = self.drop(d, drop)
+        KEYWORDS = ['id','remaining','filled','payout']
+        kw = {k: d[k] for k in KEYWORDS if k in d}
+        params = {k: d[k] for k in d if k not in KEYWORDS}
+        
+        self.update_order(**kw, params=params, set_event=set_event, enable_sub=enable_sub)
+    
+    
     def update_order(self, id, remaining=None, filled=None, payout=None, params={}, *,
                      set_event=True, enable_sub=False):
         try: o = self.orders[id]
         except KeyError:
             logger2.error('{} - not recognized order: {}'.format(self.name, id))
             return
+        
+        if 'price' in params and params['price']==0:
+            params = params.copy()
+            params['price'] = None
         
         o_prev = o.copy()
         
@@ -818,9 +1048,9 @@ class ExchangeSocket(WSClient):
                 'id': id,
                 'data': f.copy(),
             }
-            self.exec_callbacks(cb_input, 'trade', order)
-            self.exec_callbacks(cb_input, 'trade', symbol)
-            self.exec_callbacks([cb_input], 'trade', -1)
+            self.exec_callbacks(cb_input, 'fill', order)
+            self.exec_callbacks(cb_input, 'fill', symbol)
+            self.exec_callbacks([cb_input], 'fill', -1)
         
         if fee_rate is None and takerOrMaker is not None:
             fee_rate = self.api.markets[symbol][takerOrMaker]
@@ -903,6 +1133,17 @@ class ExchangeSocket(WSClient):
             self.change_subscription_state(('account',), 1, True)
     
     
+    def add_fill_from_dict(self, d, *, set_event=True, set_order_event=True,
+                           enable_sub=False, drop=None):
+        if drop is not None:
+            d = self.drop(d, drop)
+        kw = {k: d[k] for k in self.FILL_KEYWORDS if k in d}
+        params = {k: d[k] for k in d if k not in self.FILL_KEYWORDS}
+        
+        self.add_fill(**kw, params=params, set_event=set_event,
+                      set_order_event=set_order_event, enable_sub=enable_sub)
+    
+    
     def _fetch_callback_list(self, stream, id=-1):
         try: d = self.callbacks[stream]
         except KeyError:
@@ -973,9 +1214,13 @@ class ExchangeSocket(WSClient):
             'orderbook': ['orderbooks'],
         }
         attrs = _map.get(s.channel, [s.channel])
+        if s.channel not in self.channels:
+            return
         
         for attr in attrs:
-            container = getattr(self, attr)
+            container = getattr(self, attr, None)
+            if container is None:
+                continue
             #All containers are assumed to be dicts or lists
             if isinstance(container, (list,deque)):
                 while True:
@@ -1112,6 +1357,10 @@ class ExchangeSocket(WSClient):
     
     
     def subscribe_to_ohlcv(self, symbol, timeframe='1m', params={}):
+        if timeframe not in self.api.timeframes:
+            raise ccxt.NotSupported("Timeframe '{}' is not supported." \
+                                    " Choose one of the following: {}" \
+                                    .format(timeframe, list(self.api.timeframes)))
         return self.sh.add_subscription(
             self.ip.extend({
                 '_': 'ohlcv',
@@ -1210,6 +1459,18 @@ class ExchangeSocket(WSClient):
         return ohlcv
     
     
+    async def fetch_order(self, id, symbol=None, params={}):
+        return await self.api.fetch_order(id, symbol, params)
+    
+    
+    async def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
+        return await self.api.fetch_orders(symbol, since, limit, params)
+    
+    
+    async def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
+        return await self.api.fetch_my_trades(symbol, since, limit, params)
+    
+    
     async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         """[{'id': '1a8eedf7-18cf-d779-0d15-3199ad677dc8', 'timestamp': 1564361280061,
              'datetime': '2019-07-29T00:48:00.610Z', 'lastTradeTimestamp': None,
@@ -1238,22 +1499,38 @@ class ExchangeSocket(WSClient):
         side = ['sell','buy'][direction]
         if price is not None:
             price = self.api.round_price(symbol, price, side)
-        r = await self.api.create_order(symbol, type, side, amount, price, params)
-        #{'id': '0abc123de456f78ab9012345', 'symbol': 'XRP/USDT', 'type': 'limit', 'side': 'buy',
-        # 'status': 'open'}
-        if type=='limit' and self.order['add_automatically']:
-            parsed = self.parse_ccxt_order(r)
-            try: self.orders[r['id']]
-            except KeyError:
-                kw = {'id': r['id'], 'symbol': symbol,
-                      'side': side, 'price': price,
-                      'type': type, 'amount': amount,
-                      'timestamp': int(time.time()*1000)}
-                self.add_order(**dict(kw,**parsed.get('order',{})))
-            for f in parsed.get('fills',[]):
-                self.add_fill(**f)
-        #TODO: add market and stop order support to self.orders
-        return r
+        if self.has_got('create_order','ws') and self.is_active():
+            pms = {
+                '_': 'create_order',
+                'symbol': symbol,
+                'type': type,
+                'side': side,
+                'amount': amount,
+                'price': price,
+                'params': params,
+            }
+            r = (await self.send(pms, wait='default')).data
+            self.check_errors(r)
+            order_id = r['id']
+            o = _copy.deepcopy(self.orders[order_id])
+            return o
+        else:
+            r = await self.api.create_order(symbol, type, side, amount, price, params)
+            #{'id': '0abc123de456f78ab9012345', 'symbol': 'XRP/USDT', 'type': 'limit', 'side': 'buy',
+            # 'status': 'open'}
+            if type=='limit' and self.order['add_automatically']:
+                parsed = self.parse_ccxt_order(r)
+                try: self.orders[r['id']]
+                except KeyError:
+                    kw = {'id': r['id'], 'symbol': symbol,
+                          'side': side, 'price': price,
+                          'type': type, 'amount': amount,
+                          'timestamp': int(time.time()*1000)}
+                    self.add_order(**dict(kw,**parsed.get('order',{})))
+                for f in parsed.get('fills',[]):
+                    self.add_fill(**f)
+            
+            return r
     
     
     async def create_limit_order(self, symbol, side, amount, price, *args):
@@ -1269,18 +1546,30 @@ class ExchangeSocket(WSClient):
     
     
     async def cancel_order(self, id, symbol=None, params={}):
-        error = None
-        #tlogger.debug('Canceling order: {},{}'.format(id, symbol))
-        try: r = await self.api.cancel_order(id, symbol, params)
-        except ccxt.OrderNotFound as e: error = e
-        cancel_automatically = self.is_order_auto_canceling_enabled()
-        if cancel_automatically:
-            #tlogger.debug('Automatically setting "remaining" to 0: {},{}'.format(id, symbol))
-            self.update_order(id, 0)
-            #tlogger.debug('Order {},{} now: {}'.format(id, symbol, self.orders.get(id)))
-        if error is not None:
-            raise error
-        return r
+        if self.has_got('cancel_order','ws') and self.is_active():
+            pms = {
+                '_': 'cancel_order',
+                'id': id,
+                'symbol': symbol,
+                'params': params,
+            }
+            r = (await self.send(pms, wait='default')).data
+            self.check_errors(r)
+            o = _copy.deepcopy(self.orders[id])
+            return o
+        else:
+            error = None
+            #tlogger.debug('Canceling order: {},{}'.format(id, symbol))
+            try: r = await self.api.cancel_order(id, symbol, params)
+            except ccxt.OrderNotFound as e: error = e
+            cancel_automatically = self.is_order_auto_canceling_enabled()
+            if cancel_automatically:
+                #tlogger.debug('Automatically setting "remaining" to 0: {},{}'.format(id, symbol))
+                self.update_order(id, 0)
+                #tlogger.debug('Order {},{} now: {}'.format(id, symbol, self.orders.get(id)))
+            if error is not None:
+                raise error
+            return r
     
     
     async def edit_order(self, id, symbol, *args):
@@ -1291,8 +1580,17 @@ class ExchangeSocket(WSClient):
         if len(args) >= 4:
             if args[3] is not None:
                 args = args[:3] + (self.api.round_price(symbol, args[3], args[1]),) + args[4:]
-        
-        return await self.api.edit_order(id, symbol, *args)
+                
+        if self.has_got('edit_order','ws') and self.is_active():
+            pms = {
+                'id': id,
+                'symbol': symbol,
+                'args': args,    
+            }
+            r = (await self.send(pms, wait='default')).data
+            self.check_errors(r)
+        else:
+            return await self.api.edit_order(id, symbol, *args)
     
     
     def parse_ccxt_order(self, r):
@@ -1371,61 +1669,114 @@ class ExchangeSocket(WSClient):
                 cb(o,changes)
     
     
+    def safe_currency_code(self, currency_id, currency=None):
+        return self.api.safe_currency_code(currency_id, currency)
+    
+    
+    def currency_id(self, commonCode):
+        return self.api.currency_id(commonCode)
+    
+    
+    def symbol_by_id(self, symbol_id):
+        return self.api.markets_by_id[symbol_id]['symbol']
+    
+    
+    def id_by_symbol(self, symbol):
+        return self.api.markets[symbol]['id']
+    
+    
     def convert_cy(self, currency, direction=1):
         """
         :param direction:
              (currency_id is exchange-specific, commonCurrency is universal)
-             0: currency_id to commonCurrency
-             1: commonCurrency to currency_id
+             0: commonCurrency from currency_id
+             1: currency_id from commonCurrency
         """
         try:
             if hasattr(currency, '__iter__') and not isinstance(currency, str):
                 cls = list if not self.is_param_merged(currency) else self.merge
                 return cls(self.convert_cy(_cy, direction) for _cy in currency)
             if not direction:
-                return self.api.common_currency_code(currency)
+                return self.safe_currency_code(currency)
             else:
-                return self.api.currency_id(currency)
+                return self.currency_id(currency)
         finally:
             if isinstance(sys.exc_info()[1], KeyError):
                 self._reload_markets(sys.exc_info()[1])
     
     
-    def convert_symbol(self, symbol, direction=1):
+    def convert_symbol(self, symbol, direction=1, force=None):
         """
         :param direction:
             (currency_id is exchange-specific, commonCurrency is universal)
              0: currency_id to commonCurrency
              1: commonCurrency to currency_id
         """
+        keyError_occurred = False
+        sep = self.symbol['sep']
+        sw = self.symbol['startswith']
+        step = 1 if sw=='base' else -1
+        if force is None:
+            force = self.symbol['force']
+        
         try:
             if hasattr(symbol, '__iter__') and not isinstance(symbol, str):
                 cls = list if not self.is_param_merged(symbol) else self.merge
-                return cls(self.convert_symbol(_s, direction) for _s in symbol)
+                return cls(self.convert_symbol(_s, direction, force) for _s in symbol)
+        
             if not direction:
-                return self.api.markets_by_id[symbol]['symbol']
+                try:
+                    return self.symbol_by_id(symbol)
+                except KeyError:
+                    if symbol.startswith('.'):
+                        # Bitmex symbol ids starting with "." map 1:1 to ccxt
+                        keyError_occurred = True
+                        return symbol
+                    if not force:
+                        raise KeyError(symbol)
+                if not sep:
+                    method = 'endswith' if sw=='base' else 'startswith'
+                    ln = next((len(q) for q in self.symbol['quote_ids']
+                               if getattr(symbol, method)(q)), None)
+                    if ln is None:
+                        raise KeyError(symbol)
+                    if sw == 'base':
+                        cys = [symbol[:-ln], symbol[-ln:]]
+                    else:
+                        cys = [symbol[:ln], symbol[ln:]]
+                else:
+                    cys = symbol.split(sep)
+                return '/'.join([self.convert_cy(x, 0) for x in cys[::step]])
             else:
-                return self.api.markets[symbol]['id']
+                try:
+                    return self.id_by_symbol(symbol)
+                except KeyError:
+                    if not force:
+                        raise KeyError(symbol)
+                return sep.join([self.convert_cy(x, 1) for x in symbol.split('/')[::step]])
         finally:
-            if isinstance(sys.exc_info()[1], KeyError):
-                self._reload_markets(sys.exc_info()[1])
+            error = sys.exc_info()[1]
+            if isinstance(error, KeyError) or keyError_occurred:
+                error = error if isinstance(error, KeyError) else KeyError(symbol)
+                self._reload_markets(error)
     
     
     def convert_cnx_params(self, params):
         def _lower(s):
             cls = list if not self.is_param_merged(s) else self.merge
             return s.lower() if isinstance(s, str) else cls(x.lower() for x in s)
-        if 'symbol' in params:
-            params['symbol'] = _lower(self.convert_symbol(params['symbol'], 1))
+        if 'symbol' in params and params['symbol'] is not None:
+            params['symbol'] = _lower(self.convert_symbol(params['symbol'], 1, force=True))
         for attr in ('cy','currency'):
-            if attr in params:
+            if attr in params and params[attr] is not None:
                 params[attr] = _lower(self.convert_cy(params[attr], 1))
         return params
     
     
     def _reload_markets(self, e=None):
-        if self.reload_markets_on_keyerror is not None and \
-                time.time() - self._last_markets_loaded_ts > self.reload_markets_on_keyerror:
+        reload_interval = self.symbol['reload_markets_on_KeyError']
+        if reload_interval is not None and \
+                time.time() - self._last_markets_loaded_ts > reload_interval:
             error_txt = '(due to error: {})'.format(repr(e)) if e is not None else ''
             logger.error('{} - force reloading markets {}'.format(self.name, error_txt))
             self._last_markets_loaded_ts = time.time()
@@ -1495,6 +1846,7 @@ class ExchangeSocket(WSClient):
             d['info'] = prev_info
         return d
     
+    
     @staticmethod
     def dict_changes(new, prev):
         """Determine the diff between two dicts"""
@@ -1520,7 +1872,28 @@ class ExchangeSocket(WSClient):
                 new_seq = new_seq[from_i:]
         
         return new_seq
-
+    
+    
+    @staticmethod
+    def drop(d, keywords, copy=True):
+        """
+        :type keywords: dict
+        :param keywords:
+            {value: keys to drop for the matching value}
+            if keys==None, drops all matching
+        """
+        if copy:
+            d = d.copy()
+        for value, keys in keywords.items():
+            if hasattr(keys, '__iter__'):
+                for k in keys:
+                    if k in d and d[k]==value:
+                        del d[k]
+            else:
+                for k in list(d.keys()):
+                    if d[k]==value:
+                        del d[k]
+        return d
 
 
 def _resolve_auth(exchange, config):

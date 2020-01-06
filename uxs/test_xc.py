@@ -119,7 +119,7 @@ async def fetch_tickers(symbols=(), sub=True, unsub=False, resub=False, merge=Fa
             asyncio.ensure_future(_resub(params, resub, merge))
             
     while True:
-        await _print_changed('ticker','tickers',clear_first=True)
+        await _print_changed('ticker', 'tickers', clear_first=True)
         
     
 async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, resub=False, merge=False, params={}):
@@ -172,7 +172,7 @@ async def fetch_trades(symbols=(), sub=True, unsub=False, resub=False, merge=Fal
             asyncio.ensure_future(_resub(params, resub, merge))
             
     while True:
-        await _print_changed('trades','trades',clear_first=True,from_index=-5)
+        await _print_changed('trades', 'trades', clear_first=True, from_index=-5)
         
 async def fetch_ohlcv(symbols=(), sub=True, unsub=False, resub=False, merge=False):
     timeframes = dict.fromkeys(symbols, '1m')
@@ -197,7 +197,7 @@ async def fetch_ohlcv(symbols=(), sub=True, unsub=False, resub=False, merge=Fals
             asyncio.ensure_future(_resub(params, resub, merge))
             
     while True:
-        await _print_changed('ohlcv','ohlcv',clear_first=True,
+        await _print_changed('ohlcv', 'ohlcv', clear_first=True,
                              from_index=-5, key=lambda symbol, d: d[timeframes[symbol]])
 
 async def fetch_position(symbols=()):
@@ -209,7 +209,7 @@ async def show_fills():
     while True:
         await xs.events['fill'][-1].wait()
         xs.events['fill'][-1].clear()
-        print('fills:',xs.fills)
+        print('(d)fills:', xs.fills)
         #await _print_changed('trade','trades',True)
     
 async def show_orders():
@@ -217,7 +217,7 @@ async def show_orders():
         #await ws.events['order'][-1].wait()
         #ws.events['order'][-1].clear()
         #print('orders:',ws.open_orders,ws.closed_orders)
-        await _print_changed('order','orders',clear_first=False)
+        await _print_changed('order', 'orders', clear_first=False)
             
 async def show_balances():
     while True:
@@ -226,6 +226,8 @@ async def show_balances():
 async def place_order(*args):
     global oid
     symbol, amount, price = args[:3] if len(args) else ('ETH/BTC', 0.1, 0.01)
+    amount = float(amount)
+    price = float(price)
     side = 'buy' if len(args) < 4 else args[3]
     await asyncio.sleep(4)
     try: 
@@ -320,6 +322,9 @@ def main():
     if 'responses' in display or 'r' in display:
         print(display)
         config['connection_defaults'] = {'handle': lambda x: print(x)}
+    print('test in p: {}'.format('test' in p))
+    if 'test' in p:
+        config['test'] = True
     
     try:
         xs = uxs.get_socket(xc, config)
@@ -335,8 +340,9 @@ def main():
     ob_param = p.which(['ob'], '')
     trades_param = p.which(['trades',], '')
     ohlcv_param = p.which(['ohlcv',], '')
-    o_param = next((x for x in p if x.startswith('order+') or x=='order'), '')
+    o_param = next((x for x in p if x.startswith('order+') or x.startswith('order-') or x=='order'), '')
     o_plus = o_param.startswith('order+')
+    o_minus = o_param.startswith('order-')
     a_param = p.which(['account'], '')
     p_param = p.which(['pos','position','positions'], '')
     account_symbols = set()
@@ -359,8 +365,10 @@ def main():
             try: extent = int(extent)
             except ValueError: pass
             ob_params['extent'] = extent
-        #ob_print = 'changes'
-        ob_print = 4
+        if 'changes' not in p:
+            ob_print = 4
+        else:
+            ob_print = 'changes'
         coros += [fetch_order_book(ob_symbols, ob_print, sub=True, unsub=unsub, resub=resub, merge=ob_merge, params=ob_params)]
         if crash: coros += [_crash({'_': 'orderbook', 'symbol': ob_symbols[0]}, crash)]
         
@@ -389,7 +397,17 @@ def main():
         account_symbols.add(o_args[0] if o_args else 'ETH/BTC')
         coros += [place_order(*o_args)]
         if cancel: coros += [cancel_order(*o_args)]
-        
+    
+    if o_minus:
+        o_rest = o_param[len('order-'):]
+        global oid
+        spl = o_rest.split('||')
+        if len(spl) < 2:
+            oid, symbol = o_rest, None
+        else:
+            oid, symbol = spl
+        coros += [cancel_order(symbol)]
+    
     if p_param:
         p_symbols, _ = _get_items(p_param)
         account_symbols.update(p_symbols)

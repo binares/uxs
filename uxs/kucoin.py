@@ -34,12 +34,11 @@ class kucoin(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'_': True},
         'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
                         'high': False, 'low': False, 'open': False,' close': True, 'previousClose': False,
                         'change': False, 'percentage': False, 'average': False, 'vwap': False,
                         'baseVolume' :False, 'quoteVolume': False},
-        'ticker': {}, #same as all_tickers
+        'ticker': True, #same as all_tickers
         'orderbook': True,
         'trades': {'match': True},
         'account': {'balance': True, 'order': False, 'fill': False},
@@ -57,7 +56,7 @@ class kucoin(ExchangeSocket):
         'ping_interval': 30,
         'ping_as_message': True,
     }
-    topics = {
+    channel_ids = {
         'account': '/account/balance',
         'ticker': '/market/ticker:{symbol}',
         'all_tickers': '/market/ticker:all',
@@ -65,12 +64,17 @@ class kucoin(ExchangeSocket):
         'trades': '/market/match:{symbol}',
         'match': '/market/match:{symbol}',
     }
-    message_id_keyword = 'id'
+    message = {'id': {'key': 'id'}}
     match_is_subset_of_trades = True
     order = {
         'update_filled_on_fill': True,
         'update_payout_on_fill': True,
         'update_remaining_on_fill': True,
+    }
+    symbol = {
+        'quote_ids': ['ETH', 'BTC', 'USDT', 'NEO', 'KCS', 'PAX',
+                      'TUSD', 'USDC', 'NUSD', 'TRX', 'DAI'],
+        'sep': '-',
     }
 
  
@@ -309,7 +313,7 @@ class kucoin(ExchangeSocket):
     def encode(self, rq, sub=None):
         p = rq.params
         channel = rq.channel
-        topic = self.topics[channel]
+        topic = self.channel_ids[channel]
         auth = channel in ('balance', 'account', 'match')
         if channel == 'account': pass
         elif channel == 'tickers_all': pass
@@ -345,19 +349,8 @@ class kucoin(ExchangeSocket):
         return self.remove_subscription({
             '_': 'match',
             'symbol': symbol})"""
-        
-        
-    def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt 1: ccxt to ex
-        try: return super().convert_symbol(symbol, direction)
-        except KeyError: pass
-        
-        if not direction:
-            return '/'.join(self.convert_cy(x,0) for x in symbol.split('-'))
-        else:
-            return '-'.join(self.convert_cy(x,1) for x in symbol.split('/'))
-        
-        
+    
+    
     def ping(self):
         return {
             "id": str(ctime_ms()),

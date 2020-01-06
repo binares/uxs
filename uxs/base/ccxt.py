@@ -921,12 +921,13 @@ class ccxtWrapper:
     
     
     @staticmethod
-    def parse_spaceless_symbol(symbol, quotes):
-        """:param quotes: a list of quotes present in exchange"""
-        quote = next((q for q in quotes if symbol.endswith(q)), None)
+    def parse_spaceless_symbol(symbol, quote_ids, startswith='base'):
+        """:param quote_ids: a list of quote_ids present in exchange"""
+        method = 'endswith' if startswith=='base' else 'startswith'
+        quote = next((q for q in quote_ids if getattr(symbol, method)(q)), None)
         if quote is None:
             raise ValueError("Could not parse symbol: '{}'".format(symbol))
-        base = symbol[:-len(quote)]
+        base = symbol[:-len(quote)] if startswith=='base' else symbol[len(quote):]
         
         return (base, quote)
         

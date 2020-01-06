@@ -53,7 +53,6 @@ class binance(ExchangeSocket):
         },
     }
     has = {
-        'balance': {'_': True},
         'all_tickers': True,
         'ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
                    'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': True,
@@ -69,24 +68,29 @@ class binance(ExchangeSocket):
                   'open': True, 'high': True, 'low': True, 'close': True,
                   'volume': True},
         'account': {'balance': True, 'order': True, 'fill': False},
-        'fetch_tickers': {
+        'fetch_tickers': True,
+        'fetch_ticker': {
             'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False, 
             'high': True, 'low': True, 'open': True, 'close': True, 
             'previousClose': False, 'change': True, 'percentage': True, 
             'average': True, 'vwap': True, 'baseVolume': True, 'quoteVolume': True},
-        'fetch_ticker': True,
         'fetch_order_book': True,
         'fetch_balance': True,
     }
     has['all_tickers'] = has['ticker'].copy()
+    has['fetch_tickers'] = has['fetch_ticker'].copy()
     connection_defaults = {
         #'ping': lambda: {},
         #'ping': lambda: {'ping': nonce_ms()},
         #TODO: change back
-        #'ping_interval': 300,
+        'ping_interval': 300,
     }
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
+    }
+    symbol = {
+        'quote_ids': ['BTC','ETH','BNB','XRP','PAX','TUSD','USDT','USDC','USDS','BUSD'],
+        'sep': '',
     }
     
     
@@ -544,20 +548,3 @@ class binance(ExchangeSocket):
         call_via_loop(prolong_and_cancel_on_inactive,
                       loop=self.loop,
                       module='asyncio')
-        
-    
-    def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt #1: ccxt to ex
-        try: return super().convert_symbol(symbol, direction)
-        except KeyError: pass
-        
-        if not direction:
-            quotes = ['BTC','ETH','BNB','XRP','PAX',
-                      'TUSD','USDT','USDC','USDS']
-            ln = next(len(q) for q in quotes if symbol.endswith(q))
-            return '/'.join([self.convert_cy(x,0) for x in (symbol[:-ln],symbol[-ln:])])
-        else:
-            return ''.join([self.convert_cy(x,1) for x in symbol.split('/')])
-
-            
-            

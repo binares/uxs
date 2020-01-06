@@ -89,7 +89,7 @@ class bitmex(ExchangeSocket):
         'update_payout_on_fill': False,
         'update_remaining_on_fill': False,
     }
-    topics = {
+    channel_ids = {
         # This can be overriden to include 'transact' and 'wallet' in the subscription
         'account': ['execution:<symbol>','order:<symbol>','margin','position'], #'transact','wallet'
         #'ticker': ['instrument:{symbol}'],
@@ -97,13 +97,17 @@ class bitmex(ExchangeSocket):
         'orderbook': ['orderBookL2:<symbol>'],
         'trades': ['trades:<symbol>'],
     }
+    symbol = {
+        'quote_ids': ['USD','BTC','ETH','ADA','BCH','XRP','TRX'],
+        'sep': '',
+    }
     _id_prices = defaultdict(lambda: {'start': None,
                                       'multiplier': None,
                                       'per_tick': None,
                                       'cache': []})
     
-    __extend_attrs__ = ['topics']
-    __deepcopy_on_init__ = __extend_attrs__ + ['_id_prices']
+    __extend_attrs__ = []
+    __deepcopy_on_init__ = ['_id_prices']
     
     
     def handle(self, response):
@@ -480,7 +484,8 @@ class bitmex(ExchangeSocket):
             is_create_action = action in ('insert','partial')
             #('partial' sends open orders upon subscription)
             if is_create_action and not exists:
-                self.add_order(id, symbol, side, price, amount, timestamp,
+                self.add_order(id=id, symbol=symbol, side=side, amount=amount,
+                               price=price, timestamp=timestamp,
                                remaining=remaining, filled=filled, type=type,
                                stop=stop, datetime=d['timestamp'],  params=extra)
             elif is_create_action and exists or action == 'update':
@@ -816,8 +821,8 @@ class bitmex(ExchangeSocket):
         elif extent <= 25:
             orderbook = ['orderBookL2_25:<symbol>']
         
-        topics = self.topics[channel] if channel != 'orderbook' else orderbook
-        args = self.encode_symbols(params.get('symbol'), topics)
+        channel_ids = self.channel_ids[channel] if channel != 'orderbook' else orderbook
+        args = self.encode_symbols(params.get('symbol'), channel_ids)
         #print(op,args)
         
         return {'op': op, 'args': args}
@@ -835,21 +840,6 @@ class bitmex(ExchangeSocket):
         }
     
     
-    def convert_symbol(self, symbol, direction=1):
-        #0: ex to ccxt 1: ccxt to ex
-        try: return super().convert_symbol(symbol, direction)
-        except KeyError: pass
-        
-        if '.' in symbol:
-            return symbol
-        
-        if not direction:
-            base, quote = self.api.parse_spaceless_symbol(symbol, ['USD'])
-            return '/'.join(self.convert_cy(x,0) for x in (base,quote))
-        else:
-            return ''.join(self.convert_cy(x,1) for x in symbol.split('/'))
-
-
     """def ping(self):
         #This is an unrecognized request, but at least it receives response
         #that tells us that the connection is still up
