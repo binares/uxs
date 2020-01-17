@@ -10,7 +10,7 @@ dt = datetime.datetime
 td = datetime.timedelta
 
 from ..auth import get_auth2, EXTRA_TOKEN_KEYWORDS
-from ..ccxt import get_exchange, _ccxtWrapper
+from ..ccxt import init_exchange, _ccxtWrapper
 from .. import poll
 from .orderbook import OrderbookMaintainer
 from .errors import (ExchangeSocketError, ConnectionLimit)
@@ -306,7 +306,7 @@ class ExchangeSocket(WSClient):
         
         super().__init__(config)
                 
-        self.api = get_exchange({
+        self.api = init_exchange({
             'exchange':self.exchange,
             'async':True,
             'args': (ccxt_config,),
@@ -314,6 +314,7 @@ class ExchangeSocket(WSClient):
                 'load_cached_markets': load_cached_markets,
                 'profile': profile,},
             'auth': auth,
+            'add': False,
         })
         
         self._init_has()
@@ -1418,49 +1419,67 @@ class ExchangeSocket(WSClient):
                 })
     
     
-    async def fetch_balance(self):
-        balances = await poll.fetch(self.api,'balances',0)
+    async def fetch_balance(self, params={}):
+        if not self.test:
+            balances = await poll.fetch(self.api, 'balances', 0, kwargs={'params': params})
+        else:
+            balances = await self.api.fetch_balance(params)
         self.update_balances(
             [(cy,y['free'],y['used']) for cy,y in balances.items()
              if cy not in ('free','used','total','info')])
         return balances
     
     
-    async def fetch_order_book(self, symbol, *limit):
+    async def fetch_order_book(self, symbol, limit=None, params={}):
         """This method must be overriden if .orderbook_maintainer
            is used to keep the nonce in sync AND the .api.fetch_order_book doesn't return
            orderbook in correct format (i.e. doesn't include (correct!) nonce value under "nonce").
            Some exchanges may offer websocket method for retrieving the full orderbook."""
-        #ob = await self.api.fetch_order_book(symbol)
-        if not limit: limit = [0]
-        ob = await poll.fetch(self.api,('orderbook',symbol),*limit)
+        if not self.test:
+            ob = await poll.fetch(self.api,('orderbook',symbol), 0,
+                                  kwargs={'limit': limit, 'params': params})
+        else:
+            ob = await self.api.fetch_order_book(symbol, limit, params)
         ob['nonce'] = ob.get('nonce')
         return ob
     
     
-    async def fetch_tickers(self):
-        tickers = await poll.fetch(self.api,'tickers',0)
+    async def fetch_tickers(self, symbols=None, params={}):
+        if not self.test:
+            tickers = await poll.fetch(self.api, 'tickers', 0,
+                                       kwargs={'symbols': symbols, 'params': params})
+        else:
+            tickers = await self.api.fetch_tickers(symbols, params)
         self.update_tickers(
             [y for x,y in tickers.items() if x!='info'])
         return tickers
     
     
-    async def fetch_ticker(self, symbol):
-        ticker = await poll.fetch(self.api,('ticker',symbol),0)
+    async def fetch_ticker(self, symbol, params={}):
+        if not self.test:
+            ticker = await poll.fetch(self.api, ('ticker',symbol), 0, kwargs={'params': params})
+        else:
+            ticker = await self.api.fetch_ticker(symbol, params)
         self.update_tickers([ticker])
         return ticker
     
     
     async def fetch_trades(self, symbol, since=None, limit=None, params={}):
         kwargs = {'since': since, 'limit': limit, 'params': params}
-        trades = await poll.fetch(self.api,('trades',symbol),0,kwargs=kwargs)
+        if not self.test:
+            trades = await poll.fetch(self.api, ('trades',symbol), 0, kwargs=kwargs)
+        else:
+            trades = await self.api.fetch_trades(symbol, since, limit, params)
         self.update_trades([{'symbol': symbol, 'trades': trades}])
         return trades
     
     
     async def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
         kwargs = {'since': since, 'limit': limit, 'params': params}
-        ohlcv = await poll.fetch(self.api,('ohlcv',symbol,timeframe),0,kwargs=kwargs)
+        if not self.test:
+            ohlcv = await poll.fetch(self.api, ('ohlcv',symbol,timeframe), 0, kwargs=kwargs)
+        else:
+            ohlcv = await self.api.fetch_ohlcv(symbol, timeframe, since, limit, params)
         self.update_ohlcv([{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': ohlcv}])
         return ohlcv
     

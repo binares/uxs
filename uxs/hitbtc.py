@@ -274,10 +274,13 @@ class hitbtc(ExchangeSocket):
     # https://api.hitbtc.com/#socket-trading
     
     
-    async def fetch_balance(self):
-        r = (await self.send({'_':'fetch_balance'},True)).data
-        self.check_errors(r)
-        return self.balances
+    async def fetch_balance(self, params={}):
+        if self.is_active():
+            r = (await self.send({'_': 'fetch_balance'}, True)).data
+            self.check_errors(r)
+            return deepcopy(self.balances)
+        else:
+            return await super().fetch_balance(params)
     
     
     def encode(self, request, sub=None):

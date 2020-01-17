@@ -213,12 +213,12 @@ class bittrex(ExchangeSocket):
         self.orderbook_maintainer.send_update(d)
     
     
-    async def fetch_order_book(self, symbol, *limit):
+    async def fetch_order_book(self, symbol, limit=None, params={}):
         if self.is_active():
             id = 'fetch_order_book+{}'.format(symbol)
             return await self.send({'_': 'fetch_order_book', 'symbol': symbol}, True, id=id)
         else:
-            return await super().fetch_order_book(symbol, *limit)
+            return await super().fetch_order_book(symbol, limit, params)
     
     
     def on_query_summary_state(self, r):
@@ -296,11 +296,11 @@ class bittrex(ExchangeSocket):
             self.change_subscription_state({'_': 'all_tickers'}, 1)
             
     
-    async def fetch_tickers(self):
+    async def fetch_tickers(self, symbols=None, params={}):
         if self.is_active():
             return await self.send({'_': 'fetch_tickers'}, True, id='fetch_tickers')
         else:
-            return await super().fetch_tickers()
+            return await super().fetch_tickers(symbols, params)
             
             
     def on_order(self, e):

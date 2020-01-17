@@ -218,7 +218,7 @@ async def get(exchange, type, limit=None, max=1,*,
 
 async def fetch(exchange, type, limit=None, *,
                 file=True, globals=True, empty_update=True,
-                args=None, kwargs=None, loop=None, strip=True, attempts=2):
+                args=None, kwargs=None, loop=None, strip=True, attempts=1):
     """
     Checks whether reading from storage if enabled for the method of the exchange,
     if true proceeds with get(...), otherwise update()
