@@ -67,7 +67,10 @@ def get_socket(exchange, config={}):
             (if 'trade' was requested, but entries 'trade' and 'withdraw' exist,
              then the entry with 'trade' will be retrieved.)
         
-        
+        A test key is only retrieved when explicitly requested:
+            "binance:binance_test_1" or {'auth': {'test': True}} or simply {'test': True}
+            (the last one also evokes .setup_test_env(), which is probably necessary)
+    
     If the tokens file is encrypted, uxs.cache_password(encryption_password) must be called before.
     
     :rtype: ExchangeSocket
@@ -104,7 +107,11 @@ secret: ghij34kl
 password: mnopq5
 
 #--Optional keywords--
-#Thse are used for lookup executed from config's 'auth' dict [`get_socket(config={'auth':{..}})`]
+#These are used for lookup executed from config's 'auth' dict [`get_socket(config={'auth':{..}})`]
+
+#Test <bool>
+# whether or not this is a testnet token
+test: true
 
 #Rights <bool> 
 # these are only used for apiKey and secret lookup by specifying what rights are required
@@ -113,11 +120,12 @@ trade: true
 withdraw: false
 
 #Id <str>
-# the rights above can be left unspecified if id itself contains the keywords ("info","trade","withdraw")
-# keywords must be separated with "_"
+# The rights above (and "test") can be left unspecified 
+# if the id itself contains the keywords ("info","trade","withdraw","test")
+# Keywords must be separated with "_"
 # "withdraw" will include lower rights, ("trade","info") as will "trade" ("info")
 # in order to NOT include lower rights, add "-" to the end of the keyword ("trade-")
-id: binance_trade_1
+id: binance_trade_1_test
 
 #Active <bool>
 #(whether or not the apiKey and secret are still valid)

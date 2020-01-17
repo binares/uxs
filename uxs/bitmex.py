@@ -767,7 +767,20 @@ class bitmex(ExchangeSocket):
             
         return price
     
-       
+    
+    def setup_test_env(self):
+        return {
+            'url_components': {
+                'base': 'wss://testnet.bitmex.com/realtime',
+            },
+            'ccxt_config': {
+                'urls': {
+                    'api': 'https://testnet.bitmex.com',
+                },
+            },
+        }
+    
+    
     def encode(self, rq, sub=None):
         """
             "announcement",        // Site announcements

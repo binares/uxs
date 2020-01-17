@@ -299,7 +299,7 @@ class ExchangeSocket(WSClient):
             if _config is not None:
                 deep_update(config, _config)
         
-        auth = _resolve_auth(self.exchange, config)
+        auth = _resolve_auth(self.exchange, config, test=is_test)
         ccxt_config = config.pop('ccxt_config', {}).copy()
         load_cached_markets = config.pop('load_cached_markets', None)
         profile = config.pop('profile', None)
@@ -481,10 +481,12 @@ class ExchangeSocket(WSClient):
                 continue
             try:
                 prev = self.tickers[symbol]
+                changes = self.dict_changes(d, prev)
                 if action != 'update':
                     self.dict_clear(prev)
             except KeyError:
                 prev = self.dict_clear(self._tickers[symbol])
+                changes = d
             
             self.tickers[symbol] = self.dict_update(d, prev)
             
@@ -496,7 +498,7 @@ class ExchangeSocket(WSClient):
             
             cb_input = {'_': 'ticker',
                         'symbol': symbol,
-                        'data': self.dict_changes(d, prev)}
+                        'data': changes}
             self.exec_callbacks(cb_input, 'ticker', symbol)
             cb_data.append(cb_input)
         
@@ -728,6 +730,8 @@ class ExchangeSocket(WSClient):
             except KeyError:
                 prev = self.dict_clear(self._positions[symbol])
             
+            changes = self.dict_changes(d, prev)
+            
             self.positions[symbol] = self.dict_update(d, prev)
             
             if set_event:
@@ -735,7 +739,7 @@ class ExchangeSocket(WSClient):
             
             cb_input = {'_': 'position',
                         'symbol': symbol,
-                        'data': self.dict_changes(d, prev)}
+                        'data': changes}
             self.exec_callbacks(cb_input, 'position', symbol)
             cb_data.append(cb_input)
         
@@ -791,6 +795,8 @@ class ExchangeSocket(WSClient):
             except KeyError:
                 cy_prev = self.dict_clear(self._balances[cy])
             
+            changes = self.dict_changes(new, cy_prev)
+            
             cy_prev_updated = self.dict_update(new, cy_prev)
             
             for k in ['free','used','total']:
@@ -806,7 +812,7 @@ class ExchangeSocket(WSClient):
             cb_input = {
                 '_': 'balance',
                 'currency': cy,
-                'data': self.dict_changes(new, cy_prev)
+                'data': changes,
             }
             self.exec_callbacks(cb_input, 'balance', cy)
             cb_data.append(cb_input)
@@ -895,7 +901,7 @@ class ExchangeSocket(WSClient):
             '_': 'order',
             'symbol': symbol,
             'id': id,
-            'data': o.copy(),
+            'data': o,
         }
         self.exec_callbacks(cb_input, 'order', id)
         self.exec_callbacks(cb_input, 'order', symbol)
@@ -1046,7 +1052,7 @@ class ExchangeSocket(WSClient):
                 'symbol': symbol,
                 'order': order,
                 'id': id,
-                'data': f.copy(),
+                'data': f,
             }
             self.exec_callbacks(cb_input, 'fill', order)
             self.exec_callbacks(cb_input, 'fill', symbol)
@@ -1896,7 +1902,7 @@ class ExchangeSocket(WSClient):
         return d
 
 
-def _resolve_auth(exchange, config):
+def _resolve_auth(exchange, config, test=False):
     auth = config.pop('auth',{})
     if auth is None: auth = {}
     elif isinstance(auth, str):
@@ -1909,6 +1915,11 @@ def _resolve_auth(exchange, config):
             value = config.pop(k)
         if not auth.get(k):
             auth[k] = value if value is not None else ''
+    
+    if not auth['apiKey']:
+        id = auth.get('id')
+        if test and (id is None or 'test' not in id.lower().split('_')):
+            auth['id'] = 'test' if not id else id+'_test'
     
     """if not auth['apiKey']:
         relevant = {x:y for x,y in auth.items() if x not in token_kwds}

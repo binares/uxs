@@ -17,7 +17,7 @@ EXTRA_TOKEN_KEYWORDS = {
     'kucoin': ['password'],
 }
 DELETE_DAMAGED_DESTINATION_FILE = True
-ALL_DESCRIPTORS = ['null','info','trade','withdraw','info-','trade-','withdraw-']
+ALL_DESCRIPTORS = ['test','null','info','trade','withdraw','info-','trade-','withdraw-']
 
 _password = None
 _warned = defaultdict(list)
@@ -73,6 +73,7 @@ def _interpret_exchange(exchange, id=''):
         exchange = exchange[:loc]
     return exchange, id
 
+
 def _interpret_auth_id(id):
     if id is None: id = ''
     specs = id.lower().split('_')
@@ -81,10 +82,11 @@ def _interpret_auth_id(id):
     d = {}
     
     d['active'] = not any(x in specs for x in ('disabled','inactive'))
+    d['test'] = 'test' in specs
     
     rights = dict.fromkeys(by_rank, False)
-        
-    for rank in filter(lambda x: x in specs, ALL_DESCRIPTORS[1:]):
+    
+    for rank in filter(lambda x: x in specs, ALL_DESCRIPTORS[2:]):
         include_lower_ranks = True
         
         if rank.endswith('-'):
@@ -97,14 +99,20 @@ def _interpret_auth_id(id):
         else:
             changed = {rank: True}
         
-        rights.update(changed) 
-      
+        rights.update(changed)
+    
     return dict(d, **rights)
 
 
 def _strip_id_from_descriptors(id):
     if id is None: id= ''
     return '_'.join([x for x in id.split('_') if x.lower() not in ALL_DESCRIPTORS])
+
+
+def _id_labels_match(id1, id2):
+    _id1 = _strip_id_from_descriptors(id1)
+    _id2 = _strip_id_from_descriptors(id2)
+    return _id1 == _id2
 
 
 def read_tokens(password=None):
@@ -134,18 +142,25 @@ def _read_ordinary(tokens_path):
     return tokens
 
 
-def get_auth(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
+def get_auth(exchange, id=None, *,
+             info=None, trade=None, withdraw=None,
+             test=None, user=None, active=None, **kw):
+    """Get keys (apiKey, secret, password, etc..) only"""
     exchange, id = _interpret_exchange(exchange, id)
     required = ['apiKey','secret'] + EXTRA_TOKEN_KEYWORDS.get(exchange.lower(),[])
-    auth2 = get_auth2(exchange, id, info=info, trade=trade, withdraw=withdraw, user=user, active=active, **kw)
+    auth2 = get_auth2(exchange, id, info=info, trade=trade, withdraw=withdraw,
+                      test=test, user=user, active=active, **kw)
     
     return {x:y for x,y in auth2.items() if x in required}
     
     
-def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=None, active=None, **kw):
+def get_auth2(exchange, id=None, *,
+              info=None, trade=None, withdraw=None,
+              test=None, user=None, active=None, **kw):
+    """Get full auth"""
     exchange, id = _interpret_exchange(exchange, id)
     requested = dict({'id': id, 'info': info, 'trade': trade, 'withdraw': withdraw,
-                      'active': active, 'user': user}, **kw)
+                      'test': test, 'active': active, 'user': user}, **kw)
     
     _update_entry_by_its_id(requested)
     
@@ -153,7 +168,7 @@ def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=N
         return _add_auth(exchange, requested)
     
     info, trade, withdraw = requested['info'], requested['trade'], requested['withdraw']
-    rights = {k:requested[k] for k in ['info','trade','withdraw']}
+    rights = {k: requested[k] for k in ['info','trade','withdraw']}
     
     if not any(rights.values()):
         if not id:
@@ -163,7 +178,7 @@ def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=N
             
         return {'id': id, 'apiKey': '', 'secret': '',
                 'info': False, 'trade': False, 'withdraw': False, 
-                'user': None, 'active': True}
+                'test': None, 'user': None, 'active': True}
     
     xc_lower = exchange.lower()
     tokens = read_tokens()
@@ -174,7 +189,7 @@ def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=N
     entries = tokens[xc_lower]
     entries = [_update_entry_by_its_id(e) for e in entries]
     
-    _specs = {k:requested[k] for k in ['info','trade','withdraw','user','active']}
+    _specs = {k:requested[k] for k in ['test','info','trade','withdraw','user','active']}
     specs = {x:y for x,y in _specs.items() if y is not None}
     show_specs = dict(specs, id=id)
     ranks_from_highest = ('withdraw','trade','info')
@@ -182,13 +197,13 @@ def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=N
     
     id_plain = _strip_id_from_descriptors(id)
     if id_plain:
-        matches = [e for e in matches if _strip_id_from_descriptors(id)==id_plain]
-        
-    #All matches (including those that have more rights than requested)
+        matches = [e for e in matches if _id_labels_match(e.get('id'), id_plain)]
+    
+    # All matches (including those that have more rights than requested)
     matches = [e for e in matches if all(e.get(k)==v for k,v in specs.items()
                                          if k not in ranks_from_highest or v is not False)]
     
-    #Of those, select the one with least rights
+    # Of those, select the one with least rights
     for rank in ranks_from_highest:
         negative = [e for e in matches if not e.get(rank)]
         if len(negative):
@@ -199,13 +214,14 @@ def get_auth2(exchange, id=None, *, info=None, trade=None, withdraw=None, user=N
     if not len(matches):
         raise ValueError("No {} token matched against these params: {}".format(exchange, show_specs))
     elif any(x not in matches[0] for x in required):
-        raise TypeError("Token is missing one of these properties: {}".format(required))
+        match_id = matches[0].get('id')
+        raise TypeError("Token {}:{} is missing one of these properties: {}".format(xc_lower, match_id, required))
     
     f = _get_prev_frame()
     entry = matches[0]
     
-    #Log the id of the matched entry and what function and module requested it
-    #(for potential security purposes)
+    # Log the id of the matched entry and what function and module requested it
+    # (for potential security purposes)
     logger.debug("Retrieved auth id '{}' (called from '/{}:{}')".format(
         entry.get('id'), '/'.join(f.f_code.co_filename.split(os.sep)[-3:]), f.f_code.co_name))
     

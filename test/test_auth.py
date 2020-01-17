@@ -19,7 +19,8 @@ tokens_original_txt = None
 TOKENS = {
     'binance': [{'id': 'binance_withdraw', 'trade': False,  'apiKey': 'abc', 'secret': 'def'},
                 {'id': 'binance_withdraw_2', 'apiKey': 'cba', 'secret': 'fed'}],
-    'kucoin': [{'id': 'kucoin_TRADE-_WITHDRAW-', 'apiKey': 'opq', 'secret': 'rst', 'password': '123'}],
+    'kucoin': [{'id': 'kucoin_trade-_withdraw-_test', 'apiKey': 'xxx', 'secret': 'yyy', 'password': 'zzz'},
+               {'id': 'kucoin_TRADE-_WITHDRAW-', 'apiKey': 'opq', 'secret': 'rst', 'password': '123'}],
     'okex': [{'id': 'okex_disabled', 'apiKey': 'ox_key', 'secret': 'ox_secret'}],
 }
 
@@ -35,8 +36,8 @@ def _init_auth(init):
         tokens_original_txt = f.read()
 
 
-def _entry(kw, info=False, trade=False, withdraw=False, active=True):
-    entry = dict(kw, **{'info': info, 'trade': trade, 'withdraw': withdraw, 'active': active})
+def _entry(kw, info=False, trade=False, withdraw=False, active=True, test=False):
+    entry = dict(kw, **{'info': info, 'trade': trade, 'withdraw': withdraw, 'active': active, 'test': test})
     entry.update(dict.fromkeys([k for k in ['id','user'] if k not in entry]))
     return entry
 
@@ -45,7 +46,8 @@ def _entry(kw, info=False, trade=False, withdraw=False, active=True):
 EXPECTED_TOKENS = {
     'binance': [_entry(TOKENS['binance'][0],True,False,True),
                 _entry(TOKENS['binance'][1],True,True,True)],
-    'kucoin': [_entry(TOKENS['kucoin'][0],False,True,True)],   
+    'kucoin': [_entry(TOKENS['kucoin'][0],False,True,True,True,True),
+               _entry(TOKENS['kucoin'][1],False,True,True)],   
     'okex': [_entry(TOKENS['okex'][0],False,False,False,False)], 
 }
 
@@ -58,17 +60,23 @@ def test_read_tokens(exchange, _init_auth):
 #---------------------------------------------------------
     
 TEST_AUTH_DATA = [
-    [   {'exchange': 'binance', 'id': 'binance_withdraw'}, 
-        _entry(TOKENS['binance'][1],True,True,True)
+    [   {'exchange': 'binance', 'id': 'binance_2_withdraw'}, 
+        _entry(TOKENS['binance'][1],True,True,True),
     ],
     [   {'exchange': 'binance', 'info': True},
-        _entry(TOKENS['binance'][0],True,False,True)
+        _entry(TOKENS['binance'][0],True,False,True),
     ],
     [   {'exchange': 'binance', 'apiKey': 'abc', 'secret': 'wrong_secret'},
         _entry(dict(TOKENS['binance'][0], secret='wrong_secret', id=None),False,False,False),
     ],
     [   {'exchange': 'kucoin', 'id': 'withdraw-'},
-        _entry(TOKENS['kucoin'][0],False,True,True)
+        _entry(TOKENS['kucoin'][1],False,True,True),
+    ],
+    [   {'exchange': 'kucoin', 'id': 'withdraw-_test'},
+        _entry(TOKENS['kucoin'][0],False,True,True,True,True),
+    ],
+    [   {'exchange': 'kucoin', 'id': 'withdraw-', 'test': True},
+        _entry(TOKENS['kucoin'][0],False,True,True,True,True),
     ],
 ]
 

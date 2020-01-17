@@ -9,14 +9,18 @@ ENCRYPTED_PATH = None
 TOKENS = {
     #            contains permissions   the required apiKey and secret       extra tokens
     'kucoin': [{'id': 'kucoin_trade_0', 'apiKey': 'abcd', 'secret': '1234', 'password': 'xyz'}],
+    'bitmex': [{'id': 'bitmex_withdraw_0_test', 'apiKey': 'OPQR', 'secret': '9876'}],
 }
 ENCRYPTION_PASSWORD = 'myPassword'
 
 
 def verify(xs):
-    assert xs.api.apiKey == 'abcd'
-    assert xs.api.secret == '1234'
-    assert xs.api.password == 'xyz'
+    entry = TOKENS[xs.exchange][0]
+    assert xs.api.apiKey == entry['apiKey']
+    assert xs.api.secret == entry['secret']
+    if 'password' in entry:
+        assert xs.api.password == entry['password']
+    assert xs.auth_info['id'] == entry['id']
 
 
 def main():
@@ -39,6 +43,7 @@ def main():
     # uxs will think its an unencrypted file while trying to read tokens from it.
     assert ENCRYPTED_PATH == os.path.join(os.getcwd(), 'uxs_test_tokens.yaml_encrypted')
     uxs.set_tokens_path(ENCRYPTED_PATH)
+    uxs.cache_password(None)
     
     # If you want you can now delete the old file.
     # Make sure to remember the password though, or your tokens will be lost.
@@ -48,7 +53,7 @@ def main():
     try:
         uxs.get_auth('kucoin:trade')
     except ValueError as e:
-        print(e)
+        print(repr(e))
     
     # Now you'll have to cache the password at the start of each session
     uxs.cache_password(ENCRYPTION_PASSWORD)
@@ -60,6 +65,19 @@ def main():
     # Since info < trade, our TOKENS entry qualifies
     xs = uxs.kucoin({'auth': {'id': 'info'}})
     verify(xs)
+    
+    # For retrieving test tokens, the id must contain "test" part
+    uxs.get_auth('bitmex:trade_test')
+    
+    # Test tokens are strictly separated from ordinary ones
+    try:
+        uxs.get_auth('bitmex:trade')
+    except ValueError as e:
+        print(repr(e))
+    
+    # If we initiate a testnet socket ({'test': True}), then it will automatically look up test tokens
+    xs2 = uxs.bitmex({'test': True, 'auth': {'withdraw': True}})
+    verify(xs2)
     
     # Should you want to decrypt the file
     new_path = uxs.decrypt_tokens()
