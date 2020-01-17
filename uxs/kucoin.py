@@ -20,6 +20,13 @@ class kucoin(ExchangeSocket):
     auth_defaults = {
         'via_url': True,
     }
+    url_components = {
+        'base': 'https://api.kucoin.com',
+        'base-v2': 'https://openapi-v2.kucoin.com',
+        'test': 'https://openapi-sandbox.kucoin.com',
+        'public-end': '/api/v1/bullet-public',
+        'private-end': '/api/v1/bullet-private',
+    }
     channel_defaults = {
         'url': '<m$create_connection_url:shared>',
         'unsub_option': True,
@@ -76,8 +83,23 @@ class kucoin(ExchangeSocket):
                       'TUSD', 'USDC', 'NUSD', 'TRX', 'DAI'],
         'sep': '-',
     }
-
- 
+    
+    def setup_test_env(self):
+        return {
+            'url_components': {
+                'base': kucoin.url_components['test'],
+            },
+            'ccxt_config': {
+                'urls': {
+                    'api': {
+                        'public': kucoin.url_components['test'],
+                        'private': kucoin.url_components['test'],
+                    },
+                },
+            },
+        }
+    
+    
     def handle(self, response):
         r = response.data
         if r['type'] == 'ack':
@@ -253,17 +275,13 @@ class kucoin(ExchangeSocket):
                 "token": "vYNlCtbz4XNJ1QncwWilJnBtmmfe4geLQDUA62kKJsDChc6I4bRDQc73JfIrlFaVYIAE0Gv2--MROnLAgjVsWkcDq_MuG7qV7EktfCEIphiqnlfpQn4Ybg==.IoORVxR2LmKV7_maOR9xOg=="
             }
         }"""
-        end = '/api/v1/bullet-public' if not auth else '/api/v1/bullet-private'
-        url = 'https://api.kucoin.com' + end
+        which_end = 'public-end' if not auth else 'private-end'
+        url = self.url_components['base'] + self.url_components[which_end]
         headers = {}
         if auth:
             now = ctime_ms()
-            #data = {}
-            #data_json = json.dumps(data)
-            str_to_sign = str(now) + 'POST' + '/api/v1/bullet-private' #+ data_json
-            #print('str_to_sign: {}'.format(str_to_sign))
+            str_to_sign = str(now) + 'POST' + self.url_components['private-end']
             signature = sign(self.secret, str_to_sign, 'sha256', hexdigest=False, base64=True)
-            #print('signature: {}'.format(signature))
             headers = {
                 "KC-API-SIGN": signature,
                 "KC-API-TIMESTAMP": str(now),
@@ -271,7 +289,6 @@ class kucoin(ExchangeSocket):
                 "KC-API-PASSPHRASE": self.auth_info['password'],
                 "Content-Type": "application/json" # specifying content type or using json=data in request
             }
-        #print('headers: {}'.format(headers))
         async with aiohttp.ClientSession() as session:
             #print('connecting to: {}'.format(url))
             async with session.post(url, headers=headers) as response:

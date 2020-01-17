@@ -22,6 +22,8 @@ Note that there aren't separate subscription channels for *balance*, *order*, *f
 
 *\*T* - the orders and fills are updated by matching user created orders to the *trades* feed
 
+Test environments are currently offered for: BinanceFu, BitMEX and Kucoin (Kraken also offers some sort of non-sandboxed test env). For using them add `{'test': True}` to the config, and make sure you have created a sandbox account.
+
 Simple usage:
 
 ```

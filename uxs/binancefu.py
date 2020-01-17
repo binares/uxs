@@ -35,6 +35,21 @@ class binancefu(binance):
         'error': {},
     }
     
+    def setup_test_env(self):
+        return {
+            'url_components': {
+                'base': 'wss://stream.binancefuture.com/ws/',
+            },
+            'ccxt_config': {
+                'urls': {
+                    'api': {
+                        'fapiPublic': 'https://testnet.binancefuture.com/fapi/v1',
+                        'fapiPrivate': 'https://testnet.binancefuture.com/fapi/v1',
+                    },
+                },
+            },
+        }
+    
     def on_futures_account(self, r):
         """{
           "e": "ACCOUNT_UPDATE",        // Event Type
