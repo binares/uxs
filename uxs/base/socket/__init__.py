@@ -164,7 +164,7 @@ class ExchangeSocket(WSClient):
     }
     ORDER_KEYWORDS = ('id', 'symbol', 'side', 'price', 'amount', 'timestamp', 
                       'remaining', 'filled', 'payout', 'datetime',
-                      'type', 'stop',)
+                      'type', 'stop', 'cost', 'average')
     FILL_KEYWORDS = ('id', 'symbol', 'side', 'price', 'amount', 'timestamp',
                      'datetime', 'order', 'type', 'payout',
                      'fee', 'fee_rate', 'takerOrMaker', 'cost',)
@@ -855,8 +855,8 @@ class ExchangeSocket(WSClient):
     
     def add_order(self, id, symbol, side, amount, price=None, timestamp=None, 
                   remaining=None, filled=None, payout=0, datetime=None,
-                  type='limit', stop=None, params={}, *, set_event=True,
-                  enable_sub=False):
+                  type='limit', stop=None, cost=None, average=None, params={}, *,
+                  set_event=True, enable_sub=False):
         if remaining is None:
             remaining = amount
         if filled is None and remaining is not None:
@@ -870,7 +870,8 @@ class ExchangeSocket(WSClient):
         if id in self.orders:
             params = dict({'type': type, 'side': side, 'price': price,
                            'amount': amount, 'stop': stop, 'timestamp': timestamp,
-                           'datetime': datetime}, **params)
+                           'datetime': datetime, 'cost': cost, 'average': average},
+                           **params)
             return self.update_order(id, remaining, filled, payout, params)
         
         o = dict(
@@ -883,6 +884,8 @@ class ExchangeSocket(WSClient):
              'amount': amount,
              'timestamp': timestamp,
              'datetime': datetime,
+             'cost': cost,
+             'average': average,
              'filled': filled,
              'remaining': remaining,
              'payout': payout
@@ -933,15 +936,15 @@ class ExchangeSocket(WSClient):
     def update_order_from_dict(self, d, *, set_event=True, enable_sub=False, drop=None):
         if drop is not None:
             d = self.drop(d, drop)
-        KEYWORDS = ['id','remaining','filled','payout']
+        KEYWORDS = ['id','remaining','filled','payout','cost','average']
         kw = {k: d[k] for k in KEYWORDS if k in d}
         params = {k: d[k] for k in d if k not in KEYWORDS}
         
         self.update_order(**kw, params=params, set_event=set_event, enable_sub=enable_sub)
     
     
-    def update_order(self, id, remaining=None, filled=None, payout=None, params={}, *,
-                     set_event=True, enable_sub=False):
+    def update_order(self, id, remaining=None, filled=None, payout=None, cost=None, average=None,
+                     params={}, *, set_event=True, enable_sub=False):
         try: o = self.orders[id]
         except KeyError:
             logger2.error('{} - not recognized order: {}'.format(self.name, id))
@@ -959,6 +962,11 @@ class ExchangeSocket(WSClient):
             amount_difference = None
         
         self.dict_update(params, o)
+        
+        # Should it be forced that average can only decrease or increase (depending on order side),
+        # assuming that the price hasn't been edited in the meanwhile?
+        if average is not None:
+            o['average'] = average
         
         if remaining is not None:
             remaining = max(0, remaining)
@@ -985,7 +993,8 @@ class ExchangeSocket(WSClient):
         
         for name,value,op in [('remaining', remaining, modify_remaining),
                               ('filled', filled, max),
-                              ('payout', payout, max)]:
+                              ('payout', payout, max),
+                              ('cost', cost, max)]:
             prev = o[name]
             if prev is not None and value is not None:
                 value = op(prev, value)

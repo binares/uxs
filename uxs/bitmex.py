@@ -469,9 +469,11 @@ class bitmex(ExchangeSocket):
         for d in message['data']:
             symbol = self.convert_symbol(d['symbol'], 0)
             id = d['orderID']
-            timestamp = self.api.parse8601(d['timestamp'])
+            datetime = d['timestamp']
+            timestamp = self.api.parse8601(datetime)
             #For stop order the price is None
             price = d.get('price')
+            average = d.get('avgPx')
             #types: #Limit, Stop (market), Market, ...
             type = d['ordType'].lower() if 'ordType' in d else None 
             amount = d.get('orderQty')
@@ -487,7 +489,8 @@ class bitmex(ExchangeSocket):
                 self.add_order(id=id, symbol=symbol, side=side, amount=amount,
                                price=price, timestamp=timestamp,
                                remaining=remaining, filled=filled, type=type,
-                               stop=stop, datetime=d['timestamp'],  params=extra)
+                               stop=stop, datetime=datetime, average=average,
+                               params=extra)
             elif is_create_action and exists or action == 'update':
                 if amount is not None:
                     extra['amount'] = amount
@@ -499,7 +502,7 @@ class bitmex(ExchangeSocket):
                     extra['type'] = type
                 if side is not None:
                     extra['side'] = side
-                self.update_order(id, remaining, filled, params=extra)
+                self.update_order(id, remaining, filled, average=average, params=extra)
             #elif action == 'delete':
             #    self.update_order(id, 0, filled) #?
             else:
@@ -775,7 +778,10 @@ class bitmex(ExchangeSocket):
             },
             'ccxt_config': {
                 'urls': {
-                    'api': 'https://testnet.bitmex.com',
+                    'api': {
+                        'public': 'https://testnet.bitmex.com',
+                        'private': 'https://testnet.bitmex.com',
+                    },
                 },
             },
         }

@@ -181,6 +181,7 @@ class binancefu(binance):
         
         price = float(rr['p'])
         stop = float(rr['sp'])
+        average = float(rr['ap'])
         
         d = {
             'id': str(rr['i']), #ccxt parses to str
@@ -191,6 +192,7 @@ class binancefu(binance):
             'amount': float(rr['q']),
             'timestamp': r['E'],
             'stop': stop if stop else None,
+            'average': average if average else None,
             'filled': float(rr['z']),
         }
         
@@ -209,7 +211,7 @@ class binancefu(binance):
             self.add_order(**d)
         else:
             extra = {k:v for k,v in d.items() if k in ['type','side','price','stop','amount']}
-            self.update_order(d['id'], d['remaining'], d['filled'], params=extra)
+            self.update_order(d['id'], d['remaining'], d['filled'], average=d['average'], params=extra)
             
             
     def encode(self, rq, sub=None):
