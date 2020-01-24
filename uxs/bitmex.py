@@ -621,7 +621,7 @@ class bitmex(ExchangeSocket):
             #fill = dict(**mapped, info=d)
             fill = self.api.parse_trade(d)
             
-            self.add_fill(**fill)
+            self.add_fill_from_dict(fill)
     
     
     def on_position(self, message):
