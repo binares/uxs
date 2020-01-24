@@ -54,6 +54,8 @@ class ExchangeSocket(WSClient):
     
     channel_defaults = {
         'cnx_params_converter': 'm$convert_cnx_params',
+        'cnx_params_converter_config': {
+            'lower': {'symbol': True, 'currency': True}},
         'delete_data_on_unsub': True,
     }
     # If 'is_private' is set to True, .sign() is called on the specific output to server
@@ -1543,7 +1545,7 @@ class ExchangeSocket(WSClient):
             r = await self.api.create_order(symbol, type, side, amount, price, params)
             #{'id': '0abc123de456f78ab9012345', 'symbol': 'XRP/USDT', 'type': 'limit', 'side': 'buy',
             # 'status': 'open'}
-            if type=='limit' and self.order['add_automatically']:
+            if self.order['add_automatically']:
                 parsed = self.parse_ccxt_order(r)
                 try: self.orders[r['id']]
                 except KeyError:
@@ -1787,14 +1789,38 @@ class ExchangeSocket(WSClient):
     
     
     def convert_cnx_params(self, params):
-        def _lower(s):
+        channel = params['_']
+        lower = {}
+        upper = {}
+        
+        for x in ('symbol', 'currency', 'timeframe'):
+            lower[x] = self.get_value(channel, ['cnx_params_converter_config', 'lower', x])
+            upper[x] = self.get_value(channel, ['cnx_params_converter_config', 'upper', x])
+        
+        def _change_case(s, method='lower'):
             cls = list if not self.is_param_merged(s) else self.merge
-            return s.lower() if isinstance(s, str) else cls(x.lower() for x in s)
+            return getattr(s, method)() if isinstance(s, str) else \
+                   cls(getattr(x, method)() for x in s)
+        
         if 'symbol' in params and params['symbol'] is not None:
-            params['symbol'] = _lower(self.convert_symbol(params['symbol'], 1, force=True))
+            params['symbol'] = self.convert_symbol(params['symbol'], 1, force=True)
+        
         for attr in ('cy','currency'):
             if attr in params and params[attr] is not None:
-                params[attr] = _lower(self.convert_cy(params[attr], 1))
+                params[attr] = self.convert_cy(params[attr], 1)
+        
+        if 'timeframe' in params and params['timeframe'] is not None:
+            params['timeframe'] = self.api.timeframes[params['timeframe']]
+        
+        _map = {'cy': 'currency'}
+        for attr in ('symbol','cy','currency','timeframe'):
+            if attr in params and params[attr] is not None:
+                attr2 = _map.get(attr, attr)
+                if lower[attr2]:
+                    params[attr] = _change_case(params[attr], 'lower')
+                if upper[attr2]:
+                    params[attr] = _change_case(params[attr], 'upper')
+        
         return params
     
     
