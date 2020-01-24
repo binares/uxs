@@ -9,6 +9,12 @@ class binancefu:
                 'fetchMarkets': {'defaultType': 'future'},
                 'fetchBalance': {'defaultType': 'future'},
                 'fetchOpenOrders': {'defaultType': 'future'},
+            },
+            'fees': {
+                'trading': {
+                    'taker': 0.0004,
+                    'maker': 0.0002,
+                },
             }
         }
         config = deep_update(config, change, copy=True)
