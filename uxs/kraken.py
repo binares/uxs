@@ -76,8 +76,10 @@ class kraken(ExchangeSocket):
                    'baseVolume': True, 'quoteVolume': True, 'active': False},     
         'all_tickers': False,
         'orderbook': True,
-        'ohlcv': True,
-        'trades': True,
+        'ohlcv': {'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
+                   'order': False, 'type': True, 'takerOrMaker': False, 'side': True,
+                   'price': True, 'amount': True, 'cost': True, 'fee': False},
         'account': {'balance': False, 'order': True, 'fill': True},
         # Websocket versions are currently disabled
         'create_order': {'ws': False},
@@ -613,8 +615,8 @@ class kraken(ExchangeSocket):
         ]
         """
         symbol = self.convert_symbol(r[3], 0)
-        tf = int(r[2].split('-')[1])
-        timeframe = next(x for x,y in self.api.timeframes.items() if int(y)==tf)
+        tf = r[2].split('-')[1]
+        timeframe = self.convert_timeframe(tf, 0)
         parsed = self.parse_ohlcv(r[1], timeframe=timeframe)
         self.update_ohlcv(
             [{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': [parsed]}],

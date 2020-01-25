@@ -62,11 +62,7 @@ class binance(ExchangeSocket):
         'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
                    'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
                    'price': True, 'amount': True, 'cost': False, 'fee': False},
-        'ohlcv': {'timeframes': ['1m', '3m', '5m', '15m', '30m',
-                                 '1h', '2h', '4h', '6h', '8h', '12h',
-                                 '1d', '3d', '1w', '1M'],
-                  'open': True, 'high': True, 'low': True, 'close': True,
-                  'volume': True},
+        'ohlcv': {'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
         'account': {'balance': True, 'order': True, 'fill': False},
         'fetch_tickers': True,
         'fetch_ticker': {
@@ -284,7 +280,7 @@ class binance(ExchangeSocket):
         
         e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=id,
                                  side=side, price=price, amount=amount,
-                                 params={'info': r})
+                                 info=r)
         
         self.update_trades([{'symbol': symbol, 'trades': [e]}], enable_sub=True)
         
@@ -318,9 +314,10 @@ class binance(ExchangeSocket):
         symbol = self.convert_symbol(r['s'], 0)
         rr = r['k']
         e = self.api.ohlcv_entry(timestamp=rr['t'], open=rr['o'], high=rr['h'],
-                                 low=rr['l'], close=rr['c'], volume=rr['q'])
+                                 low=rr['l'], close=rr['c'], volume=rr['v'])
+        tf = self.convert_timeframe(rr['i'], 0)
         
-        self.update_ohlcv([{'symbol': symbol, 'timeframe': rr['i'], 'ohlcv': [e]}], enable_sub=True)
+        self.update_ohlcv([{'symbol': symbol, 'timeframe': tf, 'ohlcv': [e]}], enable_sub=True)
         
     
     def on_balance(self, r):

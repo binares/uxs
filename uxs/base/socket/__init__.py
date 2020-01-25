@@ -28,7 +28,6 @@ from fons.iter import unique, sequence_insert
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 
-
 class ExchangeSocket(WSClient):
     """
     Override these methods: handle, encode, sign, setup_test_env
@@ -162,12 +161,23 @@ class ExchangeSocket(WSClient):
             'is_private': True,
         },
     }
-    ORDER_KEYWORDS = ('id', 'symbol', 'side', 'price', 'amount', 'timestamp', 
-                      'remaining', 'filled', 'payout', 'datetime',
-                      'type', 'stop', 'cost', 'average')
-    FILL_KEYWORDS = ('id', 'symbol', 'side', 'price', 'amount', 'timestamp',
-                     'datetime', 'order', 'type', 'payout',
-                     'fee', 'fee_rate', 'takerOrMaker', 'cost',)
+    ORDER_KEYWORDS = (
+        'id', 'symbol', 'side', 'price', 'amount', 'timestamp', 
+        'remaining', 'filled', 'payout', 'datetime',
+        'type', 'stop', 'cost', 'average',
+    )
+    FILL_KEYWORDS = (
+        'id', 'symbol', 'side', 'price', 'amount', 'timestamp',
+        'datetime', 'order', 'type', 'payout',
+        'fee', 'fee_rate', 'takerOrMaker', 'cost',
+    )
+    TIMEFRAMES = (
+        '1m','3m','5m','15m','30m',
+        '1h','2h','4h','6h','8h','12h',
+        '1d','3d',
+        '1w',
+        '1M',
+    )
     symbol = {
         # List of quote currency ids
         'quote_ids': [],
@@ -218,6 +228,8 @@ class ExchangeSocket(WSClient):
         # automatically calculate it from each fill
         'update_payout_on_fill': True,
     }
+    # Will be extended by .api.timeframes
+    timeframes = {}
     trade = {
         'sort_by': lambda x: int(x['id']),
     }
@@ -256,6 +268,7 @@ class ExchangeSocket(WSClient):
          ['auth_info','api._auth_info'],
          ['profile','api._profile_name'],
          ['convert_currency','convert_cy'],
+         ['convert_tf','convert_timeframe'],
          ['fetch_orderbook','fetch_order_book'],
          ['subscribe_to_ob','subscribe_to_orderbook'],
          ['unsubscribe_to_ob','unsubscribe_to_orderbook'],
@@ -286,6 +299,7 @@ class ExchangeSocket(WSClient):
         'store',
         'symbol',
         'trade',
+        'timeframes',
     ]
     __deepcopy_on_init__ = __extend_attrs__[:]
     
@@ -414,6 +428,24 @@ class ExchangeSocket(WSClient):
         
         for x in ['balance','order','fill','position']:
             self.has[x] = self.has_got('account', x)
+        
+        # OHLCV and timeframes
+        deep_update(self.has, 
+                    {'ohlcv': {'_': self.has_got('ohlcv'), 'timeframes': {}}})
+        
+        api_timeframes = getattr(self.api, 'timeframes', None)
+        if api_timeframes is None:
+            api_timeframes = {}
+        
+        if self.has_got('ohlcv'):
+            self.timeframes.update(
+                {x: y for x,y in api_timeframes.items() if x not in self.timeframes})
+            self.timeframes = {x: y for x,y in self.timeframes.items() if y!='__del__'}
+            self.has['ohlcv']['timeframes'].update(
+                dict.fromkeys(list(self.timeframes), True))
+        
+        # '__del__' identifies timeframes that are present at ccxt Exchange but not in websocket
+        self.timeframes = {x: y for x,y in self.timeframes.items() if y!='__del__'}
     
     
     def _init_exceptions(self):
@@ -1375,7 +1407,7 @@ class ExchangeSocket(WSClient):
     
     
     def subscribe_to_ohlcv(self, symbol, timeframe='1m', params={}):
-        if timeframe not in self.api.timeframes:
+        if not self.has_got('ohlcv', 'timeframes', timeframe):
             raise ccxt.NotSupported("Timeframe '{}' is not supported." \
                                     " Choose one of the following: {}" \
                                     .format(timeframe, list(self.api.timeframes)))
@@ -1724,9 +1756,7 @@ class ExchangeSocket(WSClient):
     def convert_cy(self, currency, direction=1):
         """
         :param direction:
-             (currency_id is exchange-specific, commonCurrency is universal)
-             0: commonCurrency from currency_id
-             1: currency_id from commonCurrency
+             [0] common <-direction-> exchange-specific (id) [1]
         """
         try:
             if hasattr(currency, '__iter__') and not isinstance(currency, str):
@@ -1744,9 +1774,7 @@ class ExchangeSocket(WSClient):
     def convert_symbol(self, symbol, direction=1, force=None):
         """
         :param direction:
-            (currency_id is exchange-specific, commonCurrency is universal)
-             0: currency_id to commonCurrency
-             1: commonCurrency to currency_id
+             [0] common <-direction-> exchange-specific (id) [1]
         """
         keyError_occurred = False
         sep = self.symbol['sep']
@@ -1797,6 +1825,22 @@ class ExchangeSocket(WSClient):
                 self._reload_markets(error)
     
     
+    def convert_timeframe(self, timeframe, direction=1):
+        """
+        :param direction:
+             [0] common <-direction-> exchange-specific (id) [1]
+        """
+        if not direction:
+            tf = next((common for common,id in self.timeframes.items() if id==timeframe), None)
+        else:
+            tf = self.timeframes.get(timeframe)
+        
+        if tf is None:
+            raise ValueError('Not supported timeframe: {}'.format(timeframe))
+        
+        return tf
+    
+    
     def convert_cnx_params(self, params):
         channel = params['_']
         lower = {}
@@ -1819,7 +1863,7 @@ class ExchangeSocket(WSClient):
                 params[attr] = self.convert_cy(params[attr], 1)
         
         if 'timeframe' in params and params['timeframe'] is not None:
-            params['timeframe'] = self.api.timeframes[params['timeframe']]
+            params['timeframe'] = self.convert_timeframe(params['timeframe'], 1)
         
         _map = {'cy': 'currency'}
         for attr in ('symbol','cy','currency','timeframe'):
