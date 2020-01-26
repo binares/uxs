@@ -79,6 +79,7 @@ class ccxtWrapper:
         self._auth_info = dict({x: getattr(self,x,'') for x in self._token_kwds},
                                **{x:y for x,y in auth.items() if x not in self._token_kwds})
         self._profile_name = profile
+        self._synchronize_with = set()
         self.FEE_FROM_TARGET = self._custom_name in FEE_FROM_TARGET
         self.COST_LIMIT_WITH_FEE = self._custom_name in COST_LIMIT_WITH_FEE
         currencies = markets = None
@@ -96,6 +97,35 @@ class ccxtWrapper:
         if markets:
             self.set_markets(markets, currencies)
         self.cy_graph = self.load_cy_graph() if markets else None
+    
+    
+    def sync_with_other(self, other):
+        """
+        :param other:
+            another ccxtWrapper instance which's markets&currencies will be synced
+            with this one
+        """
+        self._synchronize_with.add(other)
+        other._synchronize_with.add(self)
+        self._ensure_synchronization()
+    
+    
+    def desync_with_other(self, other):
+        if other in self._synchronize_with:
+            self._syncronize_with.remove(other)
+        if self in other._synchronize_with:
+            other._synchronize_with.remove(self)
+    
+    
+    def _ensure_synchronization(self):
+        for api in self._synchronize_with:
+            api.markets = self.markets
+            api.markets_by_id = self.markets_by_id
+            api.marketsById = self.markets_by_id
+            api.symbols = self.symbols
+            api.ids = self.ids
+            api.currencies = self.currencies
+            api.currencies_by_id = self.currencies_by_id
     
     
     def repeatedTry(self, f, args=None, kwargs=None, attempts=2, sleep=0.5):
@@ -124,12 +154,14 @@ class ccxtWrapper:
             custom = poll.load_profile(self._profile_name,get_name(self),'markets')
         for item in default + custom:
             self.update_markets(item.data)
+        self._ensure_synchronization()
+        
         return self.markets
-                
-                
-    async def poll_load_markets(self, limit=None):
+    
+    
+    def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
-        await poll.load_markets(self, limit)
+        poll.sn_load_markets(self, limit)
         
         
     def update_markets(self, changed, deep=True, dismiss_new=True):
@@ -937,9 +969,14 @@ class ccxtWrapper:
         if self in d:
             del d[self]
         super(ccxtWrapper, self).__del__()
-    
-    
+
+
 class asyncCCXTWrapper(ccxtWrapper):
+    
+    async def poll_load_markets(self, limit=None):
+        import uxs.base.poll as poll
+        await poll.load_markets(self, limit)
+    
     
     async def create_order(self, symbol, type, side, amount, price=None, params={}):
         direction = as_direction(side)

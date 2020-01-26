@@ -56,6 +56,8 @@ class ExchangeSocket(WSClient):
         'cnx_params_converter_config': {
             'lower': {'symbol': True, 'currency': True}},
         'delete_data_on_unsub': True,
+        # load markets before allowing adding subscriptions
+        'on_creation': 'm$sn_load_markets',
     }
     # If 'is_private' is set to True, .sign() is called on the specific output to server
     # if 'ubsub' is set to False, .remove_subscription raises ExchangeSocketError on that channel
@@ -186,7 +188,8 @@ class ExchangeSocket(WSClient):
         # Usually symbol id starts with base, but some exchanges start with quote
         'startswith': 'base',
         # Default 'force' arg value in .convert_symbol()
-        'force': True,
+        # Forcing into exchange-id (direction=1) is less reliable, disable it
+        'force': {0: True, 1: False},
         # If KeyError occurs in .convert_symbol(), markets are automatically reloaded
         # by this interval. Set it to `None` to not reload markets.
         'reload_markets_on_KeyError': 150,
@@ -321,13 +324,29 @@ class ExchangeSocket(WSClient):
         profile = config.pop('profile', None)
         
         super().__init__(config)
-                
+        
+        if load_cached_markets is None:
+            load_cached_markets = self.fetch_limits['markets']
+        
+        # asynchronous ccxt Exchange instance
         self.api = init_exchange({
             'exchange':self.exchange,
             'async':True,
             'args': (ccxt_config,),
             'kwargs': {
                 'load_cached_markets': load_cached_markets,
+                'profile': profile,},
+            'auth': auth,
+            'add': False,
+        })
+        
+        # synchronous ccxt Exchange instance
+        self.snapi = init_exchange({
+            'exchange':self.exchange,
+            'async':False,
+            'args': (ccxt_config,),
+            'kwargs': {
+                'load_cached_markets': False,
                 'profile': profile,},
             'auth': auth,
             'add': False,
@@ -340,6 +359,8 @@ class ExchangeSocket(WSClient):
             self.api.markets =  {}
         if getattr(self.api,'currencies',None) is None:
             self.api.currencies = {}
+        
+        self.api.sync_with_other(self.snapi)
         
         names = ['ticker','orderbook','trades','ohlcv','balance',
                  'fill','order','position','empty','recv']
@@ -376,13 +397,6 @@ class ExchangeSocket(WSClient):
         
         self.orderbook_maintainer = self.OrderbookMaintainer_cls(self)
         self._last_markets_loaded_ts = 0
-    
-    
-    async def _init_markets(self):
-        limit = self.fetch_limits['markets']
-        await self.api.poll_load_markets(limit)
-        self._init_events()
-        self._init_markets_done = True
     
     
     def _init_events(self):
@@ -471,11 +485,26 @@ class ExchangeSocket(WSClient):
         raise NotImplementedError
     
     
-    async def on_start(self):
-        #TODO: make _init_markets safe?
-        if not getattr(self,'_init_markets_done',None):
-            await self._init_markets()
+    async def load_markets(self, reload=False, limit=None):
+        if not reload and self.api.markets:
+            return
+        if limit is None:
+            limit = self.fetch_limits['markets']
+        await self.api.poll_load_markets(limit)
         self._init_events()
+    
+    
+    def sn_load_markets(self, reload=False, limit=None):
+        if not reload and self.snapi.markets:
+            return
+        if limit is None:
+            limit = self.fetch_limits['markets']
+        self.snapi.poll_load_markets(limit)
+        self._init_events()
+    
+    
+    async def on_start(self):
+        await self.load_markets()
     
     
     def notify_unknown(self, r, max_chars=500):
@@ -1742,6 +1771,8 @@ class ExchangeSocket(WSClient):
     
     
     def currency_id(self, commonCode):
+        # This can be wildly inaccurate when the currencies haven't been initated yet.
+        # ccxt doesn't actually use this function in any of its exchanges
         return self.api.currency_id(commonCode)
     
     
@@ -1753,11 +1784,41 @@ class ExchangeSocket(WSClient):
         return self.api.markets[symbol]['id']
     
     
+    def guess_symbol(self, symbol, direction=1):
+        """
+        Convert by detecting and converting currencies in symbol
+        :param direction:
+             [0] common <-direction-> exchange-specific (id) [1]
+        """
+        if not isinstance(symbol, str):
+            raise TypeError('Symbol must be of type <str>, got: {}'.format(type(symbol)))
+        sep = self.symbol['sep']
+        sw = self.symbol['startswith']
+        step = 1 if sw=='base' else -1
+        if not direction:
+            if not sep:
+                method = 'endswith' if sw=='base' else 'startswith'
+                ln = next((len(q) for q in self.symbol['quote_ids']
+                           if getattr(symbol, method)(q)), None)
+                if ln is None:
+                    raise KeyError(symbol)
+                if sw == 'base':
+                    cys = [symbol[:-ln], symbol[-ln:]]
+                else:
+                    cys = [symbol[:ln], symbol[ln:]]
+            else:
+                cys = symbol.split(sep)
+            return '/'.join([self.convert_cy(x, 0) for x in cys[::step]])
+        else:
+            return sep.join([self.convert_cy(x, 1) for x in symbol.split('/')[::step]])
+    
+    
     def convert_cy(self, currency, direction=1):
         """
         :param direction:
              [0] common <-direction-> exchange-specific (id) [1]
         """
+        self.sn_load_markets()
         try:
             if hasattr(currency, '__iter__') and not isinstance(currency, str):
                 cls = list if not self.is_param_merged(currency) else self.merge
@@ -1776,48 +1837,34 @@ class ExchangeSocket(WSClient):
         :param direction:
              [0] common <-direction-> exchange-specific (id) [1]
         """
+        self.sn_load_markets()
         keyError_occurred = False
-        sep = self.symbol['sep']
-        sw = self.symbol['startswith']
-        step = 1 if sw=='base' else -1
         if force is None:
             force = self.symbol['force']
+        if isinstance(force, dict):
+            force = force[direction]
         
         try:
             if hasattr(symbol, '__iter__') and not isinstance(symbol, str):
                 cls = list if not self.is_param_merged(symbol) else self.merge
                 return cls(self.convert_symbol(_s, direction, force) for _s in symbol)
-        
+            
             if not direction:
                 try:
                     return self.symbol_by_id(symbol)
                 except KeyError:
+                    keyError_occurred = True
                     if symbol.startswith('.'):
                         # Bitmex symbol ids starting with "." map 1:1 to ccxt
-                        keyError_occurred = True
                         return symbol
-                    if not force:
-                        raise KeyError(symbol)
-                if not sep:
-                    method = 'endswith' if sw=='base' else 'startswith'
-                    ln = next((len(q) for q in self.symbol['quote_ids']
-                               if getattr(symbol, method)(q)), None)
-                    if ln is None:
-                        raise KeyError(symbol)
-                    if sw == 'base':
-                        cys = [symbol[:-ln], symbol[-ln:]]
-                    else:
-                        cys = [symbol[:ln], symbol[ln:]]
-                else:
-                    cys = symbol.split(sep)
-                return '/'.join([self.convert_cy(x, 0) for x in cys[::step]])
             else:
                 try:
                     return self.id_by_symbol(symbol)
                 except KeyError:
-                    if not force:
-                        raise KeyError(symbol)
-                return sep.join([self.convert_cy(x, 1) for x in symbol.split('/')[::step]])
+                    keyError_occurred = True
+            if not force and keyError_occurred:
+                raise KeyError(symbol)
+            return self.guess_symbol(symbol, direction)
         finally:
             error = sys.exc_info()[1]
             if isinstance(error, KeyError) or keyError_occurred:
@@ -1884,7 +1931,7 @@ class ExchangeSocket(WSClient):
             error_txt = '(due to error: {})'.format(repr(e)) if e is not None else ''
             logger.error('{} - force reloading markets {}'.format(self.name, error_txt))
             self._last_markets_loaded_ts = time.time()
-            asyncio.ensure_future(self.api.poll_load_markets(limit=0), loop=self.loop)
+            asyncio.ensure_future(self.load_markets(reload=True, limit=0), loop=self.loop)
     
     
     def encode_symbols(self, symbols, topics):
