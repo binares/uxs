@@ -15,7 +15,7 @@ from uxs.base.auth import (read_tokens, get_auth, get_auth2, cache_password,
                            encrypt_tokens, decrypt_tokens, _interpret_exchange)
 
 from uxs.base import poll
-from uxs.base.poll import (fetch, clear_cache)
+from uxs.base.poll import (fetch, sn_fetch, clear_cache)
 
 import uxs.fintls as fintls
 

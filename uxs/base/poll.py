@@ -7,6 +7,7 @@ import yaml
 import asyncio
 from copy import deepcopy
 import ccxt
+import time
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
@@ -167,6 +168,40 @@ async def load_markets(api, limit=None):
             api.currencies = currencies_initial
 
 
+def sn_load_markets(api, limit=None):
+    exchange = get_name(api)
+    limit = _resolve_limit(exchange, 'markets', limit)
+    markets_initial = api.markets
+    currencies_initial = api.currencies
+    api.markets = {}
+    api.currencies = {}
+    markets = currencies = None
+    try:
+        #this will call load_markets, which will set both markets and currencies
+        m0 = sn_fetch(exchange,'markets',limit,strip=False)[0]
+        #unless it loaded from cache, in which case they will have to be set manually
+        if not api.markets:
+            l1 = limit
+            l2 = _resolve_limit(exchange, 'markets', m0.date)
+            limit = min(l1,l2) if None not in (l1,l2) else \
+                    next((x for x in (l1,l2) if x is not None),None)
+            markets = m0.data
+            
+            if not api.currencies:
+                currencies = load(exchange,'currencies',limit,1)[0].data
+    except Exception as e:
+        logger.exception(e)
+    finally:
+        if markets:
+            logger.debug('{} - setting markets'.format(exchange))
+            try: api.set_markets(markets,currencies)
+            except Exception as e2:
+                logger.exception(e2)
+        if not api.markets:
+            api.markets = markets_initial
+            api.currencies = currencies_initial
+
+
 async def get(exchange, type, limit=None, max=1,*,
               file=True, globals=True, empty_update=True,
               blocked='sleep', args=None, kwargs=None, loop=None,
@@ -216,6 +251,55 @@ async def get(exchange, type, limit=None, max=1,*,
     return items
 
 
+def sn_get(exchange, type, limit=None, max=1,*,
+           file=True, globals=True, empty_update=True,
+           blocked='sleep', args=None, kwargs=None, loop=None,
+           cache=True, attempts=2, raise_e=False):
+    """
+    Tries to retrieve the latest data, by either
+      A) loading unexpired cache
+      B) ccxt api fetch if no unexpired cache was found
+    :param max: how many unexpired cache entries (of different time) are being loaded
+    :param blocked: what to do if in this very moment ccxt api fetch
+                    with the exact same (exchange, type) values is already being performed
+                    'sleep','ignore' or 'return' 
+                    ('return' returns empty list)
+    :param cache: if B was performed (update()), whether or not to cache the new data
+    For other params see fetch() docstring
+    """
+    exchange0 = exchange
+    exchange, _ = _exchange_and_type_to_str(exchange, type)
+    type = _resolve_type(type)
+    limit = _resolve_limit(exchange, type, limit)
+    
+    if blocked is None: blocked = 'sleep'
+    elif blocked not in ('sleep','ignore','return'):
+        raise ValueError(blocked)
+    
+    if blocked != 'ignore':
+        wait_for = _is_blocked(exchange,type)
+        if not wait_for: pass
+        elif blocked == 'sleep':
+            time.sleep(wait_for)
+        else:
+            return []
+    
+    items = []
+    
+    if file:
+        items = load(exchange, type, limit, max, globals=globals)
+    elif globals:
+        items = retrieve(exchange, type, limit, max)
+    
+    
+    if not items and empty_update:
+        items = sn_update(exchange0, type, args, kwargs, loop=loop,
+                          file=file, globals=globals, blocked=blocked,
+                          cache=cache, attempts=attempts, raise_e=raise_e)
+        
+    return items
+
+
 async def fetch(exchange, type, limit=None, *,
                 file=True, globals=True, empty_update=True,
                 args=None, kwargs=None, loop=None, strip=True, attempts=1):
@@ -256,7 +340,49 @@ async def fetch(exchange, type, limit=None, *,
         return l[0].data
     else:
         return l
+
+
+def sn_fetch(exchange, type, limit=None, *,
+             file=True, globals=True, empty_update=True,
+             args=None, kwargs=None, loop=None, strip=True, attempts=1):
+    """
+    Checks whether reading from storage if enabled for the method of the exchange,
+    if true proceeds with get(...), otherwise update()
+    :param exchange: str or api (ccxtWrapper instance)
+    :param type: str or (str, specification)
+            Examples:
+                'tickers'
+                ('ticker', 'ETH/BTC')
+                ('orderbook', 'BTC/USD')
+    :param args: args passed to ccxt api fetch
+    :param kwargs: kwargs passed to ccxt api fetch
+    :param attempts: retries for ccxt api fetch, should an error occur
     
+    Only applies if caching is enabled:
+    :type limit: dt or timedelta-like (timedelta, seconds, freqstr)
+    :param limit: max age of the cached data. If None then default cache_expiry 
+                of exchange and type is used. -1 (< 0) for no age limit.
+    :param file: allow reading from cache files (unexpired)
+    :param globals: allow retrieving from global cache (unexpired)
+    :param empty_update: if no unexpired cache was found, force fetch new data (update())
+    """
+    type = _resolve_type(type)
+    
+    if not is_caching_enabled(exchange, type):
+        l = sn_update(exchange, type, args, kwargs, loop=loop,
+                      file=False, globals=False, cache=False,
+                      blocked='ignore', attempts=attempts, raise_e=True)
+    else:
+        l = sn_get(exchange, type, limit=limit, max=1,
+                   file=file, globals=globals, empty_update=empty_update,
+                   blocked='sleep', args=args, kwargs=kwargs, loop=loop,
+                   attempts=attempts, raise_e=True)
+    
+    if strip:
+        return l[0].data
+    else:
+        return l
+
 
 async def update(exchange, type, args=None, kwargs=None, *,
                  file=True, globals=True, loop=None, limit=None,
@@ -341,6 +467,108 @@ async def update(exchange, type, args=None, kwargs=None, *,
             elif isinstance(e, KeyError) and type=='tickers' and not i:
                 logger.debug('{} - fetch_tickers caused KeyError. Re-loading markets.'.format(exchange))
                 await load_markets(api)
+            if i == attempts-1:
+                logger2.error('{} - error fetching {}: {}'.format(exchange, type, e))
+                logger.exception(e)
+        else: break
+        i += 1
+    
+    if exc is not None and i == attempts-1 and raise_e:
+        raise exc
+    
+    if cache:
+        globalise(inf)
+        save(inf)
+    
+    if is_market and inf:
+        inf = inf[:1]
+        
+    return inf
+
+
+def sn_update(exchange, type, args=None, kwargs=None, *,
+              file=True, globals=True, loop=None, limit=None,
+              cache=True, blocked='sleep', attempts=2, raise_e=False):
+    """
+    Tries to retrieve the latest data, by either
+      A) [IF (exchange, type) is being blocked by parallel update(),
+          and blocked is not set to 'ignore']
+         loading unexpired cache
+      B) ccxt api fetch if no unexpired cache was found
+    Param explanations can be found in fetch() and get() docstrings
+    """
+    exchange0 = exchange
+    exchange, _ = _exchange_and_type_to_str(exchange, type)
+    type = _resolve_type(type)
+    limit = _resolve_limit(exchange, type, limit)
+    
+    if blocked is None: blocked = 'sleep'
+    elif blocked not in ('sleep','ignore','return'):
+        raise ValueError(blocked)
+    
+    if args is None: args = tuple()
+    if kwargs is None: kwargs = {}
+    
+    try: api = get_exchange({'xc': exchange0, 'id': 'INFO'})
+    except ValueError as e:
+        if type in ('balances','balances-account'):
+            raise e
+        config = {'exchange': exchange, 'info': False, 'trade': False}
+        logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
+        api = get_exchange(config)
+    
+    if blocked != 'ignore': 
+        wait_for = _is_blocked(exchange, type)
+        if not wait_for: pass
+        elif blocked == 'sleep':
+            time.sleep(wait_for, loop=loop)
+            if file:
+                return load(exchange, type, limit, 1, globals=globals)
+            elif globals:
+                return retrieve(exchange, type, limit, 1)
+            #else:
+            #   return []
+        else:
+            return []
+    
+    inf = []
+    
+    type0 = _type0(type)
+    method_str, args2, kwargs2, kw_ids = _METHODS[type0]
+    #for symbol, the type must be in format (name,symbol)
+    # and symbol must not be included in args/kwargs
+    #kwargs2 = dict(kwargs2, **{x:type[i+1] for i,x in enumerate(kw_ids)})
+    method = getattr(api,method_str)
+    #print(api._custom_name,'method:',method,'session:',api.session)
+    args = tuple(args) + args2[len(args):]
+    if kw_ids:
+        args = tuple(type[i+1] for i,x in enumerate(kw_ids)) + args
+    kwargs = dict(kwargs2, **kwargs)
+    is_market = (type == 'markets')
+    
+    if type0 in _LOADS_MARKETS and not api.markets:
+        sn_load_markets(api)
+    
+    exc, i = None, 0
+    while i < attempts:
+        #Only block if we later cache the results
+        # (we don't want parallel update() -s to wait for nothing)
+        if cache:
+            _block(exchange, type, _BLOCK[type0])
+        try:
+            data = method(*args,**kwargs)
+            #await api.close()
+            now = dt_round_to_digit(dt.utcnow(), 6)
+            inf.append(create_new(exchange, type, now, data=data))
+            if is_market:
+                inf.append(create_new(exchange, 'currencies', now, data=api.currencies))
+        except Exception as e:
+            exc = e
+            if isinstance(e, ccxt.NotSupported): 
+                i = attempts-1
+            elif isinstance(e, KeyError) and type=='tickers' and not i:
+                logger.debug('{} - fetch_tickers caused KeyError. Re-loading markets.'.format(exchange))
+                sn_load_markets(api)
             if i == attempts-1:
                 logger2.error('{} - error fetching {}: {}'.format(exchange, type, e))
                 logger.exception(e)
