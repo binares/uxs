@@ -407,11 +407,11 @@ async def update(exchange, type, args=None, kwargs=None, *,
     if args is None: args = tuple()
     if kwargs is None: kwargs = {}
     
-    try: api = get_exchange({'xc': exchange0, 'id': 'INFO'})
+    try: api = get_exchange({'xc': exchange0, 'async': True, 'id': 'INFO'})
     except ValueError as e:
         if type in ('balances','balances-account'):
             raise e
-        config = {'exchange': exchange, 'info': False, 'trade': False}
+        config = {'exchange': exchange, 'async': True, 'info': False, 'trade': False}
         logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
         api = get_exchange(config)
     
@@ -509,11 +509,11 @@ def sn_update(exchange, type, args=None, kwargs=None, *,
     if args is None: args = tuple()
     if kwargs is None: kwargs = {}
     
-    try: api = get_exchange({'xc': exchange0, 'id': 'INFO'})
+    try: api = get_exchange({'xc': exchange0, 'async': False, 'id': 'INFO'})
     except ValueError as e:
         if type in ('balances','balances-account'):
             raise e
-        config = {'exchange': exchange, 'info': False, 'trade': False}
+        config = {'exchange': exchange, 'async': False, 'info': False, 'trade': False}
         logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
         api = get_exchange(config)
     
