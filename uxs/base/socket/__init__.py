@@ -504,7 +504,10 @@ class ExchangeSocket(WSClient):
     
     
     async def on_start(self):
-        await self.load_markets()
+        # use synchronous function to block any simultaneous loading
+        # (e.g. when a subscription is created the first time),
+        # which would result in double fetch
+        self.sn_load_markets()
     
     
     def notify_unknown(self, r, max_chars=500):
@@ -1931,7 +1934,11 @@ class ExchangeSocket(WSClient):
             error_txt = '(due to error: {})'.format(repr(e)) if e is not None else ''
             logger.error('{} - force reloading markets {}'.format(self.name, error_txt))
             self._last_markets_loaded_ts = time.time()
-            asyncio.ensure_future(self.load_markets(reload=True, limit=0), loop=self.loop)
+            if self.loop.is_running():
+                asyncio.ensure_future(
+                    self.load_markets(reload=True, limit=0), loop=self.loop)
+            else:
+                self.sn_load_markets(reload=True, limit=0)
     
     
     def encode_symbols(self, symbols, topics):
