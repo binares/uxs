@@ -166,6 +166,8 @@ async def load_markets(api, limit=None):
         if not api.markets:
             api.markets = markets_initial
             api.currencies = currencies_initial
+    
+    return api.markets
 
 
 def sn_load_markets(api, limit=None):
@@ -200,6 +202,8 @@ def sn_load_markets(api, limit=None):
         if not api.markets:
             api.markets = markets_initial
             api.currencies = currencies_initial
+    
+    return api.markets
 
 
 async def get(exchange, type, limit=None, max=1,*,

@@ -128,6 +128,16 @@ class ccxtWrapper:
             api.currencies_by_id = self.currencies_by_id
     
     
+    def _ensure_no_nulls(self):
+        _map = {'symbols': list, 'ids': list}
+        for attr in ('markets','currencies','markets_by_id',
+                     'symbols','ids','currencies_by_id'):
+            if getattr(self, attr, None) is None:
+                setattr(self, attr, _map.get(attr, dict)())
+        
+        self.marketsById = self.markets_by_id
+    
+    
     def repeatedTry(self, f, args=None, kwargs=None, attempts=2, sleep=0.5):
         if isinstance(f,str): f = getattr(self,f)
         if args is None: args = tuple()
@@ -161,7 +171,7 @@ class ccxtWrapper:
     
     def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
-        poll.sn_load_markets(self, limit)
+        return poll.sn_load_markets(self, limit)
         
         
     def update_markets(self, changed, deep=True, dismiss_new=True):
@@ -975,7 +985,7 @@ class asyncCCXTWrapper(ccxtWrapper):
     
     async def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
-        await poll.load_markets(self, limit)
+        return await poll.load_markets(self, limit)
     
     
     async def create_order(self, symbol, type, side, amount, price=None, params={}):

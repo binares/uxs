@@ -270,6 +270,8 @@ class ExchangeSocket(WSClient):
          ['secret','api.secret'],
          ['auth_info','api._auth_info'],
          ['profile','api._profile_name'],
+         ['markets','api.markets'],
+         ['currencies','api.currencies'],
          ['convert_currency','convert_cy'],
          ['convert_tf','convert_timeframe'],
          ['fetch_orderbook','fetch_order_book'],
@@ -355,10 +357,9 @@ class ExchangeSocket(WSClient):
         self._init_has()
         self._init_exceptions()
         
-        if getattr(self.api,'markets',None) is None:
-            self.api.markets =  {}
-        if getattr(self.api,'currencies',None) is None:
-            self.api.currencies = {}
+        # Some methods do not assume that a markets / currencies etc value
+        # can be `None`. Replace with empty dicts / lists instead.
+        self.api._ensure_no_nulls()
         
         self.api.sync_with_other(self.snapi)
         
@@ -492,6 +493,8 @@ class ExchangeSocket(WSClient):
             limit = self.fetch_limits['markets']
         await self.api.poll_load_markets(limit)
         self._init_events()
+        
+        return self.api.markets
     
     
     def sn_load_markets(self, reload=False, limit=None):
@@ -501,6 +504,8 @@ class ExchangeSocket(WSClient):
             limit = self.fetch_limits['markets']
         self.snapi.poll_load_markets(limit)
         self._init_events()
+        
+        return self.snapi.markets
     
     
     async def on_start(self):
