@@ -6,6 +6,7 @@ from copy import deepcopy
 
 from .auth import (get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
 from . import wrappers as _wrappers
+from .wrappers import async_support as _wrappers_async
 from uxs.fintls.basics import (as_direction, calc_price, convert_quotation, create_cy_graph)
 from uxs.fintls.utils import resolve_times
 from uxs.fintls.margin import Position
@@ -16,13 +17,6 @@ import fons.math
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
-ccxt.hitbtc.commonCurrencies = \
-ccxt.hitbtc2.commonCurrencies = \
-ccxt.async_support.hitbtc.commonCurrencies = \
-ccxt.async_support.hitbtc2.commonCurrencies = \
-    dict(ccxt.Exchange.commonCurrencies,
-         BCC = 'Bitconnect',
-    )
 ccxt.async_support.poloniex.rateLimit = 100
 ccxt.async_support.poloniex.enableRateLimit = True
 QUOTE_PREFERENCE_ORDER = \
@@ -44,18 +38,14 @@ _E_REPLACE = {
     'coinbase-pro':'coinbasepro',
     'gdax':'coinbasepro',
 }
-wrappers = {
-    'binancefu': _wrappers.binancefu,
-    'bitmex': _wrappers.bitmex,
-}
 #PRICE_ACCURACY = 3
 AMOUNT_ACCURACY = 3
 
 _ccxt_cls_wrapped = {}
 _ccxt_cls_wrapped_async = {}
 
-_exchanges = {}
-_exchanges_async = {}
+_exchange_instances = {}
+_exchange_instances_async = {}
 
 
 class ccxtWrapper:
@@ -975,7 +965,7 @@ class ccxtWrapper:
         
 
     def __del__(self):
-        d = _exchanges_async if isinstance(self, asyncCCXTWrapper) else _exchanges
+        d = _exchange_instances_async if isinstance(self, asyncCCXTWrapper) else _exchange_instances
         if self in d:
             del d[self]
         super(ccxtWrapper, self).__del__()
@@ -1055,16 +1045,19 @@ def init_exchange(exchange):
             if e_obj is not None else RETURN_ASYNC_EXCHANGE)
     ccxt_module = ccxt if not asyn else ccxt.async_support
     cls_reg = _ccxt_cls_wrapped if not asyn else _ccxt_cls_wrapped_async
-    e_reg = _exchanges if not asyn else _exchanges_async
+    e_reg = _exchange_instances if not asyn else _exchange_instances_async
     
     if e not in cls_reg:
         # Dynamically create the class
-        _name = _E_REPLACE.get(e,e)
-        eCls =  getattr(ccxt_module, _name)
+        _name = _E_REPLACE.get(e, e)
+        ccxt_eCls =  getattr(ccxt_module, _name)
         wrCls = ccxtWrapper if not asyn else asyncCCXTWrapper
-        eWrCls = wrappers.get(e)
-        bases = (eWrCls,wrCls,eCls) if eWrCls is not None else (wrCls,eCls)
-        cls_reg[e] = type(e,bases,{})
+        bases = (wrCls, ccxt_eCls)
+        if e in _wrappers.__all__:
+            bases = (getattr(_wrappers, e),) + bases
+        if e in _wrappers_async.__all__:
+            bases = (getattr(_wrappers_async, e),) + bases
+        cls_reg[e] = type(e, bases, {})
        
     e_cls = cls_reg[e]
                 
