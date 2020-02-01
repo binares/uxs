@@ -7,6 +7,7 @@ from copy import deepcopy
 from .auth import (get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
 from . import wrappers as _wrappers
 from .wrappers import async_support as _wrappers_async
+from .wrappers import sync_support as _wrappers_sync
 from uxs.fintls.basics import (as_direction, calc_price, convert_quotation, create_cy_graph)
 from uxs.fintls.utils import resolve_times
 from uxs.fintls.margin import Position
@@ -1055,6 +1056,8 @@ def init_exchange(exchange):
         bases = (wrCls, ccxt_eCls)
         if e in _wrappers.__all__:
             bases = (getattr(_wrappers, e),) + bases
+        if not asyn and e in _wrappers_sync.__all__:
+            bases = (getattr(_wrappers_sync, e),) + bases
         if asyn and e in _wrappers_async.__all__:
             bases = (getattr(_wrappers_async, e),) + bases
         cls_reg[e] = type(e, bases, {})
