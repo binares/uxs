@@ -1055,7 +1055,7 @@ def init_exchange(exchange):
         bases = (wrCls, ccxt_eCls)
         if e in _wrappers.__all__:
             bases = (getattr(_wrappers, e),) + bases
-        if e in _wrappers_async.__all__:
+        if asyn and e in _wrappers_async.__all__:
             bases = (getattr(_wrappers_async, e),) + bases
         cls_reg[e] = type(e, bases, {})
        
