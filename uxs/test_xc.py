@@ -227,11 +227,18 @@ async def place_order(*args):
     global oid
     symbol, amount, price = args[:3] if len(args) else ('ETH/BTC', 0.1, 0.01)
     amount = float(amount)
-    price = float(price)
+    type = 'limit'
+    if price=='market':
+        type = 'market'
+        price = None
+    else:
+        price = float(price)
     side = 'buy' if len(args) < 4 else args[3]
     await asyncio.sleep(4)
-    try: 
-        r = await xs.create_limit_order(symbol, side, amount, price)
+    try:
+        _args = (price,) if price is not None else ()
+        print('Creating order: {}'.format((symbol, type, side, amount) +_args))
+        r = await xs.create_order(symbol, type, side, amount, *_args)
         print('r_place: ', r)
         oid = r['id']
     except Exception as e:
@@ -240,6 +247,7 @@ async def place_order(*args):
 async def cancel_order(*args):
     symbol = args[0] if len(args) else 'ETH/BTC'
     await asyncio.sleep(6)
+    print('Canceling order - id: {} symbol: {}'.format(oid, symbol))
     r = await xs.cancel_order(oid, symbol)
     print('r_cancel ', r)
 

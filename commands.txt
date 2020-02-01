@@ -1,5 +1,5 @@
 python -m uxs.test_xc binance ob=ETH/BTC d
-python -m uxs.test_xc binance ob=ETH/BTC -unsub 5 -resub 2 d
+python -m uxs.test_xc binance ob=BTC/USDT -unsub 5 -resub 2 d
 python -m uxs.test_xc binance ob=ETH/BTC,BTC/USDT -unsub 5 -resub 2
 python -m uxs.test_xc binance ob=ETH/BTC,BTC/USDT m -unsub 5 -resub 2
 python -m uxs.test_xc binance ticker=ETH/BTC,BTC/USDT u r s
@@ -28,13 +28,15 @@ python -m uxs.test_xc kraken order test d
 python -m uxs.test_xc kraken order+-XRP/EUR,32.8,0.26,sell
 python -m uxs.test_xc kraken "order-INSERT_ORDER_ID||XRP/EUR" test d
 python -m uxs.test_xc kucoin ticker=XRP/BTC ob order -unsub 6 -resub 2 s
+python -m uxs.test_xc kucoin order+- d test
 python -m uxs.test_xc poloniex tickers u r s
 python -m uxs.test_xc poloniex ob order u r s
-python -m uxs.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d
-python -m uxs.test_xc bitmex ob=BTC/USD d
-python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=10 d
-python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=25 d
+python -m uxs.test_xc bitmex ob=BTC/USD d test
+python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=10 d test
+python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=25 d test
 python -m uxs.test_xc bitmex tickers d
+python -m uxs.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d test
+python -m uxs.test_xc bitmex order+BCHH20,1,0.04142,buy test
 python -m uxs.test_xc binancefu order position d
 python -m uxs.test_xc binancefu ob=BTC/USDT d
 python -m uxs.test_xc binancefu ticker=BTC/USDT,ETH/USDT m d
@@ -48,3 +50,11 @@ python -m pytest test/test_auth.py -vv -ss
 python -m pytest test/test_ccxt.py
 python -m pytest test/test_poll.py
 python -m pytest test/test_settings.py
+
+python -m examples.a_basics
+python -m examples.b_authenticated
+python -m examples.c_wait_on_stream
+python -m examples.d_callbacks
+python -m examples.e_trade
+python -m examples.f_caching
+python -m examples.g_storing_tokens
