@@ -1,9 +1,6 @@
-from fons.dict_ops import deep_update
-
-
 class binancefu:
-    def __init__(self, config={}, *args, **kw):
-        change = {
+    def describe(self):
+        config = {
             'options': {
                 'defaultType': 'future',
                 'fetchTradesMethod': 'fapiPublicGetAggTrades',
@@ -16,6 +13,4 @@ class binancefu:
                 },
             }
         }
-        config = deep_update(config, change, copy=True)
-        
-        super().__init__(config, *args, **kw)
+        return self.deep_extend(super().describe(), config)
