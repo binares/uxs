@@ -5,10 +5,9 @@ class binancefu:
     def __init__(self, config={}, *args, **kw):
         change = {
             'options': {
-                'fetchTime': {'defaultType': 'future'},
-                'fetchMarkets': {'defaultType': 'future'},
-                'fetchBalance': {'defaultType': 'future'},
-                'fetchOpenOrders': {'defaultType': 'future'},
+                'defaultType': 'future',
+                'fetchTradesMethod': 'fapiPublicGetAggTrades',
+                'fetchTickersMethod': 'fapiPublicGetTicker24hr',
             },
             'fees': {
                 'trading': {
