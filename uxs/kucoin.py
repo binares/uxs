@@ -89,14 +89,6 @@ class kucoin(ExchangeSocket):
             'url_components': {
                 'base': kucoin.url_components['test'],
             },
-            'ccxt_config': {
-                'urls': {
-                    'api': {
-                        'public': kucoin.url_components['test'],
-                        'private': kucoin.url_components['test'],
-                    },
-                },
-            },
         }
     
     

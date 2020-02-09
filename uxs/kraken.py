@@ -1055,6 +1055,7 @@ class kraken(ExchangeSocket):
                 'create_order': {'url': '<$beta>'},
                 'cancel_order': {'url': '<$beta>'},
             },
+            'ccxt_test': False,
         }
     
     

@@ -48,6 +48,7 @@ class binancefu(binance):
                     },
                 },
             },
+            'ccxt_test': False,
         }
     
     def on_futures_account(self, r):

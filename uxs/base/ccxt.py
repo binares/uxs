@@ -53,7 +53,8 @@ class ccxtWrapper:
     """Wraps any ccxt exchange"""
     Position = Position
         
-    def __init__(self, config={}, *, load_cached_markets=None, profile=None, auth=None):
+    def __init__(self, config={}, *, test=False,
+                 load_cached_markets=None, profile=None, auth=None):
         import uxs.base.poll as poll
         if config is None: config = {}
         else: config = config.copy()
@@ -71,6 +72,9 @@ class ccxtWrapper:
                                **{x:y for x,y in auth.items() if x not in self._token_kwds})
         self._profile_name = profile
         self._synchronize_with = set()
+        self._is_test = test
+        if test:
+            self.set_sandbox_mode(True)
         self.FEE_FROM_TARGET = self._custom_name in FEE_FROM_TARGET
         self.COST_LIMIT_WITH_FEE = self._custom_name in COST_LIMIT_WITH_FEE
         currencies = markets = None

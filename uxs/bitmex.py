@@ -776,14 +776,6 @@ class bitmex(ExchangeSocket):
             'url_components': {
                 'base': 'wss://testnet.bitmex.com/realtime',
             },
-            'ccxt_config': {
-                'urls': {
-                    'api': {
-                        'public': 'https://testnet.bitmex.com',
-                        'private': 'https://testnet.bitmex.com',
-                    },
-                },
-            },
         }
     
     

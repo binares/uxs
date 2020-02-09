@@ -325,6 +325,7 @@ class ExchangeSocket(WSClient):
         ccxt_config = config.pop('ccxt_config', {}).copy()
         load_cached_markets = config.pop('load_cached_markets', None)
         profile = config.pop('profile', None)
+        ccxt_test = config.pop('ccxt_test', is_test)
         
         super().__init__(config)
         
@@ -338,7 +339,8 @@ class ExchangeSocket(WSClient):
             'args': (ccxt_config,),
             'kwargs': {
                 'load_cached_markets': load_cached_markets,
-                'profile': profile,},
+                'profile': profile,
+                'test': ccxt_test,},
             'auth': auth,
             'add': False,
         })
@@ -350,7 +352,8 @@ class ExchangeSocket(WSClient):
             'args': (ccxt_config,),
             'kwargs': {
                 'load_cached_markets': False,
-                'profile': profile,},
+                'profile': profile,
+                'test': ccxt_test,},
             'auth': auth,
             'add': False,
         })
