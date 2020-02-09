@@ -13,7 +13,7 @@ from uxs.fintls.utils import resolve_times
 from uxs.fintls.margin import Position
 
 from fons.dict_ops import deep_update
-from fons.iter import flatten
+from fons.iter import flatten, unique
 import fons.math
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
@@ -333,6 +333,37 @@ class ccxtWrapper:
                 e[var] = float(e[var])
         
         return e
+    
+    
+    def lazy_parse(self, source, keywords=[], map={}, apply={}):
+        """
+        Retrieve keywords and the values from the source dict
+        :type source: dict
+        :param keywords: keywords to be retrieved
+        :param map: {key: mapped_key(s)}
+                    extra keywords that are present in source in another (mapped) form
+                    each key may map to many keys (first no-None value is selected),
+                    in which case pass the mapped keys as list/tuple
+        :param apply: functions to call on the retrieved values,
+                      (the output values will be returned instead)
+        """
+        final = {}
+        all_keywords = list(unique(list(keywords) + list(map)))
+        for k in all_keywords:
+            if k in map and map[k] is None:
+                continue
+            source_keys = map.get(k, [k])
+            if not isinstance(source_keys, (list, tuple)):
+                source_keys = [source_keys]
+            v = None
+            for source_key in source_keys:
+                v = source.get(source_key)
+                if v is not None:
+                    break
+            if k in apply:
+                v = apply[k](v)
+            final[k] = v
+        return final
     
     
     def convert_order_input(self, symbol, side, amount, price, takerOrMaker='taker',
