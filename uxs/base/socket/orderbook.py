@@ -104,6 +104,11 @@ class OrderbookMaintainer:
         
         if 'nonce' not in ob:
             ob['nonce'] = None
+        
+        if self.xs.ob['uses_nonce'] and ob['nonce'] is None:
+            raise ValueError("Orderbook '{}' can't be assigned because it is missing nonce"
+                             .format(symbol))
+        
         # Should the differences between old and new ob be sent to callbacks?
         self.xs.orderbooks[symbol] = self._deep_overwrite(ob)
         #print('nonce: {}'.format(nonce))
@@ -116,6 +121,12 @@ class OrderbookMaintainer:
                                         'asks': [],
                                         'nonce': ob['nonce']}],
                                       enable_sub=True)
+        
+        if self.xs.ob['purge_cache_on_create']:
+            # We want to start clean, in case new nonces start from 0 again
+            # or if orderbook was received via fetch and doesn't have a nonce
+            # (while snapshot/updates do)
+            self.purge_cache(symbol)
     
     
     def _deep_overwrite(self, new_ob):
@@ -300,6 +311,12 @@ class OrderbookMaintainer:
                 #asyncio.ensure_future(self.fetch_order_book(s['symbol']))
                 logger.debug('{} - force creating orderbook {}'.format(self.xs.name, symbol))
                 call_via_loop_afut(self._fetch_and_create, (symbol,), loop=self.xs.loop)
+    
+    
+    def purge_cache(self, symbol):
+        if symbol in self.cache:
+            self.cache[symbol]['uptades'].clear()
+    
     
     @staticmethod
     def resolve_nonce(nonce):

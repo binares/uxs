@@ -319,7 +319,7 @@ class bitmex(ExchangeSocket):
             if action == 'partial':
                 ob['bids'].sort(key=lambda x: x[0], reverse=True)
                 ob['asks'].sort(key=lambda x: x[0])
-                self.obm.send_orderbook(ob)
+                self.ob_maintainer.send_orderbook(ob)
             else:
                 force_push = False
                 if action == 'delete':
@@ -331,7 +331,7 @@ class bitmex(ExchangeSocket):
                     #while orderBookL2_25 may first send inserts related to fringe changes
                     #(it always shows 25 items)
                     force_push = True
-                self.obm.send_update(ob, force_push)
+                self.ob_maintainer.send_update(ob, force_push)
                 
                 
     def on_orderbook10(self, message):      
@@ -372,7 +372,7 @@ class bitmex(ExchangeSocket):
             updates[symbol] = self.api.ob_entry(symbol, bids=x.get('bids'), asks=x.get('asks'), datetime=x.get('timestamp'))
                 
         for symbol,ob in updates.items():
-            self.obm.send_orderbook(ob)
+            self.ob_maintainer.send_orderbook(ob)
     
     
     def on_order(self, message):

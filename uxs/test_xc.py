@@ -37,10 +37,6 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 oid = None
 
 def print_xs_info():
-    #print(uxs.ExchangeSocket.obm)
-    #print(xs.__class__.obm)
-    print(xs.sub_to_orderbook)
-    print(xs.obm)
     print(xs.apiKey)
     print('has ("all_tickers"): {}'.format(xs.has_got('all_tickers')))
     print('has ("all_tickers","last"): {}'.format(xs.has_got('all_tickers','last')))

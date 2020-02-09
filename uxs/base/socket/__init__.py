@@ -215,6 +215,7 @@ class ExchangeSocket(WSClient):
         'cache_size': 50,
         'uses_nonce': True,
         'receives_snapshot': False,
+        'purge_cache_on_create': False,
         'assert_integrity': False,
         # whether or not bid and ask of ticker if modified on orderbook update
         'sends_bidAsk': False,
@@ -265,7 +266,7 @@ class ExchangeSocket(WSClient):
     }
     __properties__ = \
         [['balance','balances'],
-         ['obm','orderbook_maintainer'],
+         ['ob_maintainer','orderbook_maintainer'],
          ['apiKey','api.apiKey'],
          ['secret','api.secret'],
          ['auth_info','api._auth_info'],
