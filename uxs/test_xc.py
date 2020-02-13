@@ -24,6 +24,7 @@ import functools
 import itertools
 import time
 import sys
+import yaml
 
 DEFAULT_EXCHANGE = 'bittrex'
 DEFAULT_DISPLAY = ['ob']
@@ -221,20 +222,16 @@ async def show_balances():
         
 async def place_order(*args):
     global oid
-    symbol, amount, price = args[:3] if len(args) else ('ETH/BTC', 0.1, 0.01)
+    symbol, type, side, amount, price = args[:5] \
+        if len(args) else ('ETH/BTC', 'limit', 'buy', 0.1, 0.01)
     amount = float(amount)
-    type = 'limit'
-    if price=='market':
-        type = 'market'
-        price = None
-    else:
-        price = float(price)
-    side = 'buy' if len(args) < 4 else args[3]
+    price = float(price) if price!='null' else None
+    params = {} if len(args) < 6 else yaml.safe_load(args[5])
     await asyncio.sleep(4)
     try:
-        _args = (price,) if price is not None else ()
-        print('Creating order: {}'.format((symbol, type, side, amount) +_args))
-        r = await xs.create_order(symbol, type, side, amount, *_args)
+        _args = (params,) if params else ()
+        print('Creating order: {}'.format((symbol, type, side, amount, price) + _args))
+        r = await xs.create_order(symbol, type, side, amount, price, *_args)
         print('r_place: ', r)
         oid = r['id']
     except Exception as e:
@@ -349,6 +346,7 @@ def main():
     o_minus = o_param.startswith('order-')
     a_param = p.which(['account'], '')
     p_param = p.which(['pos','position','positions'], '')
+    any_account = any([a_param, o_param, p_param])
     account_symbols = set()
     
     def _get_items(param, default_symbols=('ETH/BTC',)):
@@ -417,7 +415,13 @@ def main():
         account_symbols.update(p_symbols)
         coros += [fetch_position(p_symbols)]
     
-    if any([a_param, o_param, p_param]) and not account_symbols:
+    if any_account:
+        if unsub:
+            asyncio.ensure_future(_unsub({'_': 'account'}, unsub))
+        if resub:
+            asyncio.ensure_future(_resub({'_': 'account'}, resub))
+    
+    if any_account and not account_symbols:
         account_symbols.add('ETH/BTC')
         
     if account_symbols:
