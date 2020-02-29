@@ -148,11 +148,29 @@ class ccxtWrapper:
                 if i == attempts-1: raise e
     
     
+    def _get_lot_size(self, market):
+        type = market.get('type')
+        lotSize = None
+        if market.get('lotSize') is not None:
+            lotSize = market['lotSize']
+        elif type is None or type=='spot':
+            lotSize = 1
+        return lotSize
+    
+    
+    def _set_lot_sizes(self):
+        if self.markets is None:
+            return
+        for market in self.markets.values():
+            market['lotSize'] = self._get_lot_size(market)
+    
+    
     def set_markets(self, markets, currencies=None):
         import uxs.base.poll as poll
         super().set_markets(markets,currencies)
-        if getattr(self,'markets',None) is None:
-            return
+        if self.markets is None:
+            return None
+        self._set_lot_sizes()
         default = poll.load_profile('__default__',get_name(self),'markets')
         custom = []
         if getattr(self,'_profile_name',None) is not None:

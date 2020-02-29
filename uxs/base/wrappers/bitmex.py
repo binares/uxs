@@ -56,6 +56,9 @@ class bitmexPosition(Position):
 class bitmex:
     
     Position = bitmexPosition
+    
+    def _get_lot_size(self, market):
+        return market['info'].get('lotSize')
 
 
 

@@ -14,3 +14,7 @@ class binancefu:
             }
         }
         return self.deep_extend(super().describe(), config)
+    
+    
+    def _get_lot_size(self, market):
+        return 1 if market.get('type')=='future' else None
