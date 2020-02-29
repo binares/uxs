@@ -3,6 +3,7 @@ Exchanges that are not present in ccxt
 """
 import ccxt
 
+from .bitforexfu import bitforexfu
 
 # Add the custom-defined exchanges to ccxt
 for attr,value in list(globals().items()):

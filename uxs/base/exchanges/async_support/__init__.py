@@ -3,6 +3,7 @@ Async versions of exchanges that are not present in ccxt
 """
 import ccxt.async_support
 
+from .bitforexfu import bitforexfu
 
 # Add the custom-defined exchanges to ccxt.async_support
 for attr,value in list(globals().items()):
