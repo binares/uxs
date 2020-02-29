@@ -5,6 +5,7 @@ import ccxt
 
 from .bitforexfu import bitforexfu
 from .delta import delta
+from .gateiofu import gateiofu
 
 # Add the custom-defined exchanges to ccxt
 for attr,value in list(globals().items()):
