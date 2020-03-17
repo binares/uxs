@@ -492,7 +492,7 @@ class ExchangeSocket(WSClient):
     
     async def load_markets(self, reload=False, limit=None):
         if not reload and self.api.markets:
-            return
+            return self.api.markets
         if limit is None:
             limit = self.fetch_limits['markets']
         await self.api.poll_load_markets(limit)
@@ -503,7 +503,7 @@ class ExchangeSocket(WSClient):
     
     def sn_load_markets(self, reload=False, limit=None):
         if not reload and self.snapi.markets:
-            return
+            return self.snapi.markets
         if limit is None:
             limit = self.fetch_limits['markets']
         self.snapi.poll_load_markets(limit)
