@@ -868,7 +868,7 @@ class krakenfu(Exchange):
         lastItem = None
         statusId = None
         trades = []
-        if 'orderEvents' in order:
+        if 'orderEvents' in order and order['orderEvents']:
             orderEvents = order['orderEvents']
             executions = []
             for i in range(0, len(orderEvents)):
