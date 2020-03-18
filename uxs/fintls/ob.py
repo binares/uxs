@@ -1,4 +1,5 @@
 import itertools
+import pandas as pd
 import ccxt
 import datetime
 dt = datetime.datetime
@@ -221,3 +222,46 @@ def assert_integrity(ob):
     #except AssertionError: print('Contains unsorted ask: {}'.format(ask))
     assert all(bid[i][0] > bid[i+1][0] for i in range(max(0,len(bid)-1)))
     #except AssertionError: print('Contains unsorted bid: {}'.format(bid))
+
+
+def get_bidask(ob, as_dict=False):
+    bid = ask = bidVolume = askVolume = None
+    if ob['bids']:
+        bid, bidVolume = ob['bids'][0]
+    if ob['asks']:
+        ask, askVolume = ob['asks'][0]
+    
+    if not as_dict:
+        return bid, ask
+    
+    return {
+        'bid': bid,
+        'bidVolume': bidVolume,
+        'ask': ask,
+        'askVolume': askVolume,
+    }
+
+
+def calc_ob_mid_price(ob, na=None):
+    """
+    :returns:
+        mid price or `na` if it could not be determined
+    """
+    return calc_mid_price(*get_bidask(ob), na)
+
+
+def calc_mid_price(bid, ask, na=None):
+    """
+    :returns:
+        mid price or `na` if it could not be determined
+    """
+    bid_ = bid and not pd.isnull(bid)
+    ask_ = ask and not pd.isnull(ask)
+    if bid_ and ask_:
+        return (bid + ask) / 2
+    elif bid_:
+        return bid
+    elif ask_:
+        return ask
+    else:
+        return na
