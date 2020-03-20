@@ -54,7 +54,8 @@ class ExchangeSocket(WSClient):
     channel_defaults = {
         'cnx_params_converter': 'm$convert_cnx_params',
         'cnx_params_converter_config': {
-            'lower': {'symbol': True, 'currency': True}},
+            'lower': {'symbol': True, 'currency': True, 'base_cy': True, 'quote_cy': True},
+            'include': {'base_cy': False, 'quote_cy': False}},
         'delete_data_on_unsub': True,
         # load markets before allowing adding subscriptions
         'on_creation': 'm$sn_load_markets',
@@ -1905,17 +1906,45 @@ class ExchangeSocket(WSClient):
         lower = {}
         upper = {}
         
-        for x in ('symbol', 'currency', 'timeframe'):
+        for x in ('symbol', 'currency', 'timeframe', 'base_cy', 'quote_cy'):
             lower[x] = self.get_value(channel, ['cnx_params_converter_config', 'lower', x])
             upper[x] = self.get_value(channel, ['cnx_params_converter_config', 'upper', x])
         
         def _change_case(s, method='lower'):
             cls = list if not self.is_param_merged(s) else self.merge
             return getattr(s, method)() if isinstance(s, str) else \
-                   cls(getattr(x, method)() for x in s)
+                   cls(getattr(x, method)() if x is not None else x for x in s)
+        
+        include = {}
+        for x in ('base_cy','quote_cy'):
+            include[x] = self.get_value(channel, ['cnx_params_converter_config', 'include', x])
+        
+        def _extract_base_quote(symbol):
+            cls = list if not self.is_param_merged(symbol) else self.merge
+            is_str = isinstance(symbol, str)
+            symbols = [symbol] if is_str else symbol
+            cy_pairs = []
+            for symbol in symbols:
+                if symbol in self.markets:
+                    m = self.markets[symbol]
+                    cy_pairs.append([m['base'], m['quote']])
+                elif '/' in symbol:
+                    cy_pairs.append(symbol.split('/'))
+                else:
+                    cy_pairs.append([None, None])
+            cy_pairs_conv = [[self.convert_cy(cy, 1) if cy else None for cy in pair] for pair in cy_pairs]
+            if cy_pairs_conv:
+                if include['base_cy']:
+                    params['base_cy'] =  cy_pairs_conv[0][0] if is_str else cls(p[0] for p in cy_pairs_conv)
+                if include['quote_cy']:
+                    params['quote_cy'] = cy_pairs_conv[0][1] if is_str else cls(p[1] for p in cy_pairs_conv)
         
         if 'symbol' in params and params['symbol'] is not None:
+            symbol = params['symbol']
             params['symbol'] = self.convert_symbol(params['symbol'], 1, force=True)
+            
+            if include['base_cy'] or include['quote_cy']:
+                _extract_base_quote(symbol)
         
         for attr in ('cy','currency'):
             if attr in params and params[attr] is not None:
@@ -1925,7 +1954,7 @@ class ExchangeSocket(WSClient):
             params['timeframe'] = self.convert_timeframe(params['timeframe'], 1)
         
         _map = {'cy': 'currency'}
-        for attr in ('symbol','cy','currency','timeframe'):
+        for attr in ('symbol','cy','currency','timeframe','base_cy','quote_cy'):
             if attr in params and params[attr] is not None:
                 attr2 = _map.get(attr, attr)
                 if lower[attr2]:
