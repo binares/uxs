@@ -23,6 +23,7 @@ import asyncio
 import functools
 import itertools
 import time
+import warnings
 import sys
 import yaml
 
@@ -136,8 +137,8 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
         
     def _print_last_n(symbol=symbols[0]):
         ob = xs.orderbooks.get(symbol,{})
-        print('(d)ob {} bids[:{}]: {}'.format(symbol, _print, ob.get('bids',[])[:_print]))
         print('(d)ob {} asks[:{}]: {}'.format(symbol, _print, ob.get('asks',[])[:_print]))
+        print('(d)ob {} bids[:{}]: {}'.format(symbol, _print, ob.get('bids',[])[:_print]))
     
     _symbols = symbols if not merge else [symbols]
     for symbol in _symbols:
@@ -326,6 +327,11 @@ def main():
     print('test in p: {}'.format('test' in p))
     if 'test' in p:
         config['test'] = True
+    
+    if not hasattr(uxs, xc):
+        warnings.warn("Exchange {} hasn't been added to __init__.py yet".format(xc))
+        exec("from uxs.{} import {}".format(xc.lower(), xc.lower()))
+        setattr(uxs, xc.lower(), locals()[xc.lower()])
     
     try:
         xs = uxs.get_socket(xc, config)
