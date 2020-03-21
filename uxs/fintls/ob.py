@@ -224,6 +224,20 @@ def assert_integrity(ob):
     #except AssertionError: print('Contains unsorted bid: {}'.format(bid))
 
 
+def infer_side(ob, price):
+    """
+    Determine in which ob side the price is located
+    """
+    bid, ask = get_bidask(ob)
+    
+    if bid and price <= bid:
+        return 'bids'
+    elif ask and price >= ask:
+        return 'asks'
+    else:
+        return None
+
+
 def get_bidask(ob, as_dict=False):
     bid = ask = bidVolume = askVolume = None
     if ob['bids']:
