@@ -29,7 +29,6 @@ class gateiofu(Exchange):
                 'createMarketOrder': False,
                 'fetchTicker': False,
                 'fetchTickers': False,
-                'fetchOrderBook': False,
                 'withdraw': False,
                 'fetchDeposits': False,
                 'fetchWithdrawals': False,
@@ -58,6 +57,10 @@ class gateiofu(Exchange):
                 '1w': '7d',
             },
             'urls': {
+                'test': {
+                    'public': 'https://fx-api-testnet.gateio.ws/api',
+                    'private': 'https://fx-api-testnet.gateio.ws/api',
+                },
                 'logo': 'https://user-images.githubusercontent.com/1294454/31784029-0313c702-b509-11e7-9ccc-bc0da6a0e435.jpg',
                 'api': {
                     'public': 'https://fx-api.gateio.ws/api',
@@ -74,42 +77,42 @@ class gateiofu(Exchange):
             'api': {
                 'public': {
                     'get': [
-                        'futures/{settle}/contracts',
-                        'futures/{settle}/contracts/{contract}',
-                        'futures/{settle}/order_book',
-                        'futures/{settle}/trades',
-                        'futures/{settle}/candlesticks',
-                        'futures/{settle}/tickers',
-                        'futures/{settle}/funding_rate',
-                        'futures/{settle}/insurance',
+                        'contracts',
+                        'contracts/{contract}',
+                        'order_book',
+                        'trades',
+                        'candlesticks',
+                        'tickers',
+                        'funding_rate',
+                        'insurance',
                     ],
                 },
                 'private': {
                     'get': [
-                        'futures/{settle}/accounts',
-                        'futures/{settle}/account_book',
-                        'futures/{settle}/positions',
-                        'futures/{settle}/positions/{contract}',
-                        'futures/{settle}/orders',
-                        'futures/{settle}/orders/{order_id}',
-                        'futures/{settle}/my_trades',
-                        'futures/{settle}/position_close',
-                        'futures/{settle}/liquidates',
-                        'futures/{settle}/price_orders',
-                        'futures/{settle}/price_orders/{order_id}',
+                        'accounts',
+                        'account_book',
+                        'positions',
+                        'positions/{contract}',
+                        'orders',
+                        'orders/{order_id}',
+                        'my_trades',
+                        'position_close',
+                        'liquidates',
+                        'price_orders',
+                        'price_orders/{order_id}',
                     ],
                     'post': [
-                        'futures/{settle}/positions/{contract}/margin',
-                        'futures/{settle}/positions/{contract}/leverage',
-                        'futures/{settle}/positions/{contract}/risk_limit',
-                        'futures/{settle}/orders',
-                        'futures/{settle}/price_orders',
+                        'positions/{contract}/margin',
+                        'positions/{contract}/leverage',
+                        'positions/{contract}/risk_limit',
+                        'orders',
+                        'price_orders',
                     ],
                     'delete': [
-                        'futures/{settle}/orders',
-                        'futures/{settle}/orders/{order_id}',
-                        'futures/{settle}/price_orders',
-                        'futures/{settle}/price_orders/{order_id}',
+                        'orders',
+                        'orders/{order_id}',
+                        'price_orders',
+                        'price_orders/{order_id}',
                     ],
                 },
             },
@@ -186,7 +189,7 @@ class gateiofu(Exchange):
             settleCurrencyId = settleCurrencyIds[i]
             query = self.omit(params, 'type')
             query['settle'] = settleCurrencyId
-            response = self.publicGetFuturesSettleContracts(query)
+            response = self.publicGetContracts(query)
             if not  (isinstance(response, list)):
                 raise ExchangeError(self.id + ' fetchMarkets got an unrecognized response')
             for j in range(0, len(response)):
@@ -265,6 +268,40 @@ class gateiofu(Exchange):
             })
         return result
 
+    def fetch_order_book(self, symbol, limit=None, params={}):
+        self.load_markets()
+        market = self.market(symbol)
+        request = {
+            'settle': market['settleCurrencyId'],
+            'contract': market['id'],
+        }
+        if limit is not None:
+            request['limit'] = limit
+        response = self.publicGetOrderBook(self.extend(request, params))
+        #  {
+        #    "asks": [
+        #      {
+        #        "p": "1.52",
+        #        "s": 100
+        #      },
+        #      {
+        #        "p": "1.53",
+        #        "s": 40
+        #      }
+        #    ],
+        #    "bids": [
+        #      {
+        #        "p": "1.17",
+        #        "s": 150
+        #      },
+        #      {
+        #        "p": "1.16",
+        #        "s": 203
+        #      }
+        #    ]
+        #  }
+        return self.parse_order_book(response, None, 'bids', 'asks', 'p', 's')
+
     def parse_ohlcv(self, ohlcv, market=None, timeframe='1m', since=None, limit=None):
         return [
             ohlcv['t'] * 1000,
@@ -297,7 +334,7 @@ class gateiofu(Exchange):
                 request['to'] = request['from'] + (limitFinal *  periodDurationInSeconds)
         elif limit is not None:
             request['limit'] = limit
-        response = self.publicGetFuturesSettleCandlesticks(self.extend(request, params))
+        response = self.publicGetCandlesticks(self.extend(request, params))
         #
         #  [
         #      {
@@ -313,9 +350,9 @@ class gateiofu(Exchange):
         return self.parse_ohlcvs(response, market, timeframe, since, limit)
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
-        prefix = (api + '/') if (api == 'private') else ''
-        url = self.urls['api'][api] + '/' + self.version + '/' + prefix + self.implode_params(path, params)
-        query = self.omit(params, self.extract_params(path))
+        extendedPath = 'futures/{settle}/' + path
+        url = self.urls['api'][api] + '/' + self.version + '/' +  self.implode_params(extendedPath, params)
+        query = self.omit(params, self.extract_params(extendedPath))
         if api == 'public':
             if query:
                 url += '?' + self.urlencode(query)
