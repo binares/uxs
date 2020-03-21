@@ -208,14 +208,18 @@ class ExchangeSocket(WSClient):
         # orderbooks (on 1st .send_update) will be force created
         # on (each) connection (re-)activation. Set to `None` to disable.
         'force_create': 15,
-        # minimal interval between two reload (fetch) attempts (unsynced nonce)
+        # minimal interval between two reload (fetch) attempts (corrupted ob)
         'reload_interval': 15,
-        # reload orderbook if new_nonce > prev_nonce + nonce_delta 
-        #'reload_on_nonce_delta': 2,
+        # minimal interval between two restart (unsub, resub) attempts (corrupted ob)
+        'restart_interval': 15,
         # the number of latest updates to be kept in cache
         'cache_size': 50,
         'uses_nonce': True,
         'receives_snapshot': False,
+        # what to do when update's nonce is unsynced
+        'on_unsync': None, # reload (re-fetch) / restart (unsub-resub)
+        # what to do when the side of update's price can't be determined
+        'on_unassign': None, # reload / restart
         'purge_cache_on_create': False,
         'assert_integrity': False,
         # whether or not bid and ask of ticker if modified on orderbook update

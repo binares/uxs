@@ -1,9 +1,12 @@
 import asyncio
 from collections import defaultdict
 import time
+import math
 
 from fons.aio import call_via_loop_afut
+from uxs.fintls.ob import update_branch, infer_side
 import fons.log
+
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 
@@ -12,7 +15,10 @@ class OrderbookMaintainer:
         """:type xs: ExchangeSocket"""
         self.xs = xs
         def cache_item():
-            return {'updates': [], 'last_create_execution': None, 'last_warned': None}
+            return {'updates': [],
+                    'last_reload_execution': None,
+                    'last_restart_execution': None,
+                    'last_warned': None}
         self.cache = defaultdict(cache_item)
                 
         cfg = xs.connection_defaults
@@ -41,20 +47,9 @@ class OrderbookMaintainer:
         :param force_push: if True, push everything up to the latest update,
                            overriding all on hold ('__hold__') updates
         """
-        updates = [update] if isinstance(update, dict) else update
-        symbols = set()
-        holds = defaultdict(list)
-        receives_snapshot = self.xs.ob['receives_snapshot']
         force_till_id = -1 if force_push else None
+        symbols, holds = self.store_update(update)
         
-        for update in updates:
-            symbol = update['symbol']
-            ob = self.xs.orderbooks.get(symbol)
-            if ob is not None or not receives_snapshot:
-                self._add_to_cache(update)
-                symbols.add(symbol)
-                self._resolve_hold(update, holds)
-            
         for symbol in symbols:
             if self.xs.orderbooks.get(symbol) is None:
                 if self.xs.sh.is_subscribed_to(('orderbook',symbol), active=None):
@@ -64,6 +59,23 @@ class OrderbookMaintainer:
                     asyncio.ensure_future(
                                 self._push_cache_after(symbol, hold, id))
                 self._push_cache(symbol, force_till_id)
+    
+    
+    def store_update(self, update):
+        updates = [update] if isinstance(update, dict) else update
+        symbols = set()
+        holds = defaultdict(list)
+        receives_snapshot = self.xs.ob['receives_snapshot']
+        
+        for update in updates:
+            symbol = update['symbol']
+            ob = self.xs.orderbooks.get(symbol)
+            if ob is not None or not receives_snapshot:
+                self._add_to_cache(update)
+                symbols.add(symbol)
+                self._resolve_hold(update, holds)
+                
+        return symbols, holds
     
     
     """def send_update_as_range(self, symbol, start, end, changes):
@@ -166,13 +178,52 @@ class OrderbookMaintainer:
             holds[symbol] = hs[:to] + [(hold,id)]
             
         return holds
-            
+    
+    
+    @staticmethod
+    def infer_side(ob, price, to_push=None):
+        if to_push is None:
+            return infer_side(ob, price)
+        model_ob = {'bids': [], 'asks': []}
+        for side in ('bids','asks'):
+            new_extremum = OrderbookMaintainer._play_out(ob, to_push, side)
+            if 0 < new_extremum < math.inf:
+                model_ob[side] = [[new_extremum, 0]]
+        return infer_side(model_ob, price)
+    
+    
+    @staticmethod
+    def _play_out(ob, to_push, side):
+        """Predicts the resulting outermost bid/ask after pushing the updates"""
+        nullified = set()
+        new_branch = []
+        extremum = 0 if side=='bids' else math.inf
+        op = max if side=='bids' else min
+        for item in to_push[side]:
+            price, _, amount = update_branch(item, new_branch, side)
+            if not amount:
+                nullified.add(price)
+            elif price in nullified:
+                nullified.remove(price)
+        if new_branch:
+            extremum = op(extremum, new_branch[0][0])
+        ob_extremum = next((price for price,_ in ob[side] if price not in nullified), None)
+        if ob_extremum is not None:
+            extremum = op(extremum, ob_extremum)
+        
+        return extremum
+        
             
     def _add_to_cache(self, update):
         symbol = update['symbol']
         update['__id__'] = self.ids_count[symbol]
         self.ids_count[symbol] += 1
-        
+        keys = ('bids','asks','unassigned')
+        if all(update.get(x) is None for x in keys):
+            raise ValueError('Got empty update (symbol: {})'.format(symbol))
+        for x in keys:
+            if update.get(x) is None:
+                update[x] = []
         cache_size = self.xs.ob['cache_size'] 
         cache = self.cache[update['symbol']]['updates']
         #update = dict(update, nonce=self.resolve_nonce(update['nonce']))
@@ -199,6 +250,10 @@ class OrderbookMaintainer:
         
         now = time.time()
         uses_nonce = self.xs.ob['uses_nonce']
+        on_unsync = self.xs.ob['on_unsync']
+        on_unassign = self.xs.ob['on_unassign']
+        if on_unassign is None:
+            on_unassign = 'reload' if uses_nonce else 'restart'
         cur_nonce = ob['nonce']
         updates = self.cache[symbol]['updates']
         to_push = {'symbol': symbol, 'bids':[], 'asks':[]}
@@ -227,6 +282,11 @@ class OrderbookMaintainer:
         if up_to is not None:
             eligible = eligible[:up_to]
         
+        def _reset(method, reason):
+            if self._is_time(symbol, method):
+                logger.debug('{} - {}ing orderbook {} due to {}.'.format(self.xs.name, method, symbol, reason))
+                self._renew(symbol, method)
+        
         is_synced = self.is_synced[symbol]
         
         def _is_synced(n0, cur_nonce, n1):
@@ -242,12 +302,23 @@ class OrderbookMaintainer:
                 self._warn(symbol)
                 #print(cur_nonce,(n0,n1),u)
                 self._change_status(symbol, 0)
-                if self._is_orderbook_reload_time(symbol):
-                    logger.debug('{} - reloading orderbook {} due to unsynced nonce.'.format(self.xs.name, symbol))
-                    self._schedule_orderbook_creation(symbol)
+                method = on_unsync if on_unsync is not None else 'reload'
+                _reset(method, 'unsynced nonce')
                 return False, False
             for side in ('bids','asks'):
                 to_push[side] += u[side]
+            for item in u['unassigned']:
+                price, amount = item
+                inferred_side = self.infer_side(ob, price, to_push)
+                if inferred_side is None:
+                    self._warn_uninferrable(symbol, item, to_push)
+                    # Non-existing deletion isn't as important (it already isn't in the orderbook)
+                    if amount:
+                        self.purge_cache(symbol)
+                        _reset(on_unassign, 'uninferrable item: {}'.format(item))
+                        return False, False
+                else:
+                    to_push[inferred_side] += [item]
             cur_nonce = n1
         
         to_push['nonce'] = cur_nonce
@@ -271,20 +342,46 @@ class OrderbookMaintainer:
             await asyncio.sleep(hold)
         self._push_cache(symbol, force_till_id)
     
-           
+    
+    def _renew(self, symbol, method='reload'):
+        """
+        :param method: reload / restart
+        """
+        if method not in ('reload','restart'):
+            raise ValueError('{} - incorrect ob renew method: {}'.format(self.xs.name, method))
+        if method == 'reload':
+            self._schedule_orderbook_creation(symbol)
+        else:
+            self._restart_subscription(symbol)
+    
+    
     def _schedule_orderbook_creation(self, symbol):
-        if self._is_orderbook_reload_time(symbol):
+        if self._is_time(symbol, 'reload'):
             future = self.create_orderbook(symbol)
             future.t_created = time.time()
-            self.cache[symbol]['last_create_execution'] = future
+            self.cache[symbol]['last_reload_execution'] = future
     
     
-    def _is_orderbook_reload_time(self, symbol):
-        future = self.cache[symbol]['last_create_execution']
+    def _restart_subscription(self, symbol):
+        async def unsub_and_resub(s):
+            await s.unsub()
+            await asyncio.sleep(0.05)
+            return await s.push()
+        if self._is_time(symbol, 'restart'):
+            s = self.xs.get_subscription(('orderbook',symbol))
+            future = asyncio.ensure_future(unsub_and_resub(s))
+            future.t_created = time.time()
+            self.cache[symbol]['last_restart_execution'] = future
+    
+    
+    def _is_time(self, symbol, method='reload'):
+        """:param method: reload / restart"""
+        if method not in ('reload','restart'):
+            raise ValueError('{} - incorrect ob renew method: {}'.format(self.xs.name, method))
+        future = self.cache[symbol]['last_{}_execution'.format(method)]
         if not self.xs.is_subscribed_to(('orderbook',symbol), active=None):
             return False
-        #return future is None or time.time() > future.t_created + self.xs.ob['reload_interval']
-        return future is None or future.done() and time.time() > future.t_created + self.xs.ob['reload_interval']
+        return future is None or future.done() and time.time() > future.t_created + self.xs.ob['{}_interval'.format(method)]
     
     
     def _warn(self, symbol):
@@ -292,6 +389,15 @@ class OrderbookMaintainer:
         if t is None or time.time() > t + self.xs.ob['reload_interval']:
             self.cache[symbol]['last_warned'] = time.time()
             logger.debug('{} - orderbook {} nonce is unsynced with cache'.format(self.xs.name, symbol))
+    
+    
+    def _warn_uninferrable(self, symbol, item, to_push):
+        ob = self.xs.orderbooks.get(symbol)
+        bids = ob['bids'][:10] if ob is not None else None
+        asks = ob['asks'][:10] if ob is not None else None
+        tlogger.debug('{} - ob {} encountered uninferrable item: {}\n\n'
+                      'asks[:10] {}\n\nbids[:10] {}\n\nto_push: {}\n'
+                      .format(self.xs.name, symbol, item, asks, bids, to_push))
     
     
     async def _init_orderbooks(self, cnx):
@@ -307,7 +413,7 @@ class OrderbookMaintainer:
         for s in self.xs.sh.subscriptions:
             symbol = s.params.get('symbol')
             if s.channel != 'orderbook' or s.cnx != cnx: continue
-            elif not s.state and self._is_orderbook_reload_time(symbol):
+            elif not s.state and self._is_time(symbol, 'reload'):
                 #asyncio.ensure_future(self.fetch_order_book(s['symbol']))
                 logger.debug('{} - force creating orderbook {}'.format(self.xs.name, symbol))
                 call_via_loop_afut(self._fetch_and_create, (symbol,), loop=self.xs.loop)
@@ -315,7 +421,7 @@ class OrderbookMaintainer:
     
     def purge_cache(self, symbol):
         if symbol in self.cache:
-            self.cache[symbol]['uptades'].clear()
+            self.cache[symbol]['updates'].clear()
     
     
     @staticmethod

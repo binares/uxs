@@ -71,7 +71,32 @@ async def _crash(params, delay=0):
         await call_via_loop_afut(cnx.conn.__aexit__, sys.exc_info(), loop=cnx.loop)
     else:
         cnx.conn.close()
-            
+
+async def _corrupt_sync(symbol, delay=0):
+    await asyncio.sleep(delay)
+    print('corrupting sync: {}'.format(symbol))
+    ob = xs.orderbooks[symbol]
+    ask_0 = ob['asks'][0][0]
+    u = {
+        'symbol': symbol,
+        'asks': [[ask_0, 0]],
+        'nonce': ob['nonce']+1000000,
+    }
+    xs.ob_maintainer.send_update(u)
+
+async def _corrupt_assignation(symbol, delay=0):
+    await asyncio.sleep(delay)
+    print('corrupting assignation: {}'.format(symbol))
+    ob = xs.orderbooks[symbol]
+    bid_0 = ob['bids'][0][0]
+    ask_0 = ob['asks'][0][0]
+    u = {
+        'symbol': symbol,
+        'unassigned': [[(bid_0+ask_0)/2, 1]],
+        'nonce': ob['nonce']+1 if ob['nonce'] is not None else None,
+    }
+    xs.ob_maintainer.send_update(u)
+
 async def _print_changed(channel, attr=None, clear_first=False, from_index=None, key=None):
     if attr is None: attr = channel
     excl_chars = None
@@ -120,7 +145,8 @@ async def fetch_tickers(symbols=(), sub=True, unsub=False, resub=False, merge=Fa
         await _print_changed('ticker', 'tickers', clear_first=True)
         
     
-async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, resub=False, merge=False, params={}):
+async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, resub=False,
+                           merge=False, unsync=False, unassign=False, params={}):
     await asyncio.sleep(2)
     """try: print('orderbook {}: {}'.format(symbols[0], await xs.fetch_order_book(symbols[0])))
     except Exception as e:
@@ -145,7 +171,12 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
         params2 = dict({'_': 'orderbook', 'symbol': symbol}, **params)
         if sub and unsub: asyncio.ensure_future(_unsub(params2, unsub, merge))
         if sub and resub: asyncio.ensure_future(_resub(params2, resub, merge))
-        
+    
+    if unsync:
+        asyncio.ensure_future(_corrupt_sync(symbols[0], unsync))
+    if unassign:
+        asyncio.ensure_future(_corrupt_assignation(symbols[0], unassign))
+    
     if _print == 'changes':
         xs.add_callback(_print_ob_changes, 'orderbook', symbols[0])
     else:
@@ -275,7 +306,7 @@ def main():
     def _split(x):
         return x.split(',')
     
-    activities = ['u','unsub','r','resub','s','stop','c','crash']
+    activities = ['u','unsub','r','resub','s','stop','c','crash','unsync','unassign']
     apply = dict.fromkeys(activities, _to_float)
     apply.update(dict.fromkeys(['d','display','ticker','tickers',
                                 'all_tickers','ob','trades','ohlcv',
@@ -377,7 +408,10 @@ def main():
             ob_print = 4
         else:
             ob_print = 'changes'
-        coros += [fetch_order_book(ob_symbols, ob_print, sub=True, unsub=unsub, resub=resub, merge=ob_merge, params=ob_params)]
+        unsync = p.get('unsync', False)
+        unassign = p.get('unassign', False)
+        coros += [fetch_order_book(ob_symbols, ob_print, sub=True, unsub=unsub, resub=resub,
+                                   merge=ob_merge, unsync=unsync, unassign=unassign, params=ob_params)]
         if crash: coros += [_crash({'_': 'orderbook', 'symbol': ob_symbols[0]}, crash)]
         
     if trades_param:
