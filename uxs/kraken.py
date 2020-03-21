@@ -546,7 +546,7 @@ class kraken(ExchangeSocket):
             timestamp = max(timestamp, ts) if timestamp is not None else ts
             return [price, amount]
         
-        symbol = self.convert_symbol(r[-1], 0),
+        symbol = self.convert_symbol(r[-1], 0)
         
         # It may send updates for a few seconds after unsubscribing
         if not self.is_subscribed_to(('orderbook',symbol), active=None):
