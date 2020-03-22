@@ -16,17 +16,16 @@ def _extract_error(r):
 
 class krakenfu(ExchangeSocket):
     exchange = 'krakenfu'
+    url_components = {
+        'ws': 'wss://futures.kraken.com/ws/v1',
+        'test': 'wss://demo-futures.kraken.com/ws/v1',
+        'version': 'v1',
+    }
     auth_defaults = {
         'each_time': True,
         'takes_input': True,
     }
-    url_components = {
-        'base': 'wss://futures.kraken.com/ws/v1',
-        'test': 'wss://demo-futures.kraken.com/ws/v1',
-        'version': 'v1',
-    }
     channel_defaults = {
-        'url': '<$base>',
         'merge_option': True,
     }
     channels = {
@@ -106,14 +105,6 @@ class krakenfu(ExchangeSocket):
         'connected_ts': None,
     }
     __deepcopy_on_init__ = ['_cached_challenge']
-    
-    
-    def setup_test_env(self):
-        return {
-            'channel_defaults': {
-                'url': '<$test>',
-            },
-        }
     
     
     def handle(self, R):

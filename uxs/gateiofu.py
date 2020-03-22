@@ -10,13 +10,12 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 class gateiofu(ExchangeSocket):
     exchange = 'gateiofu'
-    
     url_components = {
-        'base': 'wss://fx-ws.gateio.ws/v4/ws',
+        'ws': 'wss://fx-ws.gateio.ws/v4/ws',
         'test': 'wss://fx-ws-testnet.gateio.ws/v4/ws',
     }
     channel_defaults = {
-        'url': '<$base>/<settle>',
+        'url': '<$ws>/<settle>',
         'cnx_params_converter_config': {
             'currency_aliases': ['settle'],
         },
@@ -39,15 +38,6 @@ class gateiofu(ExchangeSocket):
     }
     _cached_snapshots = {}
     __deepcopy_on_init__ = ['_cached_snapshots']
-    
-    
-    def setup_test_env(self):
-        return {
-            'url_components': {
-                'base': gateiofu.url_components['test'],
-                'base_copy': gateiofu.url_components['base'],
-            },
-        }
     
     
     def handle(self, R):
