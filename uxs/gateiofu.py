@@ -16,9 +16,10 @@ class gateiofu(ExchangeSocket):
         'test': 'wss://fx-ws-testnet.gateio.ws/v4/ws',
     }
     channel_defaults = {
-        'url': '<$base>/<quote_cy>',
+        'url': '<$base>/<settle>',
         'cnx_params_converter_config': {
-            'include': {'quote_cy': True}},
+            'currency_aliases': ['settle'],
+        },
     }
     channels = {
     }
@@ -141,6 +142,23 @@ class gateiofu(ExchangeSocket):
             if t_created and now - t_created < 100:
                 ob['nonce'] = update['nonce'] - 1
                 self.ob_maintainer.send_orderbook(ob)
+    
+    
+    def transform(self, params):
+        kw = {}
+        if 'symbol' in params:
+            cls = type(params['symbol'])
+            settle = []
+            symbols = [params['symbol']] if issubclass(cls, str) else params['symbol']
+            for symbol in symbols:
+                if self.markets and symbol in self.markets:
+                    settle.append(self.markets[symbol]['settleCurrency'])
+                else:
+                    base, quote = symbol.split('/')
+                    settle.append('USDT' if quote.lower()=='usdt' else 'BTC')
+            kw['settle'] = settle[0] if issubclass(cls, str) else cls(settle)
+        
+        return dict(params, **kw)
     
     
     def encode(self, rq, sub=None):
