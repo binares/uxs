@@ -1920,6 +1920,8 @@ class ExchangeSocket(WSClient):
         
         cy_aliases = _get_value(['currency_aliases'], [])
         cy_aliases = list(unique(cy_aliases + _get_value(['__currency_aliases'], [])))
+        if 'currency' in cy_aliases:
+            cy_aliases = ['currency'] + [x for x in cy_aliases if x!='currency']
         
         cases = {'lower': {}, 'upper': {}}
         
