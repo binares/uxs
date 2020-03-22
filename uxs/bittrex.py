@@ -17,7 +17,9 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
     
 class bittrex(ExchangeSocket): 
     exchange = 'bittrex'
-
+    url_components = {
+        'ws': 'https://socket.bittrex.com/signalr',
+    }
     auth_defaults = {
         'takes_input': True,
         'each_time': False,
@@ -25,7 +27,6 @@ class bittrex(ExchangeSocket):
         'set_authenticated': False,
     }
     channel_defaults = {
-        'url': 'https://socket.bittrex.com/signalr',
         'unsub_option': False,
         'merge_option': False,
     }

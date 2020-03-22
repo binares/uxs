@@ -16,16 +16,15 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 class kucoin(ExchangeSocket):
     exchange = 'kucoin'
-
+    url_components = {
+        'ws': 'https://api.kucoin.com',
+        'ws-v2': 'https://openapi-v2.kucoin.com',
+        'test': 'https://openapi-sandbox.kucoin.com',
+        'public-end': 'api/v1/bullet-public',
+        'private-end': 'api/v1/bullet-private',
+    }
     auth_defaults = {
         'via_url': True,
-    }
-    url_components = {
-        'base': 'https://api.kucoin.com',
-        'base-v2': 'https://openapi-v2.kucoin.com',
-        'test': 'https://openapi-sandbox.kucoin.com',
-        'public-end': '/api/v1/bullet-public',
-        'private-end': '/api/v1/bullet-private',
     }
     channel_defaults = {
         'url': '<m$create_connection_url:shared>',
@@ -83,14 +82,6 @@ class kucoin(ExchangeSocket):
                       'TUSD', 'USDC', 'NUSD', 'TRX', 'DAI'],
         'sep': '-',
     }
-    
-    def setup_test_env(self):
-        return {
-            'url_components': {
-                'base': kucoin.url_components['test'],
-            },
-        }
-    
     
     def handle(self, response):
         r = response.data
@@ -268,11 +259,11 @@ class kucoin(ExchangeSocket):
             }
         }"""
         which_end = 'public-end' if not auth else 'private-end'
-        url = self.url_components['base'] + self.url_components[which_end]
+        url = self.url_components['ws'] + '/' + self.url_components[which_end]
         headers = {}
         if auth:
             now = ctime_ms()
-            str_to_sign = str(now) + 'POST' + self.url_components['private-end']
+            str_to_sign = str(now) + 'POST' + '/' + self.url_components['private-end']
             signature = sign(self.secret, str_to_sign, 'sha256', hexdigest=False, base64=True)
             headers = {
                 "KC-API-SIGN": signature,

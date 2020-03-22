@@ -3,19 +3,19 @@ from fons.crypto import nonce_ms
 
 class binancefu(binance):
     exchange = 'binancefu'
-    
     url_components = {
-        'base': 'wss://fstream.binance.com/ws/',
+        'ws': 'wss://fstream.binance.com/ws',
+        'test': 'wss://stream.binancefuture.com/ws',
     }
     channel_defaults = {
         'send': False, #True
     }
     channels = {
         'all_tickers': {
-            #'url': '<$base>',
+            #'url': '<$ws>',
         },
         'account': {
-            #'url': '<$base><m$fetch_listen_key>',
+            #'url': '<$ws>/<m$fetch_listen_key>',
             'send': False,
         }
     }
@@ -36,10 +36,7 @@ class binancefu(binance):
     }
     
     def setup_test_env(self):
-        return {
-            'url_components': {
-                'base': 'wss://stream.binancefuture.com/ws/',
-            },
+        return dict(super().setup_test_env(), **{
             'ccxt_config': {
                 'urls': {
                     'api': {
@@ -49,7 +46,7 @@ class binancefu(binance):
                 },
             },
             'ccxt_test': False,
-        }
+        })
     
     def on_futures_account(self, r):
         """{

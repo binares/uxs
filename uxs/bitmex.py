@@ -21,17 +21,16 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 class bitmex(ExchangeSocket): 
     exchange = 'bitmex'
-
+    url_components = {
+        'ws': 'wss://www.bitmex.com/realtime',
+        'test': 'wss://testnet.bitmex.com/realtime',
+    }
     auth_defaults = {
         'takes_input': False,
         'each_time': False,
         'send_separately': True,
     }
-    url_components = {
-        'base': 'wss://www.bitmex.com/realtime',
-    }
     channel_defaults = {
-        'url': '<$base>',
         'unsub_option': True,
     }
     channels = {
@@ -769,14 +768,6 @@ class bitmex(ExchangeSocket):
             #print('id: {} inferred price: {}'.format(id, price))
             
         return price
-    
-    
-    def setup_test_env(self):
-        return {
-            'url_components': {
-                'base': 'wss://testnet.bitmex.com/realtime',
-            },
-        }
     
     
     def encode(self, rq, sub=None):

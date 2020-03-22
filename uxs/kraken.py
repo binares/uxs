@@ -23,7 +23,7 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 class kraken(ExchangeSocket):
     exchange = 'kraken'
     url_components = {
-        'base': 'wss://ws.kraken.com',
+        'ws': 'wss://ws.kraken.com',
         'private': 'wss://ws-auth.kraken.com',
         'beta': 'wss://beta-ws.kraken.com',
     }
@@ -33,7 +33,6 @@ class kraken(ExchangeSocket):
         #'set_authenticated': True,
     }
     channel_defaults = {
-        'url': '<$base>',
         'max_subscriptions': 100,
         'subscription_push_rate_limit': 0.04,
     }
@@ -176,6 +175,14 @@ class kraken(ExchangeSocket):
         'last_ticker_id': -1,
     }
     __deepcopy_on_init__ = ['_cached_wstoken']
+    
+    
+    def setup_test_env(self):
+        return {
+            'private': self.url_components['beta'],
+            'private_original': self.url_components['private'],
+            'ccxt_test': False,
+        }
     
     
     def handle(self, R):
@@ -1046,17 +1053,6 @@ class kraken(ExchangeSocket):
             symbol = self.convert_symbol(marketId, 0)
             f_parsed = self.parse_trade(fill, marketId)
             self.add_fill_from_dict(f_parsed, enable_sub=True)
-    
-    
-    def setup_test_env(self):
-        return {
-            'channels': {
-                'account': {'url': '<$beta>'},
-                'create_order': {'url': '<$beta>'},
-                'cancel_order': {'url': '<$beta>'},
-            },
-            'ccxt_test': False,
-        }
     
     
     def encode(self, req, sub=None):

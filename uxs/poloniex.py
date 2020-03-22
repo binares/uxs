@@ -45,14 +45,15 @@ currency_pairs_ccxt = {id: '/'.join(symbol.split('_')[::-1]) for id,symbol in cu
     
 class poloniex(ExchangeSocket): 
     exchange = 'poloniex'
-
+    url_components = {
+        'ws': 'wss://api2.poloniex.com',
+    }
     auth_defaults = {
         'takes_input': True,
         'each_time': True,
         'send_separately': False,
     }
     channel_defaults = {
-        'url': 'wss://api2.poloniex.com',
         'unsub_option': True,
         'merge_option': False,
     }

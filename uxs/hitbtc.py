@@ -15,13 +15,13 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
     
 class hitbtc(ExchangeSocket): 
     exchange = 'hitbtc'
+    url_components = {
+        'ws': 'wss://api.hitbtc.com/api/2/ws',
+    }
     auth_defaults = {
         'takes_input': False,
         'each_time': False,
         'send_separately': True,
-    }
-    channel_defaults = {
-        'url': 'wss://api.hitbtc.com/api/2/ws',
     }
     channels = {
         'orderbook': {

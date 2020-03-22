@@ -52,6 +52,7 @@ class ExchangeSocket(WSClient):
         ], False)
     
     channel_defaults = {
+        'url': '<$ws>',
         'cnx_params_converter': 'm$convert_cnx_params',
         'cnx_params_converter_config': {
             'currency_aliases': [],
@@ -494,8 +495,17 @@ class ExchangeSocket(WSClient):
         """
         Modify the config, e.g. change channel urls to test urls.
         If has args, config will be passed as first argument. In that case the config MAY be modified.
-        Or you can return a new dict that will deep extend the config."""
-        raise NotImplementedError
+        Or you can return a new dict that will deep extend the config.
+        """
+        if not self.url_components.get('test'):
+            raise NotImplementedError('{} - test env is not implemented yet'.format(self.__class__.__name__))
+        
+        return {
+            'url_components': {
+                'ws': self.url_components['test'],
+                'ws_original': self.url_components['ws'],
+            },
+        }
     
     
     async def load_markets(self, reload=False, limit=None):

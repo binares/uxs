@@ -19,36 +19,36 @@ class binance(ExchangeSocket):
         'via_url': True,
     }
     url_components = {
-        'base': 'wss://stream.binance.com:9443/ws/',
+        'ws': 'wss://stream.binance.com:9443/ws',
     }
     channel_defaults = {
-        'url': '<$base><m$create_url>',
+        'url': '<$ws>/<m$create_url>',
         'send': False,
         'merge_limit': 45,
     }
     channels = {
         'all_tickers': {
-            'url': '<$base>!ticker@arr',
+            'url': '<$ws>/!ticker@arr',
         },
         'ticker': {
-            #'url': '<$base><symbol>@ticker',
+            #'url': '<$ws>/<symbol>@ticker',
             'merge_option': True,
         },
         'orderbook': {
-            #'url': '<$base><symbol>@depth',
+            #'url': '<$ws>/<symbol>@depth',
             'merge_option': True,
             'fetch_limit': 1000,
         },
         'trades': {
-            #'url': '<$base><symbol>@trade',
+            #'url': '<$ws>/<symbol>@trade',
             'merge_option': True,
         },
         'ohlcv': {
-            #'url': '<$base><symbol>@kline_<timeframe>',
+            #'url': '<$ws>/<symbol>@kline_<timeframe>',
             'merge_option': True,
         },
         'account': {
-            'url': '<$base><m$fetch_listen_key>',
+            'url': '<$ws>/<m$fetch_listen_key>',
             'auto_activate': 'on_cnx_activation',
         },
     }
