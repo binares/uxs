@@ -864,23 +864,27 @@ class krakenfu(Exchange):
         # execution_limit_filled  boolean 	          True if the maker order of the execution was filled in its entirety otherwise False
         #
         details = order
-        orderEvents = None
-        lastItem = None
+        firstEventDetails = order
+        orderEvents = self.safe_value(order, 'orderEvents', [])
         statusId = None
         trades = []
-        if 'orderEvents' in order and order['orderEvents']:
-            orderEvents = order['orderEvents']
+        if len(orderEvents) > 0:
             executions = []
             for i in range(0, len(orderEvents)):
                 if self.safe_string(orderEvents[i], 'type') == 'EXECUTION':
                     executions.append(orderEvents[i])
             trades = self.parse_trades(executions)
-            lastItem = orderEvents[(len(orderEvents) - 1)]
-            details = self.safe_value_2(lastItem, 'order', 'orderTrigger')
-            if details is None:
-                details = self.safe_value_2(lastItem, 'orderPriorExecution', 'new')
-            if details is None:
-                details = self.safe_value(lastItem, 'orderPriorEdit', {})
+            indexes = [0,(len(orderEvents) - 1)]
+            for i in range(0, 2):
+                index = indexes[i]
+                item = orderEvents[index]
+                details = self.safe_value_2(item, 'order', 'orderTrigger')
+                if details is None:
+                    details = self.safe_value_2(item, 'orderPriorExecution', 'new')
+                if details is None:
+                    details = self.safe_value(item, 'orderPriorEdit', {})
+                if index == 0:
+                    firstEventDetails = details
             statusId = self.safe_string(order, 'status')
         if statusId is None:
             statusId = self.safe_string(details, 'status')
@@ -899,7 +903,7 @@ class krakenfu(Exchange):
         timestamp = self.parse8601(self.safe_string_2(details, 'timestamp', 'receivedTime'))
         lastTradeTimestamp = None
         price = self.safe_float(details, 'limitPrice')
-        amount = self.safe_float(details, 'quantity')
+        amount = self.safe_float(firstEventDetails, 'quantity')
         filled = 0.0
         average = None
         if len(trades) > 0:
@@ -914,7 +918,7 @@ class krakenfu(Exchange):
                 isClosed = True
         else:
             filled = self.safe_float_2(details, 'filled', 'filledSize', 0.0)
-        remaining = not self.safeFloat(details, 'unfilledSize') if isClosed else 0.0
+        remaining = self.safeFloat(details, 'unfilledSize') if (not isClosed) else 0.0
         if amount is not None:
             if (remaining is None) and (not isClosed) and (filled is not None):
                 remaining = max(amount - filled, 0.0)

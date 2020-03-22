@@ -332,7 +332,7 @@ class krakenfu(ExchangeSocket):
             "order_id":"3696d19b-3226-46bd-993d-a9a7aacc8fbc",
             "cli_ord_id":"8b58d9da-fcaf-4f60-91bc-9973a3eba48d",
             "fill_id":"c14ee7cb-ae25-4601-853a-d0205e576099", 
-            "fill_type":"maker"
+            "fill_type":"takerAfterEdit"     # "taker" # "takerAfterEdit"
         }
         """
         keys = ['side','price']
@@ -346,6 +346,7 @@ class krakenfu(ExchangeSocket):
         }
         apply = {
             'symbol': lambda x: self.convert_symbol(x.lower(), 0),
+            'takerOrMaker': lambda x: 'maker' if x.lower().startswith('maker') else 'taker',
         }
         return self.api.trade_entry(
             **self.api.lazy_parse(t, keys, map, apply),
@@ -458,7 +459,10 @@ class krakenfu(ExchangeSocket):
             'reason': 'edited_by_user'
         }
         """
-        # CAUTION: Market orders created by user (manually at the site) are not received!
+        # This actually only receives OPEN orders, everything else has to be updated
+        # either by fills or by .create_order / .edit_order
+        # Cancel/closed messages are also received, but final filled quantity is not included.
+        # Also market orders created by user (manually at the site) are not received at all!
         is_snapshot = (r['feed'] in ('open_orders_verbose_snapshot',
                                      'open_orders_snapshot'))
         if is_snapshot:
@@ -480,20 +484,30 @@ class krakenfu(ExchangeSocket):
     
     def parse_order(self, o):
         symbol = self.convert_symbol(o['instrument'].lower(), 0)
-        remaining = o['qty'] - o['filled'] if not o.get('is_cancel') else 0
+        remaining = o['qty'] if not o.get('is_cancel') else 0
+        amount = o['qty'] + o['filled']
         side = 'buy' if not o['direction'] else 'sell'
         return {
             'symbol': symbol,
             'id': o['order_id'],
             'type': o['type'],
             'side': side,
-            'amount': o['qty'],
+            'amount': amount,
             'price': o['limit_price'] if o.get('limit_price') else None,
             'stop': o['stop_price'] if o.get('stop_price') else None,
             'filled': o['filled'],
             'remaining': remaining,
             'timestamp': o['time'],
             'info': o,
+        }
+    
+    def parse_ccxt_order(self, r, *args):
+        return {
+            'order': {
+                'remaining': r['remaining'],
+                'filled': r['filled'],
+            },
+            'trades': [], #r['trades'],
         }
     
     
