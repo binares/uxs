@@ -1646,16 +1646,16 @@ class ExchangeSocket(WSClient):
             #{'id': '0abc123de456f78ab9012345', 'symbol': 'XRP/USDT', 'type': 'limit', 'side': 'buy',
             # 'status': 'open'}
             if self.order['add_automatically']:
-                parsed = self.parse_ccxt_order(r)
-                try: self.orders[r['id']]
-                except KeyError:
-                    kw = {'id': r['id'], 'symbol': symbol,
-                          'side': side, 'price': price,
-                          'type': type, 'amount': amount,
-                          'timestamp': int(time.time()*1000)}
-                    self.add_order(**dict(kw,**parsed.get('order',{})))
-                for f in parsed.get('fills',[]):
-                    self.add_fill(**f)
+                order = {
+                    'id': r['id'],
+                    'symbol': symbol,
+                    'type': type,
+                    'side': side,
+                    'amount': amount,
+                    'price': price,
+                    'timestamp': self.api.milliseconds(),
+                }
+                self.add_ccxt_order(r, order, 'create')
             
             return r
     
@@ -1717,10 +1717,35 @@ class ExchangeSocket(WSClient):
             r = (await self.send(pms, wait='default')).data
             self.check_errors(r)
         else:
-            return await self.api.edit_order(id, symbol, *args)
+            r = await self.api.edit_order(id, symbol, *args)
+            if self.order['add_automatically']:
+                order = {
+                    'id': r['id'] if r.get('id') else id,
+                    'symbol': symbol,
+                    'type': args[0],
+                    'side': args[1],
+                    'timestamp': self.api.milliseconds(),
+                }
+                for key, value in zip(['type','side','amount','price'], args):
+                    order[key] = value
+                self.add_ccxt_order(r, order, 'edit')
     
     
-    def parse_ccxt_order(self, r):
+    def add_ccxt_order(self, response, order={}, from_method='create', overwrite=None):
+        if overwrite is None:
+            overwrite = (from_method=='edit')
+        parsed = self.parse_ccxt_order(response, from_method)
+        exists = 'id' in response and response['id'] in self.orders
+        
+        if not exists or overwrite:
+            final_order = dict(order, **parsed.get('order', {}))
+            self.add_order_from_dict(final_order)
+        
+        for f in parsed.get('fills',[]):
+            self.add_fill_from_dict(f)
+    
+    
+    def parse_ccxt_order(self, r, *args):
         return {'order': {}, 'fills': []}
     
     
