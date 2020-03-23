@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import asyncio
 
 from uxs.base.socket import ExchangeSocket
 
@@ -91,8 +92,10 @@ class krakenfu(ExchangeSocket):
         'force_create': None, # the fetched one doesn't have nonce
     }
     order = {
+        # Orders alone can't be relied on, as no "filled"
+        # is included in the final (closed) message
         'update_remaining_on_fill': False,
-        'update_filled_on_fill': False,
+        'update_filled_on_fill': True,
         'update_payout_on_fill': False,
     }
     trade = {
@@ -463,14 +466,20 @@ class krakenfu(ExchangeSocket):
         # either by fills or by .create_order / .edit_order
         # Cancel/closed messages are also received, but final filled quantity is not included.
         # Also market orders created by user (manually at the site) are not received at all!
+        tlogger.debug(r)
         is_snapshot = (r['feed'] in ('open_orders_verbose_snapshot',
                                      'open_orders_snapshot'))
         if is_snapshot:
             orders = r['orders']
         elif 'order' not in r:
             if r.get('is_cancel'):
-                self.update_order(id=r['order_id'], remaining=0, enable_sub=True)
-            return
+                # To ensure that ccxt order response is received before canceling here,
+                # so that ccxt could set the final "filled" (and presumably cancel it by itself)
+                async def _update_after():
+                    await asyncio.sleep(1)
+                    self.update_order(id=r['order_id'], remaining=0, enable_sub=True)
+                asyncio.ensure_future(_update_after())
+            orders = []
         else:
             _order = dict(r['order'],
                           is_cancel=r['is_cancel'],
@@ -479,6 +488,8 @@ class krakenfu(ExchangeSocket):
         
         for o in orders:
             parsed = self.parse_order(o)
+            del parsed['filled']
+            #del parsed['remaining']
             self.add_order_from_dict(parsed, enable_sub=True)
     
     
@@ -501,13 +512,17 @@ class krakenfu(ExchangeSocket):
             'info': o,
         }
     
+    
     def parse_ccxt_order(self, r, *args):
+        tlogger.debug('ccxt_order: {}'.format(r))
         return {
             'order': {
+                'amount': r['amount'],
+                # fills will update these 2
                 'remaining': r['remaining'],
-                'filled': r['filled'],
+                'filled': None, #filled,
             },
-            'trades': [], #r['trades'],
+            'fills': r['trades'],
         }
     
     
@@ -553,6 +568,7 @@ class krakenfu(ExchangeSocket):
             ]
         }
         """
+        tlogger.debug(r)
         parsed = [self.parse_trade(f) for f in r['fills']]
         for f in parsed:
             self.add_fill_from_dict(f, enable_sub=True)

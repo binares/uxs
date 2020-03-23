@@ -863,29 +863,35 @@ class krakenfu(Exchange):
         # execution_mark_price    positive float 	  The market price at the time of the execution
         # execution_limit_filled  boolean 	          True if the maker order of the execution was filled in its entirety otherwise False
         #
-        details = order
-        firstEventDetails = order
         orderEvents = self.safe_value(order, 'orderEvents', [])
+        details = None
+        isPrior = False
+        fixed = False
         statusId = None
+        price = None
         trades = []
         if len(orderEvents) > 0:
             executions = []
             for i in range(0, len(orderEvents)):
-                if self.safe_string(orderEvents[i], 'type') == 'EXECUTION':
-                    executions.append(orderEvents[i])
+                item = orderEvents[i]
+                if self.safe_string(item, 'type') == 'EXECUTION':
+                    executions.append(item)
+                # Final order(after placement / editing / execution / canceling)
+                if ('new' in item) or ('order' in item) or ('orderTrigger' in item):
+                    details = self.safe_value_2(item, 'new', 'order')
+                    if details is None:
+                        details = item['orderTrigger']
+                    isPrior = False
+                    fixed = True
+                elif (('orderPriorEdit' in item) or ('orderPriorExecution' in item)) and (not fixed) and (details is None):
+                    details = self.safe_value_2(item, 'orderPriorExecution', 'orderPriorEdit')
+                    if 'orderPriorExecution' in item:
+                        price = self.safe_float(item['orderPriorExecution'], 'limitPrice')
+                    isPrior = True
             trades = self.parse_trades(executions)
-            indexes = [0,(len(orderEvents) - 1)]
-            for i in range(0, 2):
-                index = indexes[i]
-                item = orderEvents[index]
-                details = self.safe_value_2(item, 'order', 'orderTrigger')
-                if details is None:
-                    details = self.safe_value_2(item, 'orderPriorExecution', 'new')
-                if details is None:
-                    details = self.safe_value(item, 'orderPriorEdit', {})
-                if index == 0:
-                    firstEventDetails = details
             statusId = self.safe_string(order, 'status')
+        if details is None:
+            details = order
         if statusId is None:
             statusId = self.safe_string(details, 'status')
         # This may be incorrectly marked as "open" if only execution report is given,
@@ -902,27 +908,36 @@ class krakenfu(Exchange):
                 symbol = market['symbol']
         timestamp = self.parse8601(self.safe_string_2(details, 'timestamp', 'receivedTime'))
         lastTradeTimestamp = None
-        price = self.safe_float(details, 'limitPrice')
-        amount = self.safe_float(firstEventDetails, 'quantity')
-        filled = 0.0
+        if price is None:
+            price = self.safe_float(details, 'limitPrice')
+        amount = self.safe_float(details, 'quantity')
+        filled = self.safe_float_2(details, 'filledSize', 'filled',  0.0)
+        remaining = self.safe_float(details, 'unfilledSize')
         average = None
+        filled2 = 0.0
         if len(trades) > 0:
             vwapSum = 0.0
             for i in range(0, len(trades)):
                 trade = trades[i]
-                filled += trade['amount']
+                filled2 += trade['amount']
                 vwapSum += trade['amount'] * trade['price']
-            average = vwapSum / filled
-            if (amount is not None) and (not isClosed) and (filled >= amount):
+            average = vwapSum / filled2
+            if (amount is not None) and (not isClosed) and isPrior and (filled2 >= amount):
                 status = 'closed'
                 isClosed = True
-        else:
-            filled = self.safe_float_2(details, 'filled', 'filledSize', 0.0)
-        remaining = self.safeFloat(details, 'unfilledSize') if (not isClosed) else 0.0
-        if amount is not None:
-            if (remaining is None) and (not isClosed) and (filled is not None):
-                remaining = max(amount - filled, 0.0)
-        elif (filled is not None) and (remaining is not None):
+            if isPrior:
+                filled = filled + filled2
+            else:
+                filled = max(filled, filled2)
+        if remaining is None:
+            if isPrior:
+                if amount is not None:
+                    # remaining amount before execution minus executed amount
+                    remaining = amount - filled2
+            else:
+                remaining = amount
+        # if fetchOpenOrders are parsed
+        if (amount is None) and (not isPrior) and (remaining is not None):
             amount = filled + remaining
         cost = None
         if (filled is not None) and (market is not None):
