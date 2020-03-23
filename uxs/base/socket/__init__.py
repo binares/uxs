@@ -1716,6 +1716,9 @@ class ExchangeSocket(WSClient):
             }
             r = (await self.send(pms, wait='default')).data
             self.check_errors(r)
+            order_id = r['id'] if 'id' in r else id
+            o = _copy.deepcopy(self.orders[order_id])
+            return o
         else:
             r = await self.api.edit_order(id, symbol, *args)
             if self.order['add_automatically']:
@@ -1729,6 +1732,7 @@ class ExchangeSocket(WSClient):
                 for key, value in zip(['type','side','amount','price'], args):
                     order[key] = value
                 self.add_ccxt_order(r, order, 'edit')
+            return r
     
     
     def add_ccxt_order(self, response, order={}, from_method='create', overwrite=None):

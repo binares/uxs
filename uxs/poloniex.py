@@ -259,7 +259,7 @@ class poloniex(ExchangeSocket):
         self.add_fill(id=tid, symbol=None, side=None, price=price, amount=amount,
                       fee_rate=fee_rate, timestamp=ts, order=oid)
         
-    def parse_ccxt_order(self, r):
+    def parse_ccxt_order(self, r, *args):
         """{
         'info': {'timestamp': 1541421971000, 'status': 'open', 'type': 'limit', 
                 'side': 'buy', 'price': 0.1, 'amount': 0.02, 'orderNumber': '123456789010', 
