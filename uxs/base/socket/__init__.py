@@ -1136,10 +1136,14 @@ class ExchangeSocket(WSClient):
             
         loc = next((i for i,x in enumerate(o_fills) if x['id']==id), None)
         
+        # Overwriting a fill is not preferable, as it can mess up
+        # "filled", "remaining" and "payout" of the fill's order
         if loc is not None:
             tlogger.debug('{} - fill {} already registered.'.format(
                 self.name,(id,symbol,side,price,amount,order)))
-            del o_fills[loc]
+            if enable_sub:
+                self.change_subscription_state(('account',), 1, True)
+            return
         
         def insert_fill(f):
             o_fills.append(f)
