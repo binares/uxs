@@ -75,13 +75,14 @@ class bitmex(ExchangeSocket):
     ob = {
         'force_create': None,
         'cache_size': 1000,
+        'limits': [10, 25],
         'uses_nonce': False,
         'receives_snapshot': True,
         'hold_times': {
             'orderBookL2_25': 0.05,
             #this is the lowest "exact" asyncio.sleep time on Windows
             'orderBookL2': 0.016,
-        }
+        },
     }
     order = {
         'update_filled_on_fill': False,
@@ -818,10 +819,16 @@ class bitmex(ExchangeSocket):
         
         if limit is None or limit > 25:
             orderbook = ['orderBookL2:<symbol>']
+            limit = None
         elif limit <= 10 and throttled:
             orderbook = ['orderBook10:<symbol>']
+            limit = 10
         elif limit <= 25:
             orderbook = ['orderBookL2_25:<symbol>']
+            limit = 25
+        
+        if channel == 'orderbook':
+            self.ob_maintainer.set_limit(params['symbol'], limit)
         
         channel_ids = self.channel_ids[channel] if channel != 'orderbook' else orderbook
         args = self.encode_symbols(params.get('symbol'), channel_ids)

@@ -150,6 +150,7 @@ class kraken(ExchangeSocket):
         'receives_snapshot': True,
         # This is set to 10 because its the exchange's default
         'default_limit': 10,
+        'limits': [10, 25, 100, 500, 1000],
     }
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
@@ -1070,7 +1071,11 @@ class kraken(ExchangeSocket):
             #10, 25, 100, 500, 1000
             if limit is None:
                 limit = self.ob['default_limit']
-            limit = self.round_ob_limit(limit)
+            elif limit >= 1000:
+                limit = 1000
+            else:
+                limit = self.ob_maintainer.resolve_limit(limit)
+            self.ob_maintainer.set_limit(symbol, limit)
         
         if sub is not None:
             out['event'] = out2['event'] = 'subscribe' if sub else 'unsubscribe'
@@ -1128,21 +1133,6 @@ class kraken(ExchangeSocket):
         else:
             out['token'] = token
         return out
-    
-    
-    @staticmethod
-    def round_ob_limit(depth):
-        #10, 25, 100, 500, 1000
-        if depth <= 10:
-            return 10
-        elif depth <= 25:
-            return 25
-        elif depth <= 100:
-            return 100
-        elif depth <= 500:
-            return 500
-        else:
-            return 1000
     
     
     async def on_start(self):

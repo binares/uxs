@@ -37,7 +37,6 @@ class binance(ExchangeSocket):
         'orderbook': {
             #'url': '<$ws>/<symbol>@depth',
             'merge_option': True,
-            'fetch_limit': 1000,
         },
         'trades': {
             #'url': '<$ws>/<symbol>@trade',
@@ -81,6 +80,10 @@ class binance(ExchangeSocket):
         #TODO: change back
         'ping_interval': 300,
     }
+    ob = {
+        #'limits': [5, 10, 20], #not supported yet
+        'fetch_limit': 1000, # 5, 10, 20, 50, 100, 500, 1000, 5000
+    }
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
     }
@@ -110,6 +113,8 @@ class binance(ExchangeSocket):
                 self.on_futures_account(r)
             elif type == 'ORDER_TRADE_UPDATE':
                 self.on_futures_order(r)
+            elif 'lastUpdateId' in r:
+                self.on_limited_ob_update(r)
             #elif r == {} or 'ping' in r:
             #    print('Received ping response? : {}'.format(r))
             #    cnx = self.cm.connections[R.id]
@@ -239,8 +244,28 @@ class binance(ExchangeSocket):
             'nonce': (r['U'],r['u']) if 'pu' not in r else (r['pu']+1,r['u']),
         }
         self.orderbook_maintainer.send_update(update)
+    
+    
+    def on_limited_ob_update(self, R):
+        """
+        {
+            'lastUpdateId': 2905372000,
+            'bids': [['6565.79000000', '0.00300700'], ['6565.66000000', '0.06990100'], ...],
+            'asks': [['6566.32000000', '0.00000900'], ['6567.43000000', '0.01500000'], ...],
+        }
+        """
+        raise NotImplementedError('{} - limited ob not supported yet'.format(self.exchange))
         
-        
+        r = R.data
+        cnx = self.cm.connections[R.id]
+        ob = dict(
+            symbol='?',
+            **self.api.parse_order_book(r),
+        )
+        ob['nonce'] = r['lastUpdateId']
+        self.orderbook_maintainer.send_orderbook(ob)
+    
+    
     def on_trade(self, r):
         """Spot:
         {
@@ -452,6 +477,7 @@ class binance(ExchangeSocket):
         channel = params['_']
         symbol = params['symbol']
         timeframe = params.get('timeframe')
+        limit = params.get('limit')
         if isinstance(symbol, str):
             symbol = [symbol]
         is_spot = self.exchange=='binance'
@@ -459,8 +485,15 @@ class binance(ExchangeSocket):
                     'orderbook': '@depth',
                     'trades': '@trade' if is_spot else '@aggTrade',
                     'ohlcv': '@kline_{}'.format(timeframe)}
+        if channel=='orderbook' and limit is not None:
+            limit = self.ob_maintainer.resolve_limit(limit)
+            _symbol = [self.convert_symbol(x.upper(), 0) for x in symbol]
+            self.ob_maintainer.set_limit(_symbol, limit)
+            params['limit'] = limit
+            if limit is not None:
+                suffixes['orderbook'] += str(limit)
         suffix = suffixes[channel]
-        return '/'.join(['{}{}'.format(s,suffix) for s in symbol])
+        return '/'.join(['{}{}'.format(s, suffix) for s in symbol])
     
     
     async def fetch_listen_key(self):

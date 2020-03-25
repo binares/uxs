@@ -216,6 +216,12 @@ class ExchangeSocket(WSClient):
         'reload_interval': 15,
         # minimal interval between two restart (unsub, resub) attempts (corrupted ob)
         'restart_interval': 15,
+        # exchange provided depth limits. the limit provided in the subscription
+        # will be rounded up to the nearest in this list, or set to `None` if no larger exists
+        'limits': [],
+        # limit used for fetch_order_book. if not specified
+        # then the limit provided in the subscription is used instead
+        'fetch_limit': None,
         # the number of latest updates to be kept in cache
         'cache_size': 50,
         'uses_nonce': True,

@@ -97,11 +97,22 @@ class OrderbookMaintainer:
     
     async def _fetch_and_create(self, symbol):
         try:
-            fetch_limit = self.xs.cis.get_value('orderbook','fetch_limit')
+            fetch_limit = self.xs.ob['fetch_limit']
+            s = self.xs.get_subscription(('orderbook',symbol))
+            limit = s.params.get('limit')
+            # use "null" to purposefully leave `fetch_limit` to None
+            # and prevent `limit` overriding it
+            if fetch_limit == 'null':
+                fetch_limit = None
+            elif fetch_limit is None and limit is not None:
+                fetch_limit = limit
             args = (fetch_limit,) if fetch_limit is not None else ()
             tlogger.debug('{} - creating orderbook {}.'.format(self.xs.name, symbol))
             #self.orderbooks[symbol] = await self.xs.api.fetch_order_book(symbol)
-            fetched = await self.xs.fetch_order_book(symbol,*args)
+            fetched = await self.xs.fetch_order_book(symbol, *args)
+            if limit is not None:
+                fetched['bids'] = fetched['bids'][:limit]
+                fetched['asks'] = fetched['asks'][:limit]
             tlogger.debug('fetched ob {} nonce {}'.format(symbol, fetched.get('nonce')))
             ob = dict({'symbol': symbol}, **fetched)
         except Exception as e:
@@ -109,7 +120,7 @@ class OrderbookMaintainer:
             logger.exception(e)
         else:
             self._assign(ob)
-            
+    
     
     def _assign(self, ob):
         symbol = ob['symbol']
@@ -422,6 +433,22 @@ class OrderbookMaintainer:
     def purge_cache(self, symbol):
         if symbol in self.cache:
             self.cache[symbol]['updates'].clear()
+    
+    
+    def resolve_limit(self, limit):
+        if limit is None:
+            return None
+        limits = sorted(self.xs.ob['limits'])
+        return next((x for x in limits if limit<=x), None)
+    
+    
+    def set_limit(self, symbol, limit):
+        symbols = [symbol] if isinstance(symbol, str) else symbol
+        for symbol in symbols:
+            s = self.xs.get_subscription(('orderbook',symbol))
+            s.params['limit'] = limit
+            if s.merger is not None:
+                s.merger.params['limit'] = limit
     
     
     @staticmethod
