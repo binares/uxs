@@ -35,6 +35,7 @@ class gateiofu(ExchangeSocket):
         'uses_nonce': False, # the nonces aren't strictly linear
         'receives_snapshot': True,
         'force_create': None,
+        'limits': [1, 5, 10, 20],
     }
     _cached_snapshots = {}
     __deepcopy_on_init__ = ['_cached_snapshots']
@@ -164,8 +165,9 @@ class gateiofu(ExchangeSocket):
             payload += [self.convert_symbol(params['symbol'], 1)]
         if channel=='orderbook':
             limit = 20
-            if params.get('limit') is not None:
-                limit = next(x for x in (20, 10, 5, 1) if params['limit']>=x)
+            if params.get('limit') is not None and params['limit'] < 20:
+                limit = self.ob_maintainer.resolve_limit(params['limit'])
+            self.ob_maintainer.set_limit(params['symbol'], limit)
             payload += [str(limit), "0"]
             #limit     String     Yes     limit, legal limits: 20, 10, 5, 1
             #interval     String     Yes     legal intervals: "0"
