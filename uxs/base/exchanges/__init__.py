@@ -4,6 +4,7 @@ Exchanges that are not present in ccxt
 import ccxt
 
 from .bitforexfu import bitforexfu
+from .bitzfu import bitzfu
 from .delta import delta
 from .gateiofu import gateiofu
 from .krakenfu import krakenfu

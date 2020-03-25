@@ -4,6 +4,7 @@ Async versions of exchanges that are not present in ccxt
 import ccxt.async_support
 
 from .bitforexfu import bitforexfu
+from .bitzfu import bitzfu
 from .delta import delta
 from .gateiofu import gateiofu
 from .krakenfu import krakenfu
