@@ -23,7 +23,7 @@ class bitzfu(bitz):
                 'fetchOHLCV': True,
                 'fetchOpenOrders': True,
                 'fetchOrder': True,
-                'fetchOrders': True,
+                'fetchOrders': False,
                 'fetchTickers': True,
                 'fetchWithdrawals': False,
             },
@@ -80,7 +80,7 @@ class bitzfu(bitz):
                 },
             },
             'options': {
-                'defaultLeverage': 1,
+                'defaultLeverage': 2,  # 2, 5, 10, 15, 20, 50, 100
                 'defaultIsCross': 1,  # 1: cross, -1: isolated
             },
         })
@@ -92,14 +92,14 @@ class bitzfu(bitz):
         #      "status": 200,
         #      "msg": "",
         #      "data": [
-        #          {
-        #              "contractId": "101",                    # contract id
-        #              "symbol": "BTC",                        # symbol
-        #              "settleAnchor": "USDT",                 # settle anchor
-        #              "quoteAnchor": "USDT",                  # quote anchor
-        #              "contractAnchor": "BTC",                # contract anchor
+        #          {                                                                                                  # BZ settled contract:
+        #              "contractId": "101",                    # contract id                                          # "201"
+        #              "symbol": "BTC",                        # symbol                                               # "BTC"
+        #              "settleAnchor": "USDT",                 # settle anchor                                        # "BZ"
+        #              "quoteAnchor": "USDT",                  # quote anchor                                         # "USDT"
+        #              "contractAnchor": "BTC",                # contract anchor                                      # "BZ \/ 1 USDT"
         #              "contractValue": "0.00100000",          # contract face value
-        #              "pair": "BTC_USDT",                     # pair
+        #              "pair": "BTC_USDT",                     # pair                                                 # "BTC_USDT"
         #              "expiry": "0000-00-00 00:00:00",        # delivery day(non-perpetual contract)
         #              "maxLeverage": "100",                   # max leverage
         #              "maintanceMargin": "0.00500000",        # maintenance margin
@@ -109,7 +109,7 @@ class bitzfu(bitz):
         #              "priceDec": "1",                        # floating point decimal of price
         #              "anchorDec": "2",                       # floating point decimal of quote anchor
         #              "status": "1",                          # status，1: trading, 0: pending, -1: permanent stop
-        #              "isreverse": "-1",                      # 1:reverse contract，-1: forward contract
+        #              "isreverse": "-1",                      # 1:reverse contract，-1: forward contract              # "-1"
         #              "allowCross": "1",                      # Allow cross position，1:Yes，-1:No
         #              "allowLeverages": "2,5,10,15,20,50,100",// Leverage multiple allowed by the system
         #              "maxOrderNum": "50",                    # max order number
@@ -127,17 +127,24 @@ class bitzfu(bitz):
         result = []
         for i in range(0, len(markets)):
             market = markets[i]
-            id = self.safe_string(market, 'contractId')
-            pairId = self.safe_string(market, 'pair')
+            id = self.safe_string(market, 'contractId')  # unique
+            pairId = self.safe_string(market, 'pair')    # NOT unique
             baseId = self.safe_string(market, 'symbol')
             quoteId = self.safe_string(market, 'quoteAnchor')
+            settleId = self.safe_string(market, 'settleAnchor')
             maker = self.safe_float(market, 'makerFee')
             taker = self.safe_float(market, 'takerFee')
             base = baseId.upper()
             quote = quoteId.upper()
+            settle = settleId.upper()
             base = self.safe_currency_code(base)
             quote = self.safe_currency_code(quote)
+            settle = self.safe_currency_code(settle)
             symbol = base + '/' + quote
+            # To preserve the uniqueness of all symbols
+            if (settle != base) and (settle != quote):
+                symbol = settle + '_' + symbol
+            lotSize = self.safe_float(market, 'contractValue')
             precision = {
                 'amount': self.safe_integer(market, 'anchorDec'),
                 'price': self.safe_integer(market, 'priceDec'),
@@ -154,8 +161,10 @@ class bitzfu(bitz):
                 'symbol': symbol,
                 'base': base,
                 'quote': quote,
+                'settle': settle,
                 'baseId': baseId,
                 'quoteId': quoteId,
+                'settleId': settleId,
                 'spot': False,
                 'future': future,
                 'swap': swap,
@@ -165,6 +174,7 @@ class bitzfu(bitz):
                 'maker': maker,
                 'active': active,
                 'precision': precision,
+                'lotSize': lotSize,
                 'limits': {
                     'amount': {
                         'min': self.safe_float(market, 'minAmount'),
@@ -318,7 +328,7 @@ class bitzfu(bitz):
         request = {}
         if (symbols is not None) and (len(symbols) == 1):
             id = self.market_id(symbols[0])
-            request['contractId'] = int(id)
+            request['contractId'] = id
         response = await self.publicGetTickers(self.extend(request, params))
         #
         #  {
@@ -364,11 +374,6 @@ class bitzfu(bitz):
             if symbol is None:
                 if market is not None:
                     symbol = market['symbol']
-                else:
-                    baseId, quoteId = pairId.split('_')
-                    base = self.safe_currency_code(baseId)
-                    quote = self.safe_currency_code(quoteId)
-                    symbol = base + '/' + quote
             if (symbol is not None) and ((symbols is None) or self.in_array(symbol, symbols)):
                 result[symbol] = self.extend(ticker, {
                     'timestamp': timestamp,
@@ -382,7 +387,7 @@ class bitzfu(bitz):
         #  contractId 	    Yes 	    int 	Contract ID
         #  depth 	        no 	        string 	Depth type 5, 10, 15, 20, 30, 100,,default10
         request = {
-            'contractId': int(self.market_id(symbol)),
+            'contractId': self.market_id(symbol),
         }
         if limit is not None:
             request['limit'] = limit
@@ -454,6 +459,8 @@ class bitzfu(bitz):
             base = self.safe_currency_code(baseId)
             quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
+            if int(contractId) >= 200:
+                symbol = 'BZ_' + symbol
         side = self.safe_string(trade, 'type')
         price = self.safe_float(trade, 'price')
         amount = self.safe_float(trade, 'num')
@@ -462,10 +469,11 @@ class bitzfu(bitz):
         if market is not None:
             tradeFee = self.safe_float(trade, 'tradeFee')
             if tradeFee is not None:
-                base, quote = symbol.split('_')
+                tradeFee *= -1
+                base, quote = symbol.split('/')
                 currency = base if market['swap'] else quote
                 fee = {
-                    'amount': tradeFee,
+                    'cost': tradeFee,
                     'currency': currency,
                 }
         return {
@@ -491,7 +499,7 @@ class bitzfu(bitz):
         #  contractId 	    Yes 	    int 	Contract ID
         #  pageSize 	    No 	        int 	Get data volume range:10-300 default 10
         request = {
-            'contractId': int(market['id']),
+            'contractId': market['id'],
         }
         if limit is not None:
             request['pageSize'] = min(max(limit, 10), 300)
@@ -547,7 +555,7 @@ class bitzfu(bitz):
         #  size 	    No 	        int 	    Get data volume 1-300, default 300
         #
         request = {
-            'contractId': int(market['id']),
+            'contractId': market['id'],
             'type': self.timeframes[timeframe],
         }
         if limit is not None:
@@ -613,10 +621,12 @@ class bitzfu(bitz):
         if market is not None:
             symbol = market['symbol']
         type = self.safe_string(order, 'type')
-        side = self.safeInt(order, 'direction')
+        side = self.safe_integer(order, 'direction')
         if side is not None:
             side = 'buy' if (side == 1) else 'sell'
         price = self.safe_float(order, 'price')
+        if price == 0:
+            price = None  # market order
         amount = self.safe_float(order, 'amount')
         remaining = self.safe_float(order, 'available')
         filled = None
@@ -631,6 +641,7 @@ class bitzfu(bitz):
                 cost = filled
             else:
                 cost = filled * price
+            cost *= market['lotSize']
         status = self.parse_order_status(self.safe_string(order, 'orderStatus'))
         return {
             'id': id,
@@ -666,7 +677,7 @@ class bitzfu(bitz):
         market = self.market(symbol)
         ordDirection = 1 if (side == 'buy') else -1
         request = {
-            'contractId': int(market['id']),
+            'contractId': market['id'],
             'amount': self.amount_to_precision(symbol, amount),
             'leverage': self.options['defaultLeverage'],
             'direction': ordDirection,
@@ -688,18 +699,20 @@ class bitzfu(bitz):
         #      "source": "api"
         #  }
         #
-        timestamp = self.parseMicrotime(self.safe_string(response, 'microtime'))
-        order = {
-            'symbol': symbol,
-            'timestamp': timestamp,
-            'id': self.safe_integer(response['data'], 'orderId'),
-        }
-        return self.parse_order(order, market)
+        order = self.safe_value(response, 'data', {})
+        order['time'] = self.safe_integer(response, 'time')
+        order = self.parse_order(order, market)
+        return self.extend(order, {
+            'type': type,
+            'side': side,
+            'amount': amount,
+            'price': price,
+        })
 
     async def cancel_order(self, id, symbol=None, params={}):
         await self.load_markets()
         request = {
-            'entrustSheetId': self.safe_integer(id),
+            'entrustSheetId': id,
         }
         response = await self.privatePostCancelTrade(self.extend(request, params))
         #
@@ -751,19 +764,24 @@ class bitzfu(bitz):
 
     async def fetch_orders_with_method(self, method, symbol=None, since=None, limit=None, params={}):
         if symbol is None:
-            raise ArgumentsRequired(self.id + ' fetchOpenOrders requires a symbol argument')
+            raise ArgumentsRequired(self.id + ' - ' + method + ' requires a symbol argument')
+        apiMethods = {
+            'fetchClosedOrders': 'privatePostGetMyHistoryTrade',
+            'fetchOpenOrders': 'privatePostGetOrder',
+        }
+        apiMethod = apiMethods[method]
         await self.load_markets()
         market = self.market(symbol)
         request = {
-            'contractId': int(market['id']),
+            'contractId': market['id'],
         }
-        if method == 'privatePostGetMyHistoryTrade':
+        if apiMethod == 'privatePostGetMyHistoryTrade':
             request['page'] = 1  # required integer, 1-10
             if limit is not None:
                 request['pageSize'] = limit
             else:
                 request['pageSize'] = 50  # required integer, max 50
-        response = await getattr(self, method)(self.extend(request, params))
+        response = await getattr(self, apiMethod)(self.extend(request, params))
         #
         #  {
         #      "status": 200,
@@ -789,23 +807,14 @@ class bitzfu(bitz):
         #      "source": "api"
         #  }
         #
-        orders = self.safe_value(response['data'], 'data', [])
-        return self.parse_orders(orders, None, since, limit)
-
-    async def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
-        return await self.fetch_orders_with_method('privatePostGetMyHistoryTrade', symbol, since, limit, params)
-
-    async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
-        return await self.fetch_orders_with_method('privatePostGetOrder', symbol, since, limit, params)
+        orders = self.safe_value(response, 'data', [])
+        return self.parse_orders(orders, market, since, limit)
 
     async def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
-        allOrders = await self.fetch_orders_with_method('privatePostGetMyHistoryTrade', symbol, since, limit, params)
-        orders = []
-        for i in range(0, len(allOrders)):
-            order = allOrders[i]
-            if order['status'] != 'open':
-                orders.append(order)
-        return orders
+        return await self.fetch_orders_with_method('fetchClosedOrders', symbol, since, limit, params)
+
+    async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
+        return await self.fetch_orders_with_method('fetchOpenOrders', symbol, since, limit, params)
 
     async def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
         if symbol is None:
@@ -820,7 +829,7 @@ class bitzfu(bitz):
         #  createDate 	    No 	        int 	Date(Day), Default 7, currently only 7 or 30 are supported.
         #
         request = {
-            'contractId': int(market['id']),
+            'contractId': market['id'],
             'page': 1,
         }
         if limit is not None:
@@ -849,9 +858,7 @@ class bitzfu(bitz):
         #      "source":"api"
         #  }
         #
-        trades = self.safe_value(response, 'data')
-        if trades is None:
-            return []
+        trades = self.safe_value(response, 'data', [])
         return self.parse_trades(trades, market, since, limit, params)
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
