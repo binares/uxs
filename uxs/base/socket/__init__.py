@@ -637,8 +637,11 @@ class ExchangeSocket(WSClient):
                                                           'aks_count': len(new['asks'])})
             if self.ob['assert_integrity']:
                 assert_integrity(self.orderbooks[symbol])
+        
         if data and set_event:
             self.safe_set_event('orderbook', -1)
+        
+        self._update_tickers_from_ob([ob['symbol'] for ob in data])
     
     
     def update_orderbooks(self, data, *, set_event=True, enable_sub=False):
@@ -654,14 +657,7 @@ class ExchangeSocket(WSClient):
                 ...
             ]
         """
-        sends = self.ob['sends_bidAsk']
-        all_subbed = self.is_subscribed_to({'_': 'all_tickers'}, 1)
-        does_send = sends and (not isinstance(sends, dict) or '_' not in sends or sends['_'])
-        only_if_not_subbed = isinstance(sends,dict) and sends.get('only_if_not_subbed_to_ticker')
-        set_ticker_event = not isinstance(sends,dict) or sends.get('set_ticker_event', True)
-        is_subbed = lambda symbol: self.is_subscribed_to({'_':'ticker','symbol':symbol}, 1)
         cb_data = []
-        update_tickers = []
         
         for d in data:
             symbol = d['symbol']
@@ -688,9 +684,6 @@ class ExchangeSocket(WSClient):
                                                           'bids_count': len(d['bids']),
                                                           'aks_count': len(d['asks'])})
             
-            if does_send and (not only_if_not_subbed or not all_subbed and not is_subbed(symbol)):
-                update_tickers.append(symbol)
-            
             cb_input = {'_': 'orderbook',
                         'symbol': symbol,
                         'data': {'symbol': symbol,
@@ -708,13 +701,23 @@ class ExchangeSocket(WSClient):
                 self.safe_set_event('orderbook', -1)
             self.exec_callbacks(cb_data, 'orderbook', -1)
         
-        if update_tickers:
-            self._update_tickers_from_ob(update_tickers, set_ticker_event)
+        self._update_tickers_from_ob([d['symbol'] for d in data])
     
     
-    def _update_tickers_from_ob(self, symbols, set_event=True):
+    def _update_tickers_from_ob(self, symbols):
+        sends = self.ob['sends_bidAsk']
+        does_send = sends and (not isinstance(sends, dict) or '_' not in sends or sends['_'])
+        all_subbed = self.is_subscribed_to({'_': 'all_tickers'}, 1)
+        only_if_not_subbed = isinstance(sends,dict) and sends.get('only_if_not_subbed_to_ticker')
+        if not does_send or only_if_not_subbed and all_subbed:
+            return
+        set_ticker_event = not isinstance(sends,dict) or sends.get('set_ticker_event', True)
+        is_subbed = lambda symbol: self.is_subscribed_to({'_':'ticker','symbol':symbol}, 1)
+        
         data = []
         for symbol in symbols:
+            if only_if_not_subbed and is_subbed(symbol):
+                continue
             d = {'symbol': symbol}
             for side in ('bid','ask'):
                 try: d.update(dict(zip([side,side+'Volume'],
@@ -722,7 +725,9 @@ class ExchangeSocket(WSClient):
                 except (IndexError, KeyError): pass
             if len(d) > 1:
                 data.append(d)
-        self.update_tickers(data, set_event=set_event)
+        
+        if data:
+            self.update_tickers(data, set_event=set_ticker_event)
     
     
     def update_trades(self, data, key=None, *, set_event=True, enable_sub=False):
