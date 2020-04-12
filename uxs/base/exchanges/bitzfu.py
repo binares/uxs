@@ -7,6 +7,7 @@ from ccxt.bitz import bitz
 import math
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import ArgumentsRequired
+from ccxt.base.decimal_to_precision import TICK_SIZE
 
 
 class bitzfu(bitz):
@@ -79,6 +80,7 @@ class bitzfu(bitz):
                     'taker': None,
                 },
             },
+            'precisionMode': TICK_SIZE,
             'options': {
                 'defaultLeverage': 2,  # 2, 5, 10, 15, 20, 50, 100
                 'defaultIsCross': 1,  # 1: cross, -1: isolated
@@ -144,11 +146,18 @@ class bitzfu(bitz):
             # To preserve the uniqueness of all symbols
             if (settle != base) and (settle != quote):
                 symbol = settle + '_' + symbol
-            lotSize = self.safe_float(market, 'contractValue')
+            lotSize = 1.0
+            if settle != 'BZ':
+                lotSize = self.safe_float(market, 'contractValue')
             precision = {
-                'amount': self.safe_integer(market, 'anchorDec'),
+                'amount': 1.0,
                 'price': self.safe_integer(market, 'priceDec'),
             }
+            if precision['price'] is not None:
+                precision['price'] = math.pow(10, -precision['price'])
+                # Only(BZ_)BTC/USD(T) and (BZ_)ETH/USD(T) markets are tick sized
+                if (base == 'BTC') or (base == 'ETH'):
+                    precision['price'] *= 5
             active = (self.safe_integer(market, 'status') == 1)
             isReverse = (self.safe_integer(market, 'isreverse') == 1)
             type = 'swap' if isReverse else 'future'
@@ -181,7 +190,7 @@ class bitzfu(bitz):
                         'max': self.safe_float(market, 'maxAmount'),
                     },
                     'price': {
-                        'min': math.pow(10, -precision['price']),
+                        'min': precision['price'],
                         'max': None,
                     },
                     'cost': {
