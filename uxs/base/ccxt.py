@@ -3,6 +3,9 @@ import ccxt.async_support
 import json
 import time
 from copy import deepcopy
+import ssl
+import aiohttp
+import aiohttp_socks
 
 from .auth import (get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
 from . import wrappers as _wrappers
@@ -52,6 +55,7 @@ _exchange_instances_async = {}
 class ccxtWrapper:
     """Wraps any ccxt exchange"""
     Position = Position
+    socks_proxy = None
         
     def __init__(self, config={}, *, test=False,
                  load_cached_markets=None, profile=None, auth=None):
@@ -65,6 +69,8 @@ class ccxtWrapper:
             if param in auth: config[param] = auth[param]
         
         super().__init__(config)
+        if self.socks_proxy is not None and not self.proxies:
+            self.proxies = dict.fromkeys(['http','https'], self.socks_proxy)
         xc = get_name(self)
         self._custom_name = xc
         self._token_kwds = ['apiKey', 'secret'] + EXTRA_TOKEN_KEYWORDS.get(xc, [])
@@ -1048,6 +1054,18 @@ class asyncCCXTWrapper(ccxtWrapper):
             args = args[:1] + (side,) + args[2:]
         
         return await super(ccxtWrapper, self).edit_order(id, symbol, *args)
+    
+    
+    def open(self):
+        if self.own_session and self.session is None:
+            # Create our SSL context object with our CA cert file
+            context = ssl.create_default_context(cafile=self.cafile) if self.verify else self.verify
+            # Pass this SSL context to aiohttp and create a TCPConnector
+            if not self.socks_proxy:
+                connector = aiohttp.TCPConnector(ssl=context, loop=self.asyncio_loop)
+            else:
+                connector = aiohttp_socks.ProxyConnector.from_url(self.socks_proxy, ssl=context, loop=self.asyncio_loop)
+            self.session = aiohttp.ClientSession(loop=self.asyncio_loop, connector=connector, trust_env=self.aiohttp_trust_env)
 
 
 class _ccxtWrapper(ccxtWrapper, ccxt.Exchange):
@@ -1156,8 +1174,11 @@ def init_exchange(exchange):
         except KeyError: pass
         
     if not e_obj or e_obj.apiKey != auth.get('apiKey'):
+        prev_e_obj = e_obj       
         logger.debug("Initiating ccxt-exchange '{}' with auth_id '{}'".format(e, auth.get('id')))
         e_obj = e_cls(*eobj_args, **eobj_kw, auth=auth)
+        if prev_e_obj and not e_obj.markets:
+            e_obj.set_markets(prev_e_obj.markets, prev_e_obj.currencies)
         #raise ValueError('Could not initiate exchange - {}'.format(e))
 
     if add:
