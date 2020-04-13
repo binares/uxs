@@ -238,7 +238,7 @@ class bitmex(ExchangeSocket):
         
         _action = 'update' if action != 'partial' else 'replace'
         
-        self.update_tickers(data, action=_action)
+        self.update_tickers(data, action=_action, enable_sub='all_tickers')
         
             
     def on_orderbookL2(self, message):
