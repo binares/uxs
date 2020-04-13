@@ -12,6 +12,7 @@ from ccxt import TICK_SIZE
 from fons.argv import parse_argv
 from fons.debug import safeAsyncTry
 from fons.log import get_standard_5, quick_logging
+from fons.math.round import round_sd
 from fons.threads import EliThread
 import uxs
 from uxs.fintls.basics import calc_price
@@ -38,18 +39,22 @@ class Desk:
         'random': False,
     }
     
-    def __init__(self, xs, symbols, *, amounts={}, include={}, safe=False):
+    def __init__(self, xs, symbols, *, amounts={}, include={}, safe=False, round_price=None):
         """
         :type xs: uxs.ExchangeSocket
         :param amounts: 
             default (max) amounts by symbol. 
             If an amount of a symbol is not specified, then it is inferred from DEFAULT_LIMITS (~100 USD)
+        :param round_price:
+            round order price down/up (buy/sell) to sigdigit:
+                round_price=3, side='buy', orig_price=8042 -> price=8040
         """
         self.xs = xs
         self.symbols = symbols[:]
         self.include = dict(Desk.include, **include)
         self.amounts = dict(amounts)
         self.safe = safe
+        self.round_price = round_price
         
         self.name = '{}Desk'.format(self.xs.exchange)
         self.cur_symbol = None
@@ -607,6 +612,27 @@ class Trader:
         return amount
     
     
+    def calc_price(self, symbol, side, deviation, round_price=None):
+        if self.desk.has_tickers_all:
+            tSide = ['bid','ask'][side=='buy']
+            bidAsk = self.xs.tickers[symbol][tSide]
+        else:
+            obSide = ['bids','asks'][side=='buy']
+            bidAsk = self.xs.orderbooks[symbol][obSide][0][0]
+        sign = (-1)**(side=='sell')
+        price = bidAsk * (1 + sign*deviation)
+        if round_price is not None:
+            method = ['up','down'][side=='buy']
+            price2 = round_sd(price, round_price, method, accuracy=2)
+            if side=='buy' and price2 < bidAsk or side=='sell' and price2 > bidAsk:
+                logger2.error("{} - price {} cannot be rounded to sigdigit {} because the resulting price ({}) "
+                              "wouldn't fill into order book".format(symbol, price, round_price, price2))
+            else:
+                price = price2
+        
+        return price
+    
+    
     async def place_order(self, rInt=None, safe=False):
         symbol = self.desk.cur_symbol
         # random order
@@ -615,16 +641,9 @@ class Trader:
         side = ['sell','buy'][rInt]
         deviation = self.desk.order_deviation
         type = 'market' if deviation=='market' else 'limit'
-        price = None
         deviation = float(deviation[:-1])/100 if deviation!='market' else 0
-        if self.desk.has_tickers_all:
-            tSide = ['bid','ask'][rInt]
-            price = self.xs.tickers[symbol][tSide]
-        else:
-            obSide = ['bids','asks'][rInt]
-            price = self.xs.orderbooks[symbol][obSide][0][0]
-        sign = (-1)**(side=='sell')
-        price *= 1 + sign*deviation
+        round_price = self.desk.round_price
+        price = self.calc_price(symbol, side, deviation, round_price)
         limits = self.adjust_user_limits(symbol, self.desk.amount_ranges[symbol])
         if not self.desk.include['amount_range']:
             limits['min'] = limits['max']
@@ -655,6 +674,7 @@ async def run(argv=sys.argv, conn=None):
     apply = dict.fromkeys(s_params, lambda x: x.upper().split(','))
     apply['include'] = lambda x: x.split(',')
     apply['test_loggers'] = int
+    apply['round_price'] = int
     apply['amounts'] = lambda x: dict([y.split('=') for y in x.split(',')])
     p = parse_argv(argv[2:], apply)
     
@@ -664,6 +684,7 @@ async def run(argv=sys.argv, conn=None):
     safe = p.contains('safe')
     include = dict.fromkeys(p.get('include',[]), True)
     amounts = p.get('amounts', {})
+    round_price = p.get('round_price', None)
     if s_param:
         symbols = p[s_param]
     else:
@@ -677,7 +698,7 @@ async def run(argv=sys.argv, conn=None):
     else:
         xs, exchange = exchange, exchange.exchange
     
-    desk = Desk(xs, symbols, amounts=amounts, include=include, safe=safe)
+    desk = Desk(xs, symbols, amounts=amounts, include=include, safe=safe, round_price=round_price)
     await desk.start()
 
 
