@@ -59,3 +59,5 @@ python -m examples.d_callbacks
 python -m examples.e_trade
 python -m examples.f_caching
 python -m examples.g_storing_tokens
+
+python -m uxs.ui.desk bitmex BTC/USD,ETH/USD "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" include=amount_range,random,automate
