@@ -1,7 +1,7 @@
 """
 Trading desk for a single exchange.
 """
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import asyncio
 import time
 import sys
@@ -9,14 +9,15 @@ import random
 import functools
 from ccxt import TICK_SIZE
 
+from fons.aio import call_via_loop_afut
 from fons.argv import parse_argv
 from fons.debug import safeAsyncTry
+from fons.iter import unique
 from fons.log import get_standard_5, quick_logging
 from fons.math.round import round_sd
 from fons.threads import EliThread
 import uxs
 from uxs.fintls.basics import calc_price
-from fons.aio import call_via_loop_afut
 
 logger,logger2,tlogger,tloggers,tlogger0 = get_standard_5(__name__)
 
@@ -39,7 +40,8 @@ class Desk:
         'random': False,
     }
     
-    def __init__(self, xs, symbols, *, amounts={}, include={}, safe=False, round_price=None):
+    def __init__(self, xs, symbols, *, amounts={}, include={},
+                 safe=False, round_price=None, indexes={}):
         """
         :type xs: uxs.ExchangeSocket
         :param amounts: 
@@ -48,6 +50,9 @@ class Desk:
         :param round_price:
             round order price down/up (buy/sell) to sigdigit:
                 round_price=3, side='buy', orig_price=8042 -> price=8040
+        :param indexes:
+            orderbooks to be watched and displayed (but not traded) by symbol, to spot arbitrage etc
+            {symbol: [exchange/xs, index_symbol], symbol_2: index_symbol_2_of_the_same_exchange}
         """
         self.xs = xs
         self.symbols = symbols[:]
@@ -55,8 +60,10 @@ class Desk:
         self.amounts = dict(amounts)
         self.safe = safe
         self.round_price = round_price
+        self.indexes = dict(indexes)
         
-        self.name = '{}Desk'.format(self.xs.exchange)
+        self.exchange = self.xs.exchange
+        self.name = '{}Desk'.format(self.exchange)
         self.cur_symbol = None
         self.base = None
         self.quote = None
@@ -68,11 +75,17 @@ class Desk:
         self.auto_on = False
         self.queues = {'buySell': asyncio.Queue(loop=self.xs.loop)}
         self.events = {'ok': asyncio.Event(loop=self.xs.loop)}
-        self.has_tickers_all = self.xs.has_got('all_tickers', ['bid','ask'])
-        self.has_ob_merge = self.xs.has_merge_option('orderbook')
+        self.has_tickers_all = {}
+        self.has_ob_merge = {}
+        self._symbols = defaultdict(list)
         
         for symbol, amount in self.amounts.items():
             self.amount_ranges[symbol]['max'] = Gui.parse_amount(amount)
+        
+        self.streamers = {
+            self.exchange: self.xs,
+        }
+        self._init_streamers()
         
         self.gui = Gui(self)
         self.trader = Trader(self)
@@ -82,8 +95,9 @@ class Desk:
         return call_via_loop_afut(self.run, loop=self.xs.loop)
     
     
-    async def run(self):
-        self.gui.start()
+    async def run(self, *, start_gui=True):
+        if start_gui:
+            self.gui.start()
         await asyncio.sleep(3)
         #ok = self.events['ok']
         queue = self.queues['buySell']
@@ -113,7 +127,7 @@ class Desk:
                 # just continue to next cycle
                 continue
             
-            print('Received: {}'.format(direction))
+            print('{} - received: {}'.format(self.name, direction))
             await self.wait_till_active()
             r = None
             try:
@@ -158,7 +172,7 @@ class Desk:
     
     
     async def wait_till_active(self):
-        if self.has_tickers_all:
+        if self.has_tickers_all[self.exchange]:
             first_p = {'_': 'all_tickers'}
         else:
             first_p = {'_': 'orderbook', 'symbol': self.cur_symbol}
@@ -182,6 +196,51 @@ class Desk:
                     logger2.info('Wait completed.')
                 i += 1
             c += 1
+    
+    
+    def _init_streamers(self):
+        self._symbols[self.exchange] = self.symbols[:]
+        for symbol, item in self.indexes.items():
+            if isinstance(item, str):
+                item = [self.exchange, item]
+            index_exchange, index_symbol = item
+            if not index_exchange:
+                index_exchange = self.exchange
+            if isinstance(index_exchange, uxs.ExchangeSocket):
+                xs, index_exchange = index_exchange, index_exchange.exchange
+            else:
+                if index_exchange not in self.streamers:
+                    self.streamers[index_exchange] = uxs.get_socket(index_exchange, {'loop': self.xs.loop})
+                xs = self.streamers[index_exchange]
+            if index_exchange not in self.streamers:
+                self.streamers[index_exchange] = xs
+            if index_symbol not in self._symbols[index_exchange]:
+                self._symbols[index_exchange].append(index_symbol)
+            self.indexes[symbol] = [index_exchange, index_symbol]
+        for exchange, xs in self.streamers.items():
+            self.has_tickers_all[exchange] = xs.has_got('all_tickers', ['bid','ask'])
+            self.has_ob_merge[exchange] = xs.has_merge_option('orderbook')
+        for xs in self.streamers.values():
+            xs.ob['sends_bidAsk'] = True
+    
+    
+    @staticmethod
+    def _create_subscriptions(self, exchange, to_account=False):
+        symbols = self._symbols[exchange]
+        if not symbols:
+            return
+        xs = self.streamers[exchange]
+        if self.has_tickers_all[exchange]:
+            xs.subscribe_to_all_tickers()
+        elif self.has_ob_merge[exchange]:
+            xs.subscribe_to_orderbook(symbols)
+        else:
+            for symbol in symbols:
+                xs.subscribe_to_orderbook(symbol)
+        if to_account:
+            params = {} if 'symbol' not in xs.get_value('account', 'required')\
+                      else {'symbol': symbols}
+            xs.subscribe_to_account(params)
 
 
 class Gui:
@@ -190,21 +249,29 @@ class Gui:
         :type desk: Desk
         """
         self.desk = desk
-        self.prices_updated_ts = 0
-
+        self.prices_updated_ts = defaultdict(float)
+        self.thread = None
+        self.started = False
+    
     
     def start(self):
-        self.thread = EliThread(target=self.run, name='DeskGuiThread', daemon=True)
-        self.thread.start()
+        if not self.started:
+            self.thread = EliThread(target=self.run, name='{}Gui[Thread]'.format(self.desk.name), daemon=True)
+            self.thread.start()
+            self.started = True
     
     
-    def run(self):
+    def run(self, root=None, pos=0, start_loop=True):
         # Tkinter is tricky when not run in the main thread.
         # Some problems may also arise due to it not being IMPORTED in a different thread
         # from that which it runs on?
         import tkinter as tk
-        self.root = root = tk.Tk()
-        self.root.title('`{}` Desk'.format(self.xs.exchange.upper()))
+        self.started = True
+        if root is None:
+            root = tk.Tk()
+            root.title('`{}` Desk'.format(self.xs.exchange.upper()))
+        self.root = root
+        self.pos = pos
         self.desk.cur_symbol = self.desk.symbols[0]
         self.set_currencies()
         self._cur_symbol = tk.StringVar()
@@ -213,59 +280,81 @@ class Gui:
         self._amount_max = tk.StringVar(value='')
         self._automate_value = tk.StringVar(value='5')
         self._order_deviation = tk.StringVar(value=self.desk.order_deviation)
+        create_order_frame =  tk.Frame(root)
         amount_frame = tk.Frame(root)
         automate_frame = tk.Frame(root)
         sides = {
-            'amount_min': {'side': tk.LEFT, 'anchor': tk.W},
-            'amount_max': {'side': tk.LEFT, 'anchor': tk.W},
+            'long': {'side': tk.LEFT, 'anchor': tk.W},
+            'short': {'side': tk.LEFT, 'anchor': tk.W},
             'automate': {'side': tk.LEFT, 'anchor': tk.W},
             'automate_value': {'side': tk.LEFT, 'anchor': tk.W},
+            'amount_min': {'side': tk.LEFT, 'anchor': tk.W},
+            'amount_max': {'side': tk.LEFT, 'anchor': tk.W},
         }
-        self.objects = {
-            'symbol_label': tk.Label(root, text=self.desk.cur_symbol),
-            'ok': tk.Button(root, text='OK', command=self.ok),
-            'buy': tk.Button(root, text='BUY', command=self.desk.buy, fg='green'),
-            #'exit_checkbox': tk.Checkbutton(root, variable=self.exit_var),
-            'random': tk.Button(root, text='RANDOM', command=self.desk.random),
-            'sell': tk.Button(root, text='SELL', command=self.desk.sell, fg='blue'),
-            'automate_frame': automate_frame,
-            'automate': tk.Button(automate_frame, text='AUTO: off', command=self.desk.automate),
-            'automate_value': tk.Entry(automate_frame, textvariable=self._automate_value, width=7),
-            'enter': tk.Button(root, text='ENTER', command=self.enter),
-            'amount_frame': amount_frame,
-            'amount_min': tk.Entry(amount_frame, textvariable=self._amount_min, width=10),
-            'amount_max': tk.Entry(amount_frame, textvariable=self._amount_max, width=10),
-            'order_deviation': tk.OptionMenu(root, self._order_deviation, *['0%','0.5%','1%','2%','market']),
-            'prices': tk.Label(root, text='---', fg='blue'),
-            'balances': tk.Label(root, text='---', fg='green'),
-            'select_symbol': tk.OptionMenu(root, self._cur_symbol, *self.desk.symbols),
-        }
+        index_text = self.get_index_text()
+        self.objects = OrderedDict([
+            ['index_label', tk.Label(root, text=index_text)], 
+            ['exchange_label', tk.Label(root, text=self.desk.exchange.upper(), fg='red')], 
+            ['select_symbol', tk.OptionMenu(root, self._cur_symbol, *self.desk.symbols)],
+            ['ok', tk.Button(root, text='OK', command=self.ok)],
+            ['index_prices', tk.Label(root, text='---' if index_text else '', fg='red')],
+            ['prices', tk.Label(root, text='---', fg='blue')],
+            ['create_order_frame', create_order_frame],
+            ['long', tk.Button(create_order_frame, text='LONG', command=self.desk.buy, fg='green')],
+            ['short', tk.Button(create_order_frame, text='SHORT', command=self.desk.sell, fg='red')],
+            ['balances', tk.Label(root, text='---')],
+            ['automate_frame', automate_frame],
+            ['automate', tk.Button(automate_frame, text='AUTO: off', command=self.desk.automate)],
+            ['automate_value', tk.Entry(automate_frame, textvariable=self._automate_value, width=7)],
+            ['order_deviation', tk.OptionMenu(root, self._order_deviation, *['0%','0.5%','1%','2%','market'])],
+            ['amount_frame', amount_frame],
+            ['amount_min', tk.Entry(amount_frame, textvariable=self._amount_min, width=10)],
+            ['amount_max', tk.Entry(amount_frame, textvariable=self._amount_max, width=10)],
+            ['random', tk.Button(root, text='RANDOM', command=self.desk.random)],
+            ['enter', tk.Button(root, text='ENTER', command=self.enter)],
+        ])
         _map = {
             'amount_min': 'amount_range',
             'automate_frame': 'automate',
             'random': 'random', 
         }
+        coords = {
+            'index_label': (0, 0), 
+            'exchange_label': (1, 0), 
+            'select_symbol': (2, 0),
+            'ok': (3, 0),
+            'index_prices': (0, 1),
+            'prices': (1, 1),
+            'create_order_frame': (2, 1),
+            'balances': (3, 1),
+            'order_deviation': (1, 2),
+            'automate_frame': (2, 2),
+            'amount_frame': (3, 2),
+            'random': (0, 3),
+            'enter': (3, 3),
+        }
+        add = pos * 4
         for name, obj in self.objects.items():
             if name not in _map or self.desk.include[_map[name]]:
-                info = sides.get(name, {})
-                obj.pack(**info)
+                if name in coords:
+                    i, j = coords[name]
+                    obj.grid(row=add+i, column=j)
+                else:
+                    info = sides.get(name, {})
+                    obj.pack(**info)
         
         self._display_range()
+        self.config('select_symbol', fg='red')
         
-        params = {} if 'symbol' not in self.xs.get_value('account', 'required')\
-                  else {'symbol': self.desk.symbols}
-        self.xs.subscribe_to_account(params)
-        if self.desk.has_tickers_all:
-            self.xs.subscribe_to_all_tickers()
-        elif self.desk.has_ob_merge:
-            self.xs.subscribe_to_orderbook(self.desk.symbols)
-        else:
-            for symbol in self.desk.symbols:
-                self.xs.subscribe_to_orderbook(symbol)
-        self.xs.start()
-        self._add_callbacks()
+        for exchange, xs in self.desk.streamers.items():
+            to_account = (self.desk.exchange==exchange)
+            self.desk._create_subscriptions(self.desk, exchange, to_account)
+            self._add_callbacks(exchange)
+            xs.start()
+        
         self.refresh(300)
-        self.root.mainloop()
+        if start_loop:
+            self.root.mainloop()
     
     
     def set_currencies(self):
@@ -281,6 +370,13 @@ class Gui:
         self.desk.base, self.desk.quote, self.desk.settle = base, quote, settle
     
     
+    def get_index_text(self):
+        index_exchange, index_symbol = self.desk.indexes.get(self.desk.cur_symbol, [None, None])
+        if not index_symbol:
+            return ''
+        return '{} {}'.format(index_exchange, index_symbol)
+    
+    
     def refresh(self, recursive=False):
         if self.desk.cur_symbol != self._cur_symbol.get():
             self.desk.cur_symbol = self._cur_symbol.get()
@@ -288,7 +384,9 @@ class Gui:
                 self.xs.loop.call_soon_threadsafe(
                     functools.partial(self.xs.go_to_market, self.desk.cur_symbol))
             self.set_currencies()
-            self.config('symbol_label', text=self.desk.cur_symbol)
+            index_text = self.get_index_text()
+            self.config('index_label', text=index_text)
+            self.config('index_prices', text='---' if index_text else '')
             self.update_prices([{'symbol': self.desk.cur_symbol}], True)
             self.update_balances({})
             self._display_range()
@@ -296,6 +394,7 @@ class Gui:
             self._check_range_changes()
             self._check_automate_value_changes()
         
+        self._check_subscriptions()
         self.desk.order_deviation = self._order_deviation.get()
         
         if recursive:
@@ -405,6 +504,23 @@ class Gui:
         return success, values
     
     
+    def _check_subscriptions(self):
+        targets = [[self.desk.exchange, self.desk.cur_symbol, 'prices']]
+        index_exchange, index_symbol = self.desk.indexes.get(self.desk.cur_symbol, [None, None])
+        if index_symbol:
+            targets += [[index_exchange, index_symbol, 'index_prices']]
+        for exchange, symbol, name in targets:
+            if self.desk.has_tickers_all[exchange]:
+                params = {'_': 'all_tickers'}
+            else:
+                params = {'_': 'orderbook', 'symbol': symbol}
+            xs = self.desk.streamers[exchange]
+            if not xs.is_subscribed_to(params, True):
+                self.config(name, text='---')
+        if not self.desk.xs.is_subscribed_to({'_': 'account'}, True):
+            self.config('balances', text='---')
+    
+    
     def config(self, obj, *args, **kw):
         method = 'config'
         if isinstance(obj, tuple):
@@ -431,24 +547,31 @@ class Gui:
     
     
     def update_prices(self, d, force=True):
-        is_ob = not self.desk.has_tickers_all
-        if is_ob and not force and not any(x['symbol']==self.desk.cur_symbol for x in d):
-            return
-        which = self.xs.orderbooks if is_ob else self.xs.tickers
-        if self.desk.cur_symbol not in which:
-            self.config('prices', text='---')
-            return
-        if is_ob:
-            ob = self.xs.orderbooks[self.desk.cur_symbol]
-            bid, ask = ob['bids'][0][0], ob['asks'][0][0]
-        else:
-            t = self.xs.tickers[self.desk.cur_symbol]
-            bid, ask = t['bid'], t['ask']
-        text = '{} | {}'.format(round(bid, 2), round(ask, 2))
+        targets = [[self.desk.exchange, self.desk.cur_symbol, 'prices']]
+        index_exchange, index_symbol = self.desk.indexes.get(self.desk.cur_symbol, [None, None])
+        if index_symbol:
+            targets += [[index_exchange, index_symbol, 'index_prices']]
         
-        if time.time() - self.prices_updated_ts > 10 or force:
-            self.config('prices', text=text)
-            self.prices_updated_ts = time.time()
+        for exchange, symbol, name in targets:
+            xs = self.desk.streamers[exchange]
+            is_ob = not self.desk.has_tickers_all[exchange]
+            if is_ob and not force and not any(x['symbol']==symbol for x in d):
+                continue
+            which = xs.orderbooks if is_ob else xs.tickers
+            if symbol not in which:
+                self.config(name, text='---')
+                continue
+            if is_ob:
+                ob = xs.orderbooks[symbol]
+                bid, ask = ob['bids'][0][0], ob['asks'][0][0]
+            else:
+                t = xs.tickers[symbol]
+                bid, ask = t['bid'], t['ask']
+            text = '{} | {}'.format(round(bid, 2), round(ask, 2))
+            
+            if time.time() - self.prices_updated_ts[(exchange, symbol)] > 10 or force:
+                self.config(name, text=text)
+                self.prices_updated_ts[(exchange, symbol)] = time.time()
     
     
     def update_balances(self, d):
@@ -465,12 +588,15 @@ class Gui:
         self.config('balances', text=text)
     
     
-    def _add_callbacks(self):
-        if self.desk.has_tickers_all:
-            self.xs.add_callback(self.update_prices, 'ticker', -1)
+    def _add_callbacks(self, exchange):
+        xs = self.desk.streamers[exchange]
+        if self.desk.has_tickers_all[exchange]:
+            xs.add_callback(self.update_prices, 'ticker', -1)
         else:
-            self.xs.add_callback(self.update_prices, 'orderbook', -1)
-        self.xs.add_callback(self.update_balances, 'balance', -1)
+            for symbol in self.desk._symbols[exchange]:
+                xs.add_callback(self.update_prices, 'orderbook', symbol)
+        if exchange == self.desk.exchange:
+            xs.add_callback(self.update_balances, 'balance', -1)
     
     @property
     def xs(self):
@@ -613,7 +739,7 @@ class Trader:
     
     
     def calc_price(self, symbol, side, deviation, round_price=None):
-        if self.desk.has_tickers_all:
+        if self.desk.has_tickers_all[self.xs.exchange]:
             tSide = ['bid','ask'][side=='buy']
             bidAsk = self.xs.tickers[symbol][tSide]
         else:
@@ -668,38 +794,208 @@ class Trader:
         return self.desk.xs
 
 
-async def run(argv=sys.argv, conn=None):
-    exchange = argv[1]
-    s_params = ['s','symbol','symbols']
-    apply = dict.fromkeys(s_params, lambda x: x.upper().split(','))
+class Table:
+    """Join multiple desks together"""
+    
+    def __init__(self, desks=[]):
+        self.desks = []
+        self.thread = None
+        self.started = False
+        self.loop = None
+        
+        self.streamers = {}
+        self.trade_exchanges = []
+        self.has_tickers_all = {}
+        self.has_ob_merge = {}
+        self._symbols = defaultdict(list)
+        
+        for desk in desks:
+            self.add_desk(desk)
+    
+    
+    def add_desk(self, desk):
+        if self.started:
+            raise RuntimeError("Desk cannot be added when Table is running")
+        
+        if self.loop is None:
+            self.loop = desk.xs.loop
+        elif self.loop != desk.xs.loop:
+            raise ValueError("Streamers' event loops don't match")
+        
+        self.streamers[desk.exchange] = desk.xs
+        if desk.exchange not in self.trade_exchanges:
+            self.trade_exchanges.append(desk.exchange)
+        
+        self.has_tickers_all.update(desk.has_tickers_all)
+        self.has_ob_merge.update(desk.has_ob_merge)
+        
+        for exchange, symbols in desk._symbols.items():
+            self._symbols[exchange] = list(unique(self._symbols[exchange] + symbols))
+            if exchange not in self.streamers:
+                self.streamers[exchange] = desk.streamers[exchange]
+                
+        self.desks.append(desk)
+    
+    
+    @classmethod
+    def from_args(cls, data):
+        streamers =  {}
+        data2 = []
+        for exchange, symbols, indexes, kw in data:
+            if isinstance(exchange, uxs.ExchangeSocket):
+                streamers[exchange.exchange] = xs = exchange
+                exchange = exchange.exchange
+            else:
+                exchange, id = uxs._interpret_exchange(exchange)
+                if not id:
+                    id = 'TRADE'
+                if exchange not in streamers:
+                    test = kw.get('test', False)
+                    streamers[exchange] = uxs.get_socket(exchange, {'auth': id, 'test': test})
+                xs = streamers[exchange]
+            data2.append([xs, symbols, indexes, kw])
+        
+        data3 = []
+        for xs, symbols, indexes, kw in data2:
+            indexes2 = {}
+            for symbol, index in indexes.items():
+                index_exchange, index_symbol = index
+                index_exchange, id = uxs._interpret_exchange(index_exchange)
+                if index_exchange not in streamers:
+                    test = kw.get('test', False)
+                    streamers[index_exchange] = uxs.get_socket(index_exchange, {'auth': id, 'test': test})
+                indexes2[symbol] = (streamers[index_exchange], index_symbol)
+            kw2 = {k:v for k,v in kw.items() if k!='test'}
+            data3.append([xs, symbols, indexes2, kw2])
+        
+        print(data3)
+        desks = []
+        for xs, symbols, indexes, kw in data3:
+            desks.append(Desk(xs, symbols, indexes=indexes, **kw))
+        
+        return cls(desks)
+    
+    
+    def start(self):
+        return call_via_loop_afut(self.run, loop=self.loop)
+    
+    
+    async def run(self):
+        self.started = True
+        self.thread = EliThread(target=self.run_gui, name='TableGui[Thread]', daemon=True)
+        self.thread.start()
+        await asyncio.sleep(0.5)
+        await asyncio.wait([desk.run(start_gui=False) for desk in self.desks])
+    
+    
+    def run_gui(self):
+        import tkinter as tk
+        self.root = tk.Tk()
+        exchanges = [desk.exchange.upper() for desk in self.desks]
+        self.root.title('`{}` Desk'.format(', '.join(exchanges)))
+        for exchange in self.streamers:
+            to_account = (exchange in self.trade_exchanges)
+            Desk._create_subscriptions(self, exchange, to_account)
+        # build the frames, add callbacks
+        for i, desk in enumerate(self.desks):
+            desk.gui.run(self.root, pos=i, start_loop=False)
+        self.root.mainloop()
+
+
+def parse_keywords(group):
+    apply = {}
     apply['include'] = lambda x: x.split(',')
     apply['test_loggers'] = int
     apply['round_price'] = int
     apply['amounts'] = lambda x: dict([y.split('=') for y in x.split(',')])
-    p = parse_argv(argv[2:], apply)
     
-    test_loggers = p.get('test_loggers', 2)
+    return parse_argv(group, apply)
+
+
+def parse_group(group):
+    exchange = group[0]
+    symbols = []
+    indexes = {}
+    special = ['test','safe']
+    i = 1
+    while i < len(group):
+        item = group[i]
+        if item.startswith('-') or '=' in item or item in special:
+            break
+        loc1, loc2 = item.find('{'), item.find('}')
+        if [loc1, loc2].count(-1) == 1 or loc1 > loc2:
+            raise ValueError(item)
+        symbol = item[:loc1] if loc1 != -1 else item
+        if not symbol:
+            raise ValueError(item)
+        index_symbol = None
+        index_exchange = None
+        if loc1 != -1:
+            spl = item[loc1+1:loc2].split(',')
+            if len(spl) == 1:
+                index_exchange = spl[0]
+            elif len(spl) == 2:
+                index_exchange, index_symbol = spl
+            else:
+                raise ValueError(item)
+        if index_exchange and not index_symbol:
+            index_symbol = symbol
+        elif index_symbol and not index_exchange:
+            index_exchange = exchange
+        symbol = symbol.upper()
+        if index_symbol:
+            index_symbol = index_symbol.upper()
+        symbols.append(symbol)
+        if index_symbol:
+            indexes[symbol] = (index_exchange, index_symbol)
+        i += 1
+    if not symbols:
+        raise ValueError('Group contains no symbols: {}'.format(group))
+    p = parse_keywords(group[i:])
+    
+    return exchange, symbols, indexes, p
+
+
+async def run(argv=sys.argv, conn=None):
+    final_args = []
+    argv_orig = argv[:]
+    argv = argv[1:]
+    argv_defaults = []
+    if '----' in argv:
+        loc = argv.index('----')
+        argv_defaults = argv[loc+1:]
+        argv = argv[:loc]
+    
+    defaults = parse_keywords(argv_defaults)
+    
+    while argv:
+        loc = len(argv)
+        if '--' in argv:
+            loc = argv.index('--')
+        group, argv = argv[:loc], argv[loc+1:]
+        exchange, symbols, indexes, p = parse_group(group)
+        
+        safe = p.contains('safe') or defaults.contains('safe')
+        include = dict(dict.fromkeys(defaults.get('include',[]), True),
+                       **dict.fromkeys(p.get('include',[]), True))
+        amounts = dict(defaults.get('amounts', {}),
+                       **p.get('amounts', {}))
+        round_price = p.get('round_price', defaults.get('round_price', None))
+        test = p.contains('test') or defaults.contains('test')
+        kw = {
+            'safe': safe,
+            'include': include,
+            'amounts': amounts,
+            'round_price': round_price,
+            'test': test,
+        }
+        final_args.append([exchange, symbols, indexes, kw])
+    
+    test_loggers = defaults.get('test_loggers', 2)
     quick_logging(test_loggers)
-    s_param = p.which(['s','symbol','symbols'], set='mapped')
-    safe = p.contains('safe')
-    include = dict.fromkeys(p.get('include',[]), True)
-    amounts = p.get('amounts', {})
-    round_price = p.get('round_price', None)
-    if s_param:
-        symbols = p[s_param]
-    else:
-        symbols = argv[2].upper().split(',')
-    test = p.contains('test')
-    if not isinstance(exchange, uxs.ExchangeSocket):
-        if ':' not in exchange:
-            exchange += ':TRADE'
-        xs = uxs.get_socket(exchange, {'test': test, 'ob': {'sends_bidAsk': True}})
-        exchange = xs.exchange
-    else:
-        xs, exchange = exchange, exchange.exchange
     
-    desk = Desk(xs, symbols, amounts=amounts, include=include, safe=safe, round_price=round_price)
-    await desk.start()
+    table = Table.from_args(final_args)
+    await table.start()
 
 
 def main(argv=sys.argv, conn=None):

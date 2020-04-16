@@ -60,4 +60,6 @@ python -m examples.e_trade
 python -m examples.f_caching
 python -m examples.g_storing_tokens
 
-python -m uxs.ui.desk bitmex BTC/USD,ETH/USD "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range
+python -m uxs.ui.desk bitmex BTC/USD ETH/USD "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range
+python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 -- kucoin BTC/USDT ---- test
+python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range -- kucoin BTC/USDT ---- test
