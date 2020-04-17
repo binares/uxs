@@ -69,7 +69,7 @@ class Desk:
         self.quote = None
         self.settle = None
         self.amount_ranges = defaultdict(lambda: dict.fromkeys(['min','max'], (None, None)))
-        self.order_deviation = '0.5%'
+        self.order_deviation = '0.2%'
         # In minutes
         self.automate_value = {'min': 0, 'max': 5}
         self.auto_on = False
@@ -306,7 +306,7 @@ class Gui:
             ['automate_frame', automate_frame],
             ['automate', tk.Button(automate_frame, text='AUTO: off', command=self.desk.automate)],
             ['automate_value', tk.Entry(automate_frame, textvariable=self._automate_value, width=7)],
-            ['order_deviation', tk.OptionMenu(root, self._order_deviation, *['0%','0.5%','1%','2%','market'])],
+            ['order_deviation', tk.OptionMenu(root, self._order_deviation, *['0%','0.2%','0.5%','1%','2%','market'])],
             ['amount_frame', amount_frame],
             ['amount_min', tk.Entry(amount_frame, textvariable=self._amount_min, width=10)],
             ['amount_max', tk.Entry(amount_frame, textvariable=self._amount_max, width=10)],
@@ -338,7 +338,8 @@ class Gui:
             if name not in _map or self.desk.include[_map[name]]:
                 if name in coords:
                     i, j = coords[name]
-                    obj.grid(row=add+i, column=j)
+                    kw = {'pady': (10, 0)} if pos and not i%4 else {}
+                    obj.grid(row=add+i, column=j, **kw)
                 else:
                     info = sides.get(name, {})
                     obj.pack(**info)
@@ -352,6 +353,7 @@ class Gui:
             self._add_callbacks(exchange)
             xs.start()
         
+        self._go_to_market()
         self.refresh(300)
         if start_loop:
             self.root.mainloop()
@@ -380,9 +382,7 @@ class Gui:
     def refresh(self, recursive=False):
         if self.desk.cur_symbol != self._cur_symbol.get():
             self.desk.cur_symbol = self._cur_symbol.get()
-            if hasattr(self.xs, 'go_to_market'):
-                self.xs.loop.call_soon_threadsafe(
-                    functools.partial(self.xs.go_to_market, self.desk.cur_symbol))
+            self._go_to_market()
             self.set_currencies()
             index_text = self.get_index_text()
             self.config('index_label', text=index_text)
@@ -597,6 +597,12 @@ class Gui:
                 xs.add_callback(self.update_prices, 'orderbook', symbol)
         if exchange == self.desk.exchange:
             xs.add_callback(self.update_balances, 'balance', -1)
+    
+    
+    def _go_to_market(self):
+        if hasattr(self.xs, 'go_to_market'):
+            self.xs.loop.call_soon_threadsafe(
+                functools.partial(self.xs.go_to_market, self.desk.cur_symbol))
     
     @property
     def xs(self):
