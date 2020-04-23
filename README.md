@@ -7,16 +7,18 @@ This free to use python library is ccxt based. I use it for personal trading and
 
 Supported exchanges:
 
-|         	| ticker | all_tickers | orderbook (L2) | L3 | ohlcv | trades | balance | order | fill | position |
-| ---------	|-----|-----|----|----|----|----|----|----|----|----|
-| Binance 	| :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:| | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | | |
-| BinanceFu | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | | :heavy_check_mark: |
-| BitMEX 	| | :heavy_check_mark: | :heavy_check_mark: | | | | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
-| Bittrex 	| | :heavy_check_mark: | :heavy_check_mark: | | | | :heavy_check_mark: | :heavy_check_mark: | | |
-| HitBTC 	| :heavy_check_mark: | | :heavy_check_mark: | | | | | :heavy_check_mark: | :heavy_check_mark: | |
-| Kucoin 	| :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | | | :heavy_check_mark: | :heavy_check_mark: | *\*T* | *\*T* | |
-| Kraken 	| :heavy_check_mark: | | :heavy_check_mark: | | :heavy_check_mark: | :heavy_check_mark: | | :heavy_check_mark: | :heavy_check_mark: | |
-| Poloniex 	| | :heavy_check_mark: | :heavy_check_mark: | | | | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | |
+|         	| ticker | all_tickers | orderbook (L2) | ohlcv | trades | balance | order | fill | position |
+| ---------	|----|----|----|----|----|----|----|----|----|
+| binance 	| + | + | +| + | + | + | + | | |
+| binancefu | + | + | + | + | + | + | + | | + |
+| bitmex 	| | + | + | | | + | + | + | + |
+| bittrex 	| | + | + | | | + | + | | |
+| gateiofu 	| | | + | | | | | | |
+| hitbtc 	| + | | + | | | | + | + | |
+| kucoin 	| + | + | + | | + | + | *\*T* | *\*T* | |
+| kraken 	| + | | + | + | + | | + | + | |
+| krakenfu 	| + | | + | | + | + | + | + | + |
+| poloniex 	| | + | + | | | + | + | + | |
 
 Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. And for L2 you must use *orderbook*: `xs.subscribe_to_orderbook(symbol)`. Support for L3 hasn't been added yet, and some *ohlcv* and *trades* are yet to be implemented.
 
