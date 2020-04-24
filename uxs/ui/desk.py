@@ -210,7 +210,7 @@ class Desk:
                 xs, index_exchange = index_exchange, index_exchange.exchange
             else:
                 if index_exchange not in self.streamers:
-                    self.streamers[index_exchange] = uxs.get_socket(index_exchange, {'loop': self.xs.loop})
+                    self.streamers[index_exchange] = uxs.get_streamer(index_exchange, {'loop': self.xs.loop})
                 xs = self.streamers[index_exchange]
             if index_exchange not in self.streamers:
                 self.streamers[index_exchange] = xs
@@ -857,7 +857,7 @@ class Table:
                     id = 'TRADE'
                 if exchange not in streamers:
                     test = kw.get('test', False)
-                    streamers[exchange] = uxs.get_socket(exchange, {'auth': id, 'test': test})
+                    streamers[exchange] = uxs.get_streamer(exchange, {'auth': id, 'test': test})
                 xs = streamers[exchange]
             data2.append([xs, symbols, indexes, kw])
         
@@ -869,7 +869,7 @@ class Table:
                 index_exchange, id = uxs._interpret_exchange(index_exchange)
                 if index_exchange not in streamers:
                     test = kw.get('test', False)
-                    streamers[index_exchange] = uxs.get_socket(index_exchange, {'auth': id, 'test': test})
+                    streamers[index_exchange] = uxs.get_streamer(index_exchange, {'auth': id, 'test': test})
                 indexes2[symbol] = (streamers[index_exchange], index_symbol)
             kw2 = {k:v for k,v in kw.items() if k!='test'}
             data3.append([xs, symbols, indexes2, kw2])

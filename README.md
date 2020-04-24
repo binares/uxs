@@ -1,4 +1,4 @@
-# UXS - Universal eXchange Socket
+# UXS - Unified eXchange Streaming
 A unified crypto exchange websocket
 
 This free to use python library is ccxt based. I use it for personal trading and data feeds. Pull requests are welcome, although I'll yet have to make some sort of guide on how to implement new exchanges.

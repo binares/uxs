@@ -44,7 +44,7 @@ async def test_callback(cb, channel, symbol):
 
 async def main():
     global xs
-    xs = uxs.get_socket('kucoin')#, {'connection_defaults': {'handle': {lambda x: print(x)}}})
+    xs = uxs.get_streamer('kucoin')#, {'connection_defaults': {'handle': {lambda x: print(x)}}})
     
     xs.start()
     

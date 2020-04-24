@@ -6,7 +6,7 @@ import yaml
 
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
 
-from uxs.base.ccxt import (get_name, get_exchange, init_exchange,
+from uxs.base.ccxt import (get_name, get_exchange, get_sn_exchange, init_exchange,
                            list_exchanges, ccxtWrapper, asyncCCXTWrapper)
 
 from uxs.base._settings import *
@@ -32,16 +32,16 @@ from uxs.kucoin import kucoin
 from uxs.poloniex import poloniex
 
 
-def get_socket_cls(exchange):
-    socket_cls = globals().get(exchange.lower(), None)
+def get_streamer_cls(exchange):
+    streamer_cls = globals().get(exchange.lower(), None)
     
-    if not isinstance(socket_cls, type) or not issubclass(socket_cls, ExchangeSocket):
+    if not isinstance(streamer_cls, type) or not issubclass(streamer_cls, ExchangeSocket):
         raise ValueError('Unknown exchange: {}'.format(exchange))
     
-    return socket_cls
+    return streamer_cls
 
 
-def get_socket(exchange, config={}):
+def get_streamer(exchange, config={}):
     """
     Exchange can be given as "exchange_name" or "exchange_name:id_label"
     Config must be dict.
@@ -86,11 +86,14 @@ def get_socket(exchange, config={}):
         if 'auth' not in config:
             config['auth'] = {}
         config['auth']['id'] = auth_id
-         
-    socket_cls = get_socket_cls(exchange)
     
-    return socket_cls(config)
+    streamer_cls = get_streamer_cls(exchange)
+    
+    return streamer_cls(config)
 
+# For backwards compatibility
+get_socket_cls = get_streamer_cls
+get_socket = get_streamer
 
 """
 Tokens can be stored in a yaml file with the following format:
@@ -109,7 +112,7 @@ secret: ghij34kl
 password: mnopq5
 
 #--Optional keywords--
-#These are used for lookup executed from config's 'auth' dict [`get_socket(config={'auth':{..}})`]
+#These are used for lookup executed from config's 'auth' dict [`get_streamer(config={'auth':{..}})`]
 
 #Test <bool>
 # whether or not this is a testnet token

@@ -1189,19 +1189,30 @@ def init_exchange(exchange):
     return e_obj
 
 
+def _normalize(x):
+    if not isinstance(x,dict):
+        d = {'exchange': x}
+    else:
+        d = x.copy()
+    if 'add' not in d:
+        d['add'] = True
+    if not bool(d.get('get')): 
+        d['get'] = True
+    return d
+
+
 def get_exchange(exchange):
     """:rtype: _ccxtWrapper
     (The actual return type is type(..,[ccxtWrapper,exchange_api_cls])"""
-    def _normalize(x):
-        if not isinstance(x,dict):
-            d = {'exchange': x}
-        else: d = x.copy()
-        if 'add' not in d: d['add'] = True
-        if not bool(d.get('get')): 
-            d['get'] = True
-        return d
-    
     return init_exchange(_normalize(exchange))
+
+
+def get_sn_exchange(exchange):
+    """:rtype: _ccxtWrapper
+    (The actual return type is type(..,[ccxtWrapper,exchange_api_cls])"""
+    d = _normalize(exchange)
+    d['async'] = False
+    return init_exchange(d)
 
 
 def list_exchanges():

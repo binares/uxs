@@ -1,5 +1,5 @@
 import uxs
-from uxs.poll import fetch
+from uxs import fetch
 import asyncio
 
 """

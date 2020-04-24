@@ -32,7 +32,7 @@ def main():
     # to set it at the start of each session
     uxs.set_tokens_path(TOKENS_PATH, make_permanent=False)
     
-    xs = uxs.get_socket('kucoin:TRADE')
+    xs = uxs.get_streamer('kucoin:TRADE')
     verify(xs)
     
     # Generally there is no point of encrypting the tokens file, unless

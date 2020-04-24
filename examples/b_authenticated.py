@@ -9,7 +9,7 @@ async def main(apiKey=None, secret=None):
     if secret is None:
         secret = sys.argv[2]
     
-    xs = uxs.get_socket('binance', {'apiKey': apiKey, 'secret': secret})
+    xs = uxs.get_streamer('binance', {'apiKey': apiKey, 'secret': secret})
     
     query = ['balance','order','fill','position']
     has = [x for x in query if xs.has_got('account', x)]

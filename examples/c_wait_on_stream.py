@@ -3,7 +3,7 @@ import asyncio
 
 
 async def main():
-    xs = uxs.get_socket('kucoin')
+    xs = uxs.get_streamer('kucoin')
     
     xs.subscribe_to_ticker('BTC/USDT')
     

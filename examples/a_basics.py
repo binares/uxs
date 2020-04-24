@@ -3,7 +3,7 @@ import asyncio
 
 
 async def main():
-    xs = uxs.get_socket('binance')
+    xs = uxs.get_streamer('binance')
     
     xs.subscribe_to_all_tickers()
     xs.subscribe_to_orderbook('BTC/USDT')

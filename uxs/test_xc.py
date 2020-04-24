@@ -365,10 +365,10 @@ def main():
         setattr(uxs, xc.lower(), locals()[xc.lower()])
     
     try:
-        xs = uxs.get_socket(xc, config)
+        xs = uxs.get_streamer(xc, config)
     except ValueError as e:
         config['auth'] = 'NULL'
-        xs = uxs.get_socket(xc, config)
+        xs = uxs.get_streamer(xc, config)
     
     print_xs_info()
 
