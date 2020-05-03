@@ -149,8 +149,10 @@ async def load_markets(api, limit=None):
         if not api.markets:
             l1 = limit
             l2 = _resolve_limit(exchange, 'markets', m0.date)
-            limit = min(l1,l2) if None not in (l1,l2) else \
-                    next((x for x in (l1,l2) if x is not None),None)
+            limit = -1
+            if -1 not in (l1, l2):
+                limit = min(l1,l2) if None not in (l1,l2) else \
+                        next((x for x in (l1,l2) if x is not None),None)
             markets = m0.data
             
             if not api.currencies:
@@ -185,8 +187,10 @@ def sn_load_markets(api, limit=None):
         if not api.markets:
             l1 = limit
             l2 = _resolve_limit(exchange, 'markets', m0.date)
-            limit = min(l1,l2) if None not in (l1,l2) else \
-                    next((x for x in (l1,l2) if x is not None),None)
+            limit = -1
+            if -1 not in (l1, l2):
+                limit = min(l1,l2) if None not in (l1,l2) else \
+                        next((x for x in (l1,l2) if x is not None),None)
             markets = m0.data
             
             if not api.currencies:

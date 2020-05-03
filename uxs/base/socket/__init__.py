@@ -889,11 +889,9 @@ class ExchangeSocket(WSClient):
             return cy, new
         
         for x in data:
-            if isinstance(x, dict):
-                cy, new = parse_dict(x)
-            else:
-                cy,free,used = x
-                new = {'free': free, 'used': used, 'total': free+used}
+            if not isinstance(x, dict):
+                x = {'cy': x[0], 'free': x[1], 'used': x[2]}
+            cy, new = parse_dict(x)
             
             try:
                 cy_prev = self.balances[cy]
@@ -972,9 +970,10 @@ class ExchangeSocket(WSClient):
         if id in self.orders:
             params = dict({'type': type, 'side': side, 'price': price,
                            'amount': amount, 'stop': stop, 'timestamp': timestamp,
-                           'datetime': datetime, 'cost': cost, 'average': average},
+                           'datetime': datetime},
                            **params)
-            return self.update_order(id, remaining, filled, payout, params)
+            return self.update_order(id=id, remaining=remaining, filled=filled, payout=payout,
+                                     cost=cost, average=average, params=params)
         
         o = dict(
             {'id': id,
@@ -1626,9 +1625,9 @@ class ExchangeSocket(WSClient):
                 keywords = ['id','symbol','side','price','amount','timestamp',
                             'remaining','filled','datetime','type','stop']
                 params = {k:v for k,v in o.items() if k not in keywords}
-                self.add_order(o['id'], o['symbol'], o['side'], o['price'], o['amount'],
-                               o.get('timestamp'), remaining=o.get('remaining'), filled=o.get('filled'),
-                               type=o.get('type'), datetime=o.get('datetime'), stop=o.get('stop'),
+                self.add_order(o['id'], o['symbol'], o['side'], o['amount'], price=o['price'], 
+                               timestamp=o.get('timestamp'), remaining=o.get('remaining'), filled=o.get('filled'),
+                               datetime=o.get('datetime'), type=o.get('type'),  stop=o.get('stop'),
                                params=params)
             except Exception as e:
                 logger.exception(e)
@@ -1707,7 +1706,7 @@ class ExchangeSocket(WSClient):
             cancel_automatically = self.is_order_auto_canceling_enabled()
             if cancel_automatically:
                 #tlogger.debug('Automatically setting "remaining" to 0: {},{}'.format(id, symbol))
-                self.update_order(id, 0)
+                self.update_order(id, remaining=0)
                 #tlogger.debug('Order {},{} now: {}'.format(id, symbol, self.orders.get(id)))
             if error is not None:
                 raise error
