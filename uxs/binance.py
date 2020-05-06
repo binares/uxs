@@ -501,7 +501,9 @@ class binance(ExchangeSocket):
             "listenKey": "pqia91ma19a5s61cv6a81va65sdf19v8a65a1a5s61cv6a81va65sdf19v8a65a1"
         }"""
         is_spot = self.exchange=='binance'
-        method = 'publicPostUserDataStream' if is_spot else 'fapiPublicPostListenKey'
+        fapiMethod = 'fapiPrivatePostListenKey' if hasattr(self.api, 'fapiPrivatePostListenKey') \
+                     else 'fapiPublicPostListenKey'
+        method = 'publicPostUserDataStream' if is_spot else fapiMethod
         params = {}
         
         async def fetch_key():
@@ -530,7 +532,9 @@ class binance(ExchangeSocket):
     
     async def prolong_listen_key_expiry(self, listen_key):
         is_spot = self.exchange=='binance'
-        method = 'publicPutUserDataStream' if is_spot else 'fapiPublicPutListenKey'
+        fapiMethod = 'fapiPrivatePutListenKey' if hasattr(self.api, 'fapiPrivatePutListenKey') \
+                     else 'fapiPublicPutListenKey'
+        method = 'publicPutUserDataStream' if is_spot else fapiMethod
         params = {'listenKey': listen_key}
         
         async def prolong_key():
