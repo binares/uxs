@@ -9,7 +9,8 @@ directs the endpoints to Binance Futures (instead of the default one, Binance "s
 
 from .binancefu import binancefu
 from .bitmex import bitmex
+from .bittrex import bittrex
 from .hitbtc import hitbtc
 
-__all__ = ['binancefu','bitmex','hitbtc']
+__all__ = ['binancefu','bitmex','bittrex','hitbtc']
 
