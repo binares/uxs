@@ -41,6 +41,11 @@ class ExchangeSocket(WSClient):
     # If True, .setup_test_env(config) will be called on init
     test = False
     
+    api = None # ccxt.Exchange instance
+    snapi = None # ccxt.async_support.Exchange instance
+    pro = None # ccxtpro.Exchange instance (if requested)
+    use_pro = False # TODO
+    
     # Used on .subscribe_to_{x} , raises ValueError when doesn't have
     has = dict.fromkeys([
          'all_tickers', 'ticker', 'orderbook', 'trades',
@@ -373,6 +378,26 @@ class ExchangeSocket(WSClient):
             'add': False,
         })
         
+        if self.use_pro:
+            raise NotImplementedError('uxs library does not support ccxt pro yet.')
+        
+        try:
+            self.pro = init_exchange({
+                'exchange':self.exchange,
+                'async': True,
+                'args': (ccxt_config,),
+                'kwargs': {
+                    'load_cached_markets': False,
+                    'profile': profile,
+                    'test': ccxt_test,},
+                'pro': True,
+                'auth': auth,
+                'add': False,
+            })
+        except (ImportError, AttributeError) as e:
+            if self.use_pro:
+                raise ccxt.NotSupported(self.exchange + ' is not supported by ccxt pro yet.')
+        
         self._init_has()
         self._init_exceptions()
         
@@ -381,6 +406,9 @@ class ExchangeSocket(WSClient):
         self.api._ensure_no_nulls()
         
         self.api.sync_with_other(self.snapi)
+        if self.pro:
+            self.api.sync_with_other(self.pro)
+            self.snapi.sync_with_other(self.pro)
         
         names = ['ticker','orderbook','trades','ohlcv','balance',
                  'fill','order','position','empty','recv']

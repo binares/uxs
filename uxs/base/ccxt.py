@@ -37,19 +37,21 @@ FEE_FROM_TARGET = ['binance','poloniex']
 COST_LIMIT_WITH_FEE = []
 _E_REPLACE = {
     'binancefu': 'binance',
-    'hitbtc':'hitbtc2',
     'huobi':'huobipro',
     'coinbase-pro':'coinbasepro',
     'gdax':'coinbasepro',
 }
+_E_REPLACE_PRO = _E_REPLACE.copy()
 #PRICE_ACCURACY = 3
 AMOUNT_ACCURACY = 3
 
 _ccxt_cls_wrapped = {}
 _ccxt_cls_wrapped_async = {}
+_ccxtpro_cls_wrapped = {}
 
 _exchange_instances = {}
 _exchange_instances_async = {}
+_ccxtpro_instances = {}
 
 
 class ccxtWrapper:
@@ -1025,7 +1027,13 @@ class ccxtWrapper:
         
 
     def __del__(self):
-        d = _exchange_instances_async if isinstance(self, asyncCCXTWrapper) else _exchange_instances
+        ccxtpro = any(x.__name__.startswith('ccxtpro.') for x in self.__class__.__mro__)
+        if ccxtpro:
+            d = _ccxtpro_instances
+        elif isinstance(self, asyncCCXTWrapper):
+            d = _exchange_instances_async
+        else:
+            d = _exchange_instances
         if self in d:
             del d[self]
         super(ccxtWrapper, self).__del__()
@@ -1112,16 +1120,28 @@ def init_exchange(exchange):
     if _id:
         D['id'] = _id
     
+    pro = D.pop('pro', False)
     asyn = D.pop('async') if 'async' in D else (
         isinstance(e_obj, ccxt.async_support.Exchange) 
             if e_obj is not None else RETURN_ASYNC_EXCHANGE)
-    ccxt_module = ccxt if not asyn else ccxt.async_support
-    cls_reg = _ccxt_cls_wrapped if not asyn else _ccxt_cls_wrapped_async
-    e_reg = _exchange_instances if not asyn else _exchange_instances_async
+    
+    if not pro:
+        ccxt_module = ccxt if not asyn else ccxt.async_support
+        cls_reg = _ccxt_cls_wrapped if not asyn else _ccxt_cls_wrapped_async
+        e_reg = _exchange_instances if not asyn else _exchange_instances_async
+    elif asyn:
+        import ccxtpro
+        ccxt_module = ccxtpro
+        cls_reg = _ccxtpro_cls_wrapped
+        e_reg = _ccxtpro_instances
+        asyn = True
+    else:
+        raise ValueError('got async={}, while pro instance was requested'.format(asyn))
     
     if e not in cls_reg:
         # Dynamically create the class
-        _name = _E_REPLACE.get(e, e)
+        _name_reg = _E_REPLACE if not pro else _E_REPLACE_PRO
+        _name = _name_reg.get(e, e)
         ccxt_eCls =  getattr(ccxt_module, _name)
         wrCls = ccxtWrapper if not asyn else asyncCCXTWrapper
         bases = (wrCls, ccxt_eCls)
