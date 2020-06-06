@@ -5,6 +5,7 @@ import ccxt.async_support
 
 from .bitforexfu import bitforexfu
 from .bitzfu import bitzfu
+from .cryptocom import cryptocom
 from .delta import delta
 from .gateiofu import gateiofu
 from .krakenfu import krakenfu
