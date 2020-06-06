@@ -3,6 +3,7 @@ Async versions of exchanges that are not present in ccxt
 """
 import ccxt.async_support
 
+from .biki import biki
 from .bitforexfu import bitforexfu
 from .bitzfu import bitzfu
 from .cryptocom import cryptocom
