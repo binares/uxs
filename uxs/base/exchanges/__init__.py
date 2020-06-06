@@ -5,6 +5,7 @@ import ccxt
 
 from .biki import biki
 from .bitforexfu import bitforexfu
+from .bitpanda import bitpanda
 from .bitzfu import bitzfu
 from .cryptocom import cryptocom
 from .delta import delta
