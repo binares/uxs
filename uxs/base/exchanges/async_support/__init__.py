@@ -3,6 +3,7 @@ Async versions of exchanges that are not present in ccxt
 """
 import ccxt.async_support
 
+from .bcio import bcio
 from .biki import biki
 from .bitbns import bitbns
 from .bitcoincom import bitcoincom

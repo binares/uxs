@@ -3,6 +3,7 @@ Exchanges that are not present in ccxt
 """
 import ccxt
 
+from .bcio import bcio
 from .biki import biki
 from .bitbns import bitbns
 from .bitcoincom import bitcoincom
