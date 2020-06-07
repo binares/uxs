@@ -7,6 +7,7 @@ from .biki import biki
 from .bitforexfu import bitforexfu
 from .bitpanda import bitpanda
 from .bitzfu import bitzfu
+from .coinbene import coinbene
 from .cryptocom import cryptocom
 from .delta import delta
 from .gateiofu import gateiofu
