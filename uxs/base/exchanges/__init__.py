@@ -23,6 +23,7 @@ from .krakenfu import krakenfu
 from .primexbt import primexbt
 from .slicex import slicex
 from .tokensnet import tokensnet
+from .tradeogre import tradeogre
 from .txbit import txbit
 
 # Add the custom-defined exchanges to ccxt
