@@ -9,6 +9,7 @@ from .bitforexfu import bitforexfu
 from .bitpanda import bitpanda
 from .bitzfu import bitzfu
 from .coinbene import coinbene
+from .coinsbit import coinsbit
 from .cryptocom import cryptocom
 from .delta import delta
 from .gateiofu import gateiofu
