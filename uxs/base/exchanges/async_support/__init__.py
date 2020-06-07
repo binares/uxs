@@ -8,6 +8,7 @@ from .bitcoincom import bitcoincom
 from .bitforexfu import bitforexfu
 from .bitpanda import bitpanda
 from .bitzfu import bitzfu
+from .bkex import bkex
 from .coinbene import coinbene
 from .coindcx import coindcx
 from .coinsbit import coinsbit
