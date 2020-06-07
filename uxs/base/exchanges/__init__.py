@@ -4,6 +4,7 @@ Exchanges that are not present in ccxt
 import ccxt
 
 from .biki import biki
+from .bitcoincom import bitcoincom
 from .bitforexfu import bitforexfu
 from .bitpanda import bitpanda
 from .bitzfu import bitzfu
