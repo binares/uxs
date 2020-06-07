@@ -18,6 +18,7 @@ from .gateiofu import gateiofu
 from .krakenfu import krakenfu
 from .primexbt import primexbt
 from .slicex import slicex
+from .tokensnet import tokensnet
 
 # Add the custom-defined exchanges to ccxt
 for attr,value in list(globals().items()):
