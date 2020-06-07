@@ -21,6 +21,7 @@ from .krakenfu import krakenfu
 from .primexbt import primexbt
 from .slicex import slicex
 from .tokensnet import tokensnet
+from .txbit import txbit
 
 # Add the custom-defined exchanges to ccxt
 for attr,value in list(globals().items()):
