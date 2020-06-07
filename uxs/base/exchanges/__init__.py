@@ -25,6 +25,7 @@ from .slicex import slicex
 from .tokensnet import tokensnet
 from .tradeogre import tradeogre
 from .txbit import txbit
+from .yunex import yunex
 
 # Add the custom-defined exchanges to ccxt
 for attr,value in list(globals().items()):
