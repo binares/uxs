@@ -177,27 +177,38 @@ def get_to_matching_price(ob_branch, price, side, closed=True,
     return {'volume': cumvol, 'vwap': vwap, 
             'remainder': remainder,
             'cumother': cumother, 'i': i}
-        
+
+
+def parse_item(x, price_key=0, amount_key=1):
+    return [float(x[price_key]), float(x[amount_key])]
+
+
+def parse_branch(branch, price_key=0, amount_key=1):
+    if branch is None:
+        return []
+    return [parse_item(x, price_key, amount_key) for x in branch]
+
 
 def sort_branch(branch, side='bids'):
     return sorted(branch, key=lambda x:x[0], reverse=(side in ('bid','bids')))
 
 
-def create_orderbook(data, add_time=False):
+def create_orderbook(data, add_time=False, bids_key='bids', asks_key='asks', price_key=0, amount_key=1):
     datetime, timestamp = resolve_times(data, add_time)
-    
-    return {'symbol': data['symbol'],
-            'bids': sort_branch(data['bids'],'bids'),
-            'asks': sort_branch(data['asks'],'asks'),
-            'timestamp': timestamp,
-            'datetime': datetime,
-            'nonce': data.get('nonce')}
-    
-    
+    return {
+        'symbol': data['symbol'],
+        'bids': sort_branch(parse_branch(data.get(bids_key), price_key, amount_key), 'bids'),
+        'asks': sort_branch(parse_branch(data.get(asks_key), price_key, amount_key), 'asks'),
+        'timestamp': timestamp,
+        'datetime': datetime,
+        'nonce': data.get('nonce')
+    }
+
+
 def update_branch(item, branch, side='bids'):
-    rate,qnt = float(item[0]),float(item[1])
-    new_item = [rate,qnt]
-    if not rate: return (.0,.0,.0)
+    rate, qnt = parse_item(item)
+    new_item = [rate, qnt]
+    if not rate: return (.0, .0, .0)
     #if side in('bid','bids'): op = lambda x,rate: x[0] >= rate
     #else: op = lambda x,rate: x[0] <= rate
     op = rate.__le__ if side in ('ask','asks') else rate.__ge__

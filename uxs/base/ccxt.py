@@ -12,6 +12,7 @@ from . import wrappers as _wrappers
 from .wrappers import async_support as _wrappers_async
 from .wrappers import sync_support as _wrappers_sync
 from uxs.fintls.basics import (as_direction, calc_price, convert_quotation, create_cy_graph)
+from uxs.fintls.ob import create_orderbook
 from uxs.fintls.utils import resolve_times
 from uxs.fintls.margin import Position
 
@@ -279,18 +280,14 @@ class ccxtWrapper:
     
     @staticmethod
     def ob_entry(symbol=None, bids=None, asks=None, timestamp=None, datetime=None, nonce=None):
-        datetime, timestamp = resolve_times([datetime,timestamp])
-        if bids is None: bids = []
-        if asks is None: asks = []
-        
-        return {
+        return create_orderbook({
             'symbol': symbol,
             'datetime': datetime,
             'timestamp': timestamp,
             'bids': bids,
             'asks': asks,
             'nonce': nonce,
-        }
+        })
     
     
     @staticmethod
