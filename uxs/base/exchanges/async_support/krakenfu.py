@@ -50,7 +50,7 @@ class krakenfu(Exchange):
                     'private': 'https://demo-futures.kraken.com/derivatives',
                     'www': 'https://demo-futures.kraken.com',
                 },
-                'logo': 'https://user-images.githubusercontent.com/1294454/27766599-22709304-5ede-11e7-9de1-9f33732e1509.jpg',
+                'logo': 'https://user-images.githubusercontent.com/24300605/81436764-b22fd580-9172-11ea-9703-742783e6376d.jpg',
                 'api': {
                     'public': 'https://futures.kraken.com/derivatives',
                     'private': 'https://futures.kraken.com/derivatives',
@@ -125,7 +125,7 @@ class krakenfu(Exchange):
             'precisionMode': TICK_SIZE,
             'options': {
                 'symbol': {
-                    'quoteIds': ['USD','XBT'],
+                    'quoteIds': ['USD', 'XBT'],
                     'reversed': False,
                 },
                 'orderTypes': {
@@ -259,27 +259,27 @@ class krakenfu(Exchange):
             'symbol': market['id'],
         }
         response = await self.publicGetOrderbook(self.extend(request, params))
-        # { 
+        # {
         #    "result":"success",
         #    "serverTime":"2016-02-25T09:45:53.818Z",
-        #    "orderBook":{ 
-        #       "bids":[ 
-        #          [ 
+        #    "orderBook":{
+        #       "bids":[
+        #          [
         #             4213,
         #             2000,
         #          ],
-        #          [ 
+        #          [
         #             4210,
         #             4000,
         #          ],
         #          ...,
         #       ],
-        #       "asks":[ 
-        #          [ 
+        #       "asks":[
+        #          [
         #             4218,
         #             4000,
         #          ],
-        #          [ 
+        #          [
         #             4220,
         #             5000,
         #          ],
@@ -303,7 +303,7 @@ class krakenfu(Exchange):
         return result
 
     def parse_ticker(self, ticker, market=None):
-        # { 
+        # {
         #    "tag":"quarter",
         #    "pair":"XRP:USD",
         #    "symbol":"fi_xrpusd_180615",
@@ -381,7 +381,7 @@ class krakenfu(Exchange):
         #
         # fetchTrades(public)
         #
-        # { 
+        # {
         #    "time":"2019-02-14T09:25:33.920Z",
         #    "trade_id":100,
         #    "price":3574,
@@ -390,10 +390,10 @@ class krakenfu(Exchange):
         #    "type":"fill"                                          # fill, liquidation, assignment, termination
         #    "uid":"11c3d82c-9e70-4fe9-8115-f643f1b162d4"
         # }
-        # 
+        #
         # fetchMyTrades(private)
         #
-        # { 
+        # {
         #    "fillTime":"2016-02-25T09:47:01.000Z",
         #    "order_id":"c18f0c17-9971-40e6-8e5b-10df05d422f0",
         #    "fill_id":"522d4e08-96e7-4b44-9694-bfaea8fe215e",
@@ -432,7 +432,7 @@ class krakenfu(Exchange):
         amount = self.safe_float_2(trade, 'size', 'amount', 0.0)
         id = self.safe_string_2(trade, 'uid', 'fill_id')
         if id is None:
-            id = self.safeString(trade, 'executionId')
+            id = self.safe_string(trade, 'executionId')
         order = self.safe_string(trade, 'order_id')
         symbolId = self.safe_string(trade, 'symbol')
         side = self.safe_string(trade, 'side')
@@ -497,12 +497,12 @@ class krakenfu(Exchange):
         #                            more than 2 decimal places. Note that for stop orders, limitPrice denotes
         #                            the worst price at which the stop or take_profit order can get filled at.
         #                            If no limitPrice is provided the stop or take_profit order will trigger a market order.
-        # triggerSignal   string 	  If placing a stp or take_profit, the signal used for trigger. One of:
+        # triggerSignal   string     If placing a stp or take_profit, the signal used for trigger. One of:
         #                              mark - the mark price
         #                              index - the index price
-        #                              last - the last executed trade  
-        # cliOrdId        UUID 	  The order identity that is specified from the user. It must be globally unique.
-        # reduceOnly      string 	  Set as True if you wish the order to only reduce an existing position.
+        #                              last - the last executed trade
+        # cliOrdId        UUID       The order identity that is specified from the user. It must be globally unique.
+        # reduceOnly      string     Set as True if you wish the order to only reduce an existing position.
         #                            Any order which increases an existing position will be rejected. Default False.
         await self.load_markets()
         typeId = self.safe_string(self.options['orderTypes'], type, type)
@@ -557,7 +557,7 @@ class krakenfu(Exchange):
         cancelStatus = self.safe_value(response, 'cancelStatus', {})
         cancelledOrders = self.safe_value(cancelStatus, 'cancelledOrders', [])
         for i in range(0, len(cancelledOrders)):
-            id = self.safeString(cancelledOrders[i], 'order_id')
+            id = self.safe_string(cancelledOrders[i], 'order_id')
             if id in self.orders:
                 self.orders[id]['status'] = 'canceled'
                 self.orders[id]['remaining'] = 0.0
@@ -566,16 +566,18 @@ class krakenfu(Exchange):
     async def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
         raise NotSupported(self.id + ' fetchOrders not supprted yet')
         # This only works on mainnet
-        await self.load_markets()
-        market = None
-        request = {}
-        if symbol is not None:
-            market = self.market(symbol)
-            request['symbol'] = market['id']
-        if since is not None:
-            request['after'] = since
-        response = await self.privateGetHistoricorders(request)
-        return self.parse_orders(response, market, since, limit)
+        # await self.load_markets()
+        # market = None
+        # request = {}
+        # if symbol is not None:
+        #     market = self.market(symbol)
+        #     request['symbol'] = market['id']
+        # }
+        # if since is not None:
+        #     request['after'] = since
+        # }
+        # response = await self.privateGetHistoricorders(request)
+        # return self.parse_orders(response, market, since, limit)
 
     async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         await self.load_markets()
@@ -592,7 +594,7 @@ class krakenfu(Exchange):
             'lmt': 'limit',
             'stp': 'stop',
         }
-        return self.safeString(map, orderType, orderType)
+        return self.safe_string(map, orderType, orderType)
 
     def verify_order_action_success(self, status, action='placed/edited/canceled', omit=[]):
         errors = {
@@ -609,7 +611,7 @@ class krakenfu(Exchange):
             'clientOrderIdAlreadyExist': DuplicateOrderId,
             'clientOrderIdTooLong': BadRequest,
             'outsidePriceCollar': InvalidOrder,
-            'postWouldExecute': OrderImmediatelyFillable,  # the unplaced order could actually be parsed(with status = "rejected"), but there is self specific error for self 
+            'postWouldExecute': OrderImmediatelyFillable,  # the unplaced order could actually be parsed(with status = "rejected"), but there is self specific error for self
             'iocWouldNotExecute': OrderNotFillable,  # -||-
             'wouldNotReducePosition': ExchangeError,
             'orderForEditNotFound': OrderNotFound,
@@ -717,7 +719,7 @@ class krakenfu(Exchange):
         #         "orderTrigger":{
         #            "uid":"1abfd3c6-af93-4b30-91cc-e4a93797f3f5",
         #            "clientId":null,
-        #            "type":"lmt",                                         # "ioc" if stop market 
+        #            "type":"lmt",                                         # "ioc" if stop market
         #            "symbol":"pi_xbtusd",
         #            "side":"buy",
         #            "quantity":10,
@@ -806,10 +808,10 @@ class krakenfu(Exchange):
         # "CANCEL ORDER"
         # {
         #    "status":"cancelled",
-        #    "orderEvents":[ 
-        #       { 
+        #    "orderEvents":[
+        #       {
         #          "uid":"85c40002-3f20-4e87-9302-262626c3531b",
-        #          "order":{ 
+        #          "order":{
         #             "orderId":"85c40002-3f20-4e87-9302-262626c3531b",
         #             "cliOrdId":null,
         #             "type":"lmt",
@@ -828,7 +830,7 @@ class krakenfu(Exchange):
         # }
         #
         # "FETCH OPEN ORDERS"
-        # { 
+        # {
         #     "order_id":"59302619-41d2-4f0b-941f-7e7914760ad3",
         #     "symbol":"pi_xbtusd",
         #     "side":"sell",
@@ -843,25 +845,25 @@ class krakenfu(Exchange):
         # }
         #
         # "FETCH ORDERS"
-        # timestamp               Unix timestamp 	  The timestamp of the order event
-        # uid                     UUID 	          A structure containing information on the send order request, see below
-        # event_type              string 	          One of ORDER_PLACED ORDER_CANCELLED ORDER_REJECTED EXECUTION
-        # order_uid 	           UUID 	          The unique identifier of the order
-        # order_tradeable 	       string 	          The tradeable(symbol) of the futures contract
-        # order_direction 	       string 	          BUY for buy order and SELL for a sell
-        # order_quantity 	       positive float 	  The order quantity(size)
-        # order_filled            positive float 	  The order filled amount
-        # order_timestamp         Unix timestamp 	  The order timestamp
-        # order_type              string 	          One of: LIMIT IMMEDIATE_OR_CANCEL POST_ONLY LIQUIDATION ASSIGNMENT STOP
-        # order_client_id         string 	          The provided client order id
-        # order_stop_price 	   positive float 	  The stop price of the order.
-        # info 	               string 	          One of: MAKER_ORDER TAKER_ORDER
-        # algo_id 	               string 	          The id of the algorithm that placed the order
-        # execution_timestamp 	   Unix timestamp 	  The execution timestamp
-        # execution_quantity 	   positive integer   The executed quantity
-        # execution_price 	       positive float 	  The price that the orders got executed
-        # execution_mark_price    positive float 	  The market price at the time of the execution
-        # execution_limit_filled  boolean 	          True if the maker order of the execution was filled in its entirety otherwise False
+        # timestamp               Unix timestamp     The timestamp of the order event
+        # uid                     UUID               A structure containing information on the send order request, see below
+        # event_type              string             One of ORDER_PLACED ORDER_CANCELLED ORDER_REJECTED EXECUTION
+        # order_uid               UUID               The unique identifier of the order
+        # order_tradeable         string             The tradeable(symbol) of the futures contract
+        # order_direction         string             BUY for buy order and SELL for a sell
+        # order_quantity          positive float     The order quantity(size)
+        # order_filled            positive float     The order filled amount
+        # order_timestamp         Unix timestamp     The order timestamp
+        # order_type              string             One of: LIMIT IMMEDIATE_OR_CANCEL POST_ONLY LIQUIDATION ASSIGNMENT STOP
+        # order_client_id         string             The provided client order id
+        # order_stop_price        positive float     The stop price of the order.
+        # info                    string             One of: MAKER_ORDER TAKER_ORDER
+        # algo_id                 string             The id of the algorithm that placed the order
+        # execution_timestamp     Unix timestamp     The execution timestamp
+        # execution_quantity      positive integer   The executed quantity
+        # execution_price         positive float     The price that the orders got executed
+        # execution_mark_price    positive float     The market price at the time of the execution
+        # execution_limit_filled  boolean            True if the maker order of the execution was filled in its entirety otherwise False
         #
         orderEvents = self.safe_value(order, 'orderEvents', [])
         details = None
@@ -911,7 +913,7 @@ class krakenfu(Exchange):
         if price is None:
             price = self.safe_float(details, 'limitPrice')
         amount = self.safe_float(details, 'quantity')
-        filled = self.safe_float_2(details, 'filledSize', 'filled',  0.0)
+        filled = self.safe_float_2(details, 'filledSize', 'filled', 0.0)
         remaining = self.safe_float(details, 'unfilledSize')
         average = None
         filled2 = 0.0
@@ -983,11 +985,11 @@ class krakenfu(Exchange):
             request['lastFillTime'] = self.iso8601(since)
         request = self.deep_extend(request, params)
         response = await self.privateGetFills(request)
-        # { 
+        # {
         #    "result":"success",
         #    "serverTime":"2016-02-25T09:45:53.818Z",
-        #    "fills":[ 
-        #       { 
+        #    "fills":[
+        #       {
         #          "fillTime":"2016-02-25T09:47:01.000Z",
         #          "order_id":"c18f0c17-9971-40e6-8e5b-10df05d422f0",
         #          "fill_id":"522d4e08-96e7-4b44-9694-bfaea8fe215e",
@@ -1005,7 +1007,6 @@ class krakenfu(Exchange):
 
     async def fetch_balance(self, params={}):
         await self.load_markets()
-        request = {}
         response = await self.privateGetAccounts(params)
         # {
         #    "result":"success",
@@ -1055,13 +1056,13 @@ class krakenfu(Exchange):
         cashBalances = self.safe_value(cash, 'balances', {})
         # This contains the actually usable margin by each market,
         # but ccxt does not support such format
-        bySymbol = self.omit(accounts, 'cash')
+        # bySymbol = self.omit(accounts, 'cash')
         currencyIds = list(cashBalances.keys())
         for i in range(0, len(currencyIds)):
             currencyId = currencyIds[i]
             code = self.safe_currency_code(currencyId)
             account = self.account()
-            account['total'] = self.safeFloat(cashBalances, currencyId)
+            account['total'] = self.safe_float(cashBalances, currencyId)
             result[code] = account
         return self.parse_balance(result)
 
@@ -1094,14 +1095,13 @@ class krakenfu(Exchange):
                 break
         if quoteId is None:
             raise BadSymbol(self.id + ' symbolId could not be parsed: ' + symbolId)
-        first = self.slice_string(symbolId, 0, len(symbolId) - len(quoteId))
-        second = self.slice_string(symbolId, len(quoteId))
         if not reversed:
-            baseId = first
-            quoteId = second
+            baseIdLength = len(symbolId) - len(quoteId)
+            baseId = self.slice_string(symbolId, 0, baseIdLength)
+            quoteId = self.slice_string(symbolId, baseIdLength)
         else:
-            quoteId = first
-            baseId = second
+            quoteId = self.slice_string(symbolId, 0, len(quoteId))
+            baseId = self.slice_string(symbolId, len(quoteId))
         return {
             'baseId': baseId,
             'quoteId': quoteId,
