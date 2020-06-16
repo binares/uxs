@@ -46,7 +46,7 @@ class hitbtc(ExchangeSocket):
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False, 
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True},
-        'fetch_balance': {'ws': True},
+        'fetch_balance': {'ws': True, 'free': True, 'used': True, 'total': True},
         'create_order': {'ws': True},
         'cancel_order': {'ws': True},
         #'edit_order': {'ws': True},

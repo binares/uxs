@@ -53,6 +53,8 @@ class kucoin(ExchangeSocket):
         'fetch_ticker': True,
         'fetch_order_book': True,
         'fetch_balance': True,
+        'fetch_open_orders': {'symbolRequired': False},
+        'fetch_my_trades': {'symbolRequired': False},
     }
     has['ticker'] = has['all_tickers'].copy()
     connection_defaults = {

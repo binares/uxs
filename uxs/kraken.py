@@ -83,6 +83,7 @@ class kraken(ExchangeSocket):
         # Websocket versions are currently disabled
         'create_order': {'ws': False},
         'cancel_order': {'ws': False},
+        'fetch_balance': {'free': False, 'used': False, 'total': True},
     }
     channel_ids = {
         'ticker': 'ticker',

@@ -58,7 +58,6 @@ class poloniex(ExchangeSocket):
         'merge_option': False,
     }
     has = {
-        'balance': {'_': True},
         'ticker': False,
         'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
                         'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
@@ -67,10 +66,14 @@ class poloniex(ExchangeSocket):
         'orderbook': True,
         'account': {'balance': True, 'order': True, 'fill': True},
         'fetch_tickers': True,
-        'fetch_ticker': True,
+        'fetch_ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+                        'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
+                        'change': True, 'percentage': True, 'average': True, 'vwap': False,
+                        'baseVolume': True, 'quoteVolume': True, 'active': False},
         'fetch_order_book': True,
         'fetch_balance': True,
     }
+    has['fetch_tickers'] = has['fetch_ticker'].copy()
     connection_defaults = {
         'max_subscriptions': 95, #?
         'subscription_push_rate_limit': 0.12,

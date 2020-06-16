@@ -21,7 +21,8 @@ from wsclient import WSClient
 
 import fons.log
 from fons.aio import call_via_loop
-from fons.dict_ops import deep_update
+from fons.dict_ops import deep_update, deep_get
+from fons.errors import QuitException
 from fons.func import get_arg_count
 from fons.iter import unique, sequence_insert
 
@@ -43,17 +44,17 @@ class ExchangeSocket(WSClient):
     
     api = None # ccxt.Exchange instance
     snapi = None # ccxt.async_support.Exchange instance
-    pro = None # ccxtpro.Exchange instance (if requested)
+    pro = None # ccxtpro.Exchange instance (if ccxtpro installed and present in its library)
     use_pro = False # TODO
     
     # Used on .subscribe_to_{x} , raises ValueError when doesn't have
     has = dict.fromkeys([
-         'all_tickers', 'ticker', 'orderbook', 'trades',
-         'ohlcv', 'account', 'match', 'balance',
+         'all_tickers', 'ticker', 'orderbook', 'trades', 'ohlcv',
+         'account', 'match', 'balance', 'order', 'fill', 'position',
          'fetch_tickers', 'fetch_ticker', 'fetch_order_book',
          'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
-         'fetch_orders', 'fetch_order', 'fetch_open_orders',
-         'create_order', 'edit_order', 'cancel_order',
+         'fetch_orders', 'fetch_order', 'fetch_orders', 'fetch_open_orders',
+         'fetch_my_trades', 'create_order', 'edit_order', 'cancel_order',
         ], False)
     
     channel_defaults = {
@@ -173,6 +174,21 @@ class ExchangeSocket(WSClient):
             'is_private': True,
         },
     }
+    TICKER_KEYWORDS = (
+        'last', 'bid', 'bidVolume', 'ask', 'askVolume', 'high', 'low',
+        'open', 'close', 'previousClose', 'change', 'percentage',
+        'average', 'vwap', 'baseVolume', 'quoteVolume',
+    )
+    TRADE_KEYWORDS = (
+        'timestamp', 'datetime', 'symbol', 'id', 'order', 'type',
+        'takerOrMaker', 'side', 'price', 'amount', 'cost', 'fee'
+    )
+    OHLCV_KEYWORDS = (
+        'timestamp', 'open', 'high', 'low', 'close', 'volume',
+    )
+    BALANCE_KEYWORDS = (
+        'free', 'used', 'total',
+    )
     ORDER_KEYWORDS = (
         'id', 'symbol', 'side', 'price', 'amount', 'timestamp', 
         'remaining', 'filled', 'payout', 'datetime',
@@ -210,6 +226,22 @@ class ExchangeSocket(WSClient):
     # Optional, for reference in .encode
     channel_ids = {}
     
+    intervals = {
+        'default': 30,
+        'fetch_tickers': 5,
+        'fetch_ticker': 15,
+        'fetch_order_book': 15,
+        'fetch_trades': 60,
+        'fetch_balance': 10,
+        'fetch_open_orders': 8,
+        'fetch_orders': 8,
+        'fetch_order': 15,
+        'fetch_my_trades': 8,
+    }
+    max_missed_intervals = {
+        'default': 2,
+    }
+        
     OrderbookMaintainer_cls = OrderbookMaintainer
     
     ob = {
@@ -320,6 +352,8 @@ class ExchangeSocket(WSClient):
     __extend_attrs__ = [
         'fetch_limits',
         'channel_ids',
+        'intervals',
+        'max_missed_intervals',
         'ob',
         'order',
         'store',
@@ -346,54 +380,40 @@ class ExchangeSocket(WSClient):
         load_cached_markets = config.pop('load_cached_markets', None)
         profile = config.pop('profile', None)
         ccxt_test = config.pop('ccxt_test', is_test)
+        subscriptions = config.pop('subscriptions',None)
         
         super().__init__(config)
         
         if load_cached_markets is None:
             load_cached_markets = self.fetch_limits['markets']
         
-        # asynchronous ccxt Exchange instance
-        self.api = init_exchange({
+        _kwargs =  {
+            'load_cached_markets': False,
+            'profile': profile,
+            'test': ccxt_test,
+        }
+        _params = {
             'exchange':self.exchange,
             'async':True,
             'args': (ccxt_config,),
-            'kwargs': {
-                'load_cached_markets': load_cached_markets,
-                'profile': profile,
-                'test': ccxt_test,},
+            'kwargs': _kwargs,
             'auth': auth,
             'add': False,
-        })
+        }
+        # asynchronous ccxt Exchange instance
+        self.api = init_exchange(dict(
+            _params,
+            kwargs=dict(_kwargs, load_cached_markets=load_cached_markets)
+        ))
         
         # synchronous ccxt Exchange instance
-        self.snapi = init_exchange({
-            'exchange':self.exchange,
-            'async':False,
-            'args': (ccxt_config,),
-            'kwargs': {
-                'load_cached_markets': False,
-                'profile': profile,
-                'test': ccxt_test,},
-            'auth': auth,
-            'add': False,
-        })
+        self.snapi = init_exchange({**_params, 'async': False})
         
         if self.use_pro:
             raise NotImplementedError('uxs library does not support ccxt pro yet.')
         
         try:
-            self.pro = init_exchange({
-                'exchange':self.exchange,
-                'async': True,
-                'args': (ccxt_config,),
-                'kwargs': {
-                    'load_cached_markets': False,
-                    'profile': profile,
-                    'test': ccxt_test,},
-                'pro': True,
-                'auth': auth,
-                'add': False,
-            })
+            self.pro = init_exchange({**_params, 'pro': True})
         except (ImportError, AttributeError) as e:
             if self.use_pro:
                 raise ccxt.NotSupported(self.exchange + ' is not supported by ccxt pro yet.')
@@ -444,7 +464,12 @@ class ExchangeSocket(WSClient):
         self._balances.update(self.balances)
         
         self.orderbook_maintainer = self.OrderbookMaintainer_cls(self)
+        self._last_fetches = defaultdict(float)
         self._last_markets_loaded_ts = 0
+        
+        if subscriptions is not None:
+            for params in subscriptions:
+                self.susbcribe_to(params)
     
     
     def _init_events(self):
@@ -467,29 +492,77 @@ class ExchangeSocket(WSClient):
             spl = x.split('_')
             return spl[0].lower() + ''.join(w.lower().capitalize() for w in spl[1:])
         
-        map = {'fetch_ohlcv': 'fetchOHLCV'}
+        under_account = ['balance','order','fill','position']
+        if not isinstance(self.has['account'], dict):
+            self.has['account'] = dict.fromkeys(under_account, self.has_got('account'))
+        
+        camel_map = {'fetch_ohlcv': 'fetchOHLCV'}
+        emulation_methods = {
+            'ticker': ['fetch_ticker'],
+            'all_tickers': ['fetch_tickers'],
+            'orderbook': ['fetch_order_book'],
+            'trades': ['fetch_trades'],
+            'ohlcv': ['fetch_ohlcv'],
+            'balance': ['fetch_balance'],
+            'order': ['fetch_orders','fetch_order','fetch_open_orders','fetch_my_trades'],
+            'fill': [],
+            'position': [],
+        }
         
         for x in ['fetch_tickers', 'fetch_ticker', 'fetch_order_book',
                   'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
                   'fetch_orders', 'fetch_order', 'fetch_open_orders',
-                  'create_order', 'edit_order', 'cancel_order']:
-            camel = map.get(x, to_camelcase(x))
-            ccxt_has = self.api.has[camel]
+                  'fetch_my_trades', 'create_order', 'edit_order',
+                  'cancel_order'] + list(emulation_methods):
+            methods = emulation_methods.get(x, [x])
+            camel = camel_map.get(x, to_camelcase(x))
+            camel_methods = [camel_map.get(m, to_camelcase(m)) for m in methods]
+            ccxt_has = any(self.api.has.get(cm) for cm in camel_methods) if x not in emulation_methods else None
             self_has = self.has_got(x)
-            any_has = ccxt_has or self_has
+            ws_has = self.has_got(x, 'ws') if x not in emulation_methods else self_has
+            if x in under_account:
+                self_has = self_has or self.has_got('account', x)
+                ws_has = ws_has or self_has or self.has_got('account', x, 'ws')
+            emulation_opt = None if x not in emulation_methods else any(self.has_got(m) for m in methods)
+            if x == 'balance':
+                emulation_opt = emulation_opt and self.has_got('fetch_balance',['free','used'])
+            any_has = self_has or ws_has or ccxt_has or emulation_opt
+            emulated = not any([self_has, ccxt_has, ws_has]) and emulation_opt
+            any_has, emulated = bool(any_has), bool(emulated)
             
-            if not isinstance(self.has[x], dict):
-                self.has[x] = {'_': any_has}
-            else:
-                self.has[x]['_'] = any_has
+            get = [x]
+            update = {x: {'_': any_has, 'ws': ws_has, 'emulated': emulated}}
+            ccxt_update = {x: {'ccxt': ccxt_has}}
+            if x in under_account:
+                update = {'account': update}
+                ccxt_update = {'account': ccxt_update}
+                get = ['account'] + get
             
-            if 'ccxt' not in self.has[x]:
-                self.has[x]['ccxt'] = ccxt_has
+            deep_update(self.has, update)
             
-            self.has[camel] = _copy.deepcopy(self.has[x])
+            if deep_get([self.has], get+['ccxt']) is None:
+                deep_update(self.has, ccxt_update)
+            
+            self.has[camel] = _copy.deepcopy(deep_get([self.has], get))
+            
+            if emulated and x in self.channels and self.channels[x].get('url') is None:
+                self.channels[x]['url'] = ''
         
-        for x in ['balance','order','fill','position']:
-            self.has[x] = self.has_got('account', x)
+        if self.has_got('account','balance','ws'):
+            self.has['account']['balance'].update(
+                {k: True for k in self.BALANCE_KEYWORDS if k not in self.has['account']['balance']})
+        
+        self.has.update({x: _copy.deepcopy(deep_get([self.has], ['account', x])) for x in under_account})
+        
+        self.has['account'].update({
+            '_': any(self.has_got(x) for x in under_account),
+            'ws': any(self.has_got(x,'ws') for x in under_account),
+            'ccxt': None,
+            'emulated': any(self.has_got(x,'emulated') for x in under_account)
+        })
+        
+        if not self.has['account']['ws'] and self.channels['account'].get('url') is None:
+            self.channels['account']['url'] = ''
         
         # OHLCV and timeframes
         deep_update(self.has, 
@@ -508,6 +581,18 @@ class ExchangeSocket(WSClient):
         
         # '__del__' identifies timeframes that are present at ccxt Exchange but not in websocket
         self.timeframes = {x: y for x,y in self.timeframes.items() if y!='__del__'}
+        
+        for x,kw in [('all_tickers','TICKER'),('ticker','TICKER'),('trades','TRADE'),('ohlcv','OHLCV'),
+                     ('balance','BALANCE')]:
+            if self.has_got(x, 'emulated'):
+                keywords = getattr(self, kw+'_KEYWORDS')
+                update = {k: v for k,v in self.has[emulation_methods[x][0]].items() if k in keywords}
+                self.has[x].update(update)
+                if x in under_account:
+                    self.has['account'][x].update(update)
+        
+        # reload the url_factories
+        self.reload_urls()
     
     
     def _init_exceptions(self):
@@ -569,6 +654,7 @@ class ExchangeSocket(WSClient):
         # (e.g. when a subscription is created the first time),
         # which would result in double fetch
         self.sn_load_markets()
+        asyncio.ensure_future(self.poll_loop())
     
     
     def notify_unknown(self, r, max_chars=500):
@@ -1406,6 +1492,87 @@ class ExchangeSocket(WSClient):
             self.orderbook_maintainer.is_synced[symbol] = False
     
     
+    async def poll_loop(self):
+        """Poll everything that can't be accessed via websocket"""
+        def get_emulated_subs():
+            return [s for s in self.subscriptions if self.has_got(s.channel,'emulated')]
+        methods = {
+            'all_tickers': 'fetch_tickers',
+            'ticker': 'fetch_ticker',
+            'orderbook': 'fetch_order_book',
+            'trades': 'fetch_trades',
+        }
+        pending = []
+        while self.is_running():
+            now = time.time()
+            coros = {}
+            
+            # disactivate subscriptions that have missed N fetch intervals
+            for s in get_emulated_subs():
+                if s.channel not in methods:
+                    continue
+                id = s.id_tuple + (methods.get(s.channel),)
+                mmi = deep_get([self.max_missed_intervals], methods.get(s.channel),
+                                return2=self.max_missed_intervals['default'])
+                interval = deep_get([self.intervals], methods.get(s.channel),
+                                     return2=self.intervals['default'])
+                if s.channel in methods and now - self._last_fetches[id] > mmi*interval:
+                    self.change_subscription_state(s, 0)
+            
+            if pending:
+                _, pending = await asyncio.wait(pending, timeout=0.1)
+                continue
+            
+            if self.is_subscribed_to(('account',)):
+                s = self.get_subscription(('account',))
+                if self.has_got('account','balance','emulated'):
+                    coros['balance'] = self.poll_fetch_and_activate(s, 'fetch_balance')
+                if self.has_got('account','order','emulated'):
+                    method = None
+                    if self.has_got('fetch_my_trades'):
+                        method = 'fetch_my_trades'
+                    elif self.has_got('fetch_open_orders'):
+                        method = 'fetch_open_orders'
+                    if not method: pass
+                    elif self.has_got(method,'symbolRequired'):
+                        symbols = list(unique(o['symbol'] for o in self.open_orders.values()))
+                        for symbol in symbols:
+                            coros['order'+':'+symbol] = self.poll_fetch_and_activate(s, method, (symbol,))
+                    else:
+                        coros['order'] = self.poll_fetch_and_activate(s, method)
+            
+            for s in get_emulated_subs():
+                if s.channel in methods:
+                    coros[s.id_tuple] = self.poll_fetch_and_activate(s, methods[s.channel])
+            
+            pending = [asyncio.ensure_future(c) for c in coros.values()]
+            if not pending:
+                await asyncio.sleep(0.1)
+    
+    
+    async def poll_fetch_and_activate(self, subscription, method, args=None):
+        s = subscription
+        if args is None:
+            args = s.id_tuple[1:]
+        id = args + (method,)
+        interval = deep_get([self.intervals], method, return2=self.intervals['default'])
+        if time.time() - self._last_fetches[id] < interval:
+            return
+        tlogger.debug('{} - polling {}{}'.format(self.name, method, args))
+        r = await getattr(self, method) (*args)
+        self._last_fetches[id] = time.time()
+        # In case user has unsubscribed
+        s = next((_s for _s in self.subscriptions if _s.id_tuple==s.id_tuple), None)
+        if s is None:
+            return
+        if s.channel != 'orderbook':
+            self.change_subscription_state(s, 1)
+        else:
+            self.ob_maintainer.send_orderbook(r)
+        #if method == 'fetch_open_orders':
+        #    if not self.has('fill')
+    
+    
     def get_markets_with_active_tickers(self, last=True, bidAsk=True):
         has_tAll = self.has_got('all_tickers')
         has_tAll_bidAsk = self.has_got('all_tickers','bid') and self.has_got('all_tickers','ask')
@@ -1511,7 +1678,7 @@ class ExchangeSocket(WSClient):
         if not self.has_got('ohlcv', 'timeframes', timeframe):
             raise ccxt.NotSupported("Timeframe '{}' is not supported." \
                                     " Choose one of the following: {}" \
-                                    .format(timeframe, list(self.api.timeframes)))
+                                    .format(timeframe, list(self.timeframes)))
         return self.sh.add_subscription(
             self.ip.extend({
                 '_': 'ohlcv',
@@ -1584,8 +1751,7 @@ class ExchangeSocket(WSClient):
                                   kwargs={'limit': limit, 'params': params})
         else:
             ob = await self.api.fetch_order_book(symbol, limit, params)
-        ob['nonce'] = ob.get('nonce')
-        return ob
+        return {'symbol': symbol, **ob, 'nonce': ob.get('nonce')}
     
     
     async def fetch_tickers(self, symbols=None, params={}):
@@ -1637,7 +1803,13 @@ class ExchangeSocket(WSClient):
     
     
     async def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
-        return await self.api.fetch_my_trades(symbol, since, limit, params)
+        trades =  await self.api.fetch_my_trades(symbol, since, limit, params)
+        for t in trades:
+            try:
+                self.add_fill_from_dict(t)
+            except Exception as e:
+                logger.exception(e)
+        return trades
     
     
     async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):

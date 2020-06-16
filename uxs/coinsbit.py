@@ -47,6 +47,9 @@ class coinsbit(ExchangeSocket):
                    'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
                    'price': True, 'amount': True, 'cost': False, 'fee': False},
         'account': {'balance': False, 'order': False, 'fill': False},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        'fetch_open_orders': {'symbolRequired': True},
+        'fetch_my_trades': {'symbolRequired': True},
         'fetch_ticker': {'ws': True},
     }
     has['fetch_ticker'].update(has['ticker'])
