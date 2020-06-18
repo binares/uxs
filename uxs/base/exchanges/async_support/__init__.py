@@ -23,6 +23,7 @@ from .dragonex import dragonex
 from .felixo import felixo
 from .gateiofu import gateiofu
 from .krakenfu import krakenfu
+from .nominex import nominex
 from .primexbt import primexbt
 from .slicex import slicex
 from .tokensnet import tokensnet
