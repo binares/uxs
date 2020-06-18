@@ -12,6 +12,7 @@ from .bitforexfu import bitforexfu
 from .bitget import bitget
 from .bitopro import bitopro
 from .bitpanda import bitpanda
+from .bitrue import bitrue
 from .bitzfu import bitzfu
 from .bkex import bkex
 from .coinbene import coinbene
