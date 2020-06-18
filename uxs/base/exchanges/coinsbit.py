@@ -79,6 +79,7 @@ class coinsbit(Exchange):
                 'fetchTrades': True,
             },
             'rateLimit': 1000,
+            'timeout': 20000, # 10000 is not enough for fetchTickers
             'fees': {
                 'trading': {
                     'maker': 0.002,

@@ -51,6 +51,11 @@ class coinsbit(ExchangeSocket):
         'fetch_open_orders': {'symbolRequired': True},
         'fetch_my_trades': {'symbolRequired': True},
         'fetch_ticker': {'ws': True},
+        'fetch_tickers': {
+                'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+                'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
+                'change': False, 'percentage': True, 'average': True, 'vwap': False,
+                'baseVolume': True, 'quoteVolume': True, 'active': False},  
     }
     has['fetch_ticker'].update(has['ticker'])
     channel_ids = {
@@ -67,6 +72,7 @@ class coinsbit(ExchangeSocket):
         'error': {'key': 'error'},
     }
     ob = {
+        'force_create': None,
         'uses_nonce': False,
         'receives_snapshot': True,
         'default_limit': 10,
