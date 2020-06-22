@@ -29,6 +29,7 @@ from .mxc import mxc
 from .nominex import nominex
 from .primexbt import primexbt
 from .slicex import slicex
+from .tokenomy import tokenomy
 from .tokensnet import tokensnet
 from .tradeogre import tradeogre
 from .txbit import txbit
