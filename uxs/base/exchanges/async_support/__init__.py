@@ -15,6 +15,7 @@ from .bitpanda import bitpanda
 from .bitrue import bitrue
 from .bitzfu import bitzfu
 from .bkex import bkex
+from .ceo import ceo
 from .coinbene import coinbene
 from .coindcx import coindcx
 from .coinsbit import coinsbit
