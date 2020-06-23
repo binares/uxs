@@ -23,6 +23,7 @@ from .coinsbit import coinsbit
 from .cryptocom import cryptocom
 from .delta import delta
 from .dragonex import dragonex
+from .equos import equos
 from .felixo import felixo
 from .gateiofu import gateiofu
 from .krakenfu import krakenfu
