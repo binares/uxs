@@ -10,6 +10,7 @@ from .bitbns import bitbns
 from .bitcoincom import bitcoincom
 from .bitforexfu import bitforexfu
 from .bitget import bitget
+from .bitkub import bitkub
 from .bitopro import bitopro
 from .bitpanda import bitpanda
 from .bitrue import bitrue
