@@ -20,6 +20,7 @@ from .ceo import ceo
 from .coinbene import coinbene
 from .coindcx import coindcx
 from .coinsbit import coinsbit
+from .coinsuper import coinsuper
 from .cryptocom import cryptocom
 from .delta import delta
 from .dragonex import dragonex

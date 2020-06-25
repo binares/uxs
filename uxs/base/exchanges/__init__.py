@@ -2,6 +2,7 @@
 Exchanges that are not present in ccxt
 """
 import ccxt
+import warnings
 
 from ._58coin import _58coin
 from .bcio import bcio
@@ -20,6 +21,7 @@ from .ceo import ceo
 from .coinbene import coinbene
 from .coindcx import coindcx
 from .coinsbit import coinsbit
+from .coinsuper import coinsuper
 from .cryptocom import cryptocom
 from .delta import delta
 from .dragonex import dragonex
@@ -40,4 +42,6 @@ from .yunex import yunex
 # Add the custom-defined exchanges to ccxt
 for attr,value in list(globals().items()):
     if isinstance(value, type) and issubclass(value, ccxt.Exchange):
+        if hasattr(ccxt, attr):
+            warnings.warn("Overwriting already existing ccxt exchange '{}'".format(attr))
         setattr(ccxt, attr, value)
