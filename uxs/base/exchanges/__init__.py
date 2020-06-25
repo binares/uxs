@@ -8,6 +8,7 @@ from ._58coin import _58coin
 from .bcio import bcio
 from .biki import biki
 from .bitbns import bitbns
+from .bitclude import bitclude
 from .bitcoincom import bitcoincom
 from .bitforexfu import bitforexfu
 from .bitget import bitget

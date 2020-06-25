@@ -14,6 +14,7 @@ import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 EXTRA_TOKEN_KEYWORDS = {
+    'bitclave': ['uid'],
     'kucoin': ['password'],
 }
 DELETE_DAMAGED_DESTINATION_FILE = True
