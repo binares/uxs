@@ -6,6 +6,7 @@ import warnings
 
 from ._58coin import _58coin
 from .bcio import bcio
+from .beaxy import beaxy
 from .biki import biki
 from .bitbns import bitbns
 from .bitclude import bitclude
