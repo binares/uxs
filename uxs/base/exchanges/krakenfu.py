@@ -143,7 +143,7 @@ class krakenfu(Exchange):
         #   "instruments":[
         #     {
         #       "symbol":"fi_ethusd_180928",
-        #       "type":"futures_inverse",
+        #       "type":"futures_inverse",                      # futures_vanilla  # spot index
         #       "underlying":"rr_ethusd",
         #       "lastTradingTime":"2018-09-28T15:00:00.000Z",
         #       "tickSize":0.1,
@@ -183,21 +183,16 @@ class krakenfu(Exchange):
             active = True
             id = market['symbol']
             type = None
-            swap = False
-            future = False
-            prediction = False
-            perpetual = None
-            if market['type'].find('_inverse') >= 0:
-                swap = True
-                type = 'swap'
-            elif market['type'].find(' index') >= 0:
-                prediction = True
-                type = 'prediction'
+            prediction = (market['type'].find(' index') >= 0)
+            linear = None
+            if not prediction:
+                linear = (market['type'].find('_vanilla') >= 0)
+                settleTime = self.safe_string(market, 'lastTradingTime')
+                type = 'swap' if (settleTime is None) else 'future'
             else:
-                future = True
-                type = 'future'
-            if type != 'prediction':
-                perpetual = (self.safe_string(market, 'lastTradingTime') is None)
+                type = 'prediction'
+            swap = (type == 'swap')
+            future = (type == 'future')
             symbol = id
             split = id.split('_')
             parsed = self.parse_symbol_id_joined(split[1])
@@ -205,7 +200,8 @@ class krakenfu(Exchange):
             quoteId = parsed['quoteId']
             base = parsed['base']
             quote = parsed['quote']
-            if perpetual:
+            # swap == perpetual
+            if swap:
                 symbol = base + '/' + quote
             precision = {
                 'amount': None,
@@ -246,7 +242,7 @@ class krakenfu(Exchange):
                 'swap': swap,
                 'future': future,
                 'prediction': prediction,
-                'perpetual': perpetual,
+                'linear': linear,
                 'lotSize': lotSize,
                 'info': market,
             })
@@ -340,10 +336,10 @@ class krakenfu(Exchange):
         baseVolume = None
         quoteVolume = None
         if (market is not None) and (not market['prediction']):
-            if market['swap']:
-                quoteVolume = volume
+            if market['linear']:
+                baseVolume = volume  # pv_xrpxbt volume given in XRP
             else:
-                baseVolume = volume
+                quoteVolume = volume  # pi_xbtusd volume given in USD
         return {
             'symbol': symbol,
             'timestamp': timestamp,
@@ -458,8 +454,8 @@ class krakenfu(Exchange):
             symbol = market['symbol']
         cost = None
         if (amount is not None) and (market is not None):
-            if market['swap']:
-                cost = amount
+            if not market['linear']:
+                cost = amount  # assuming cost is in quote currency
             elif price is not None:
                 cost = price * amount
         fee = None
@@ -943,8 +939,8 @@ class krakenfu(Exchange):
             amount = filled + remaining
         cost = None
         if (filled is not None) and (market is not None):
-            if market['swap']:
-                cost = filled
+            if not market['linear']:
+                cost = filled  # assuming cost is in quote currency
             elif average is not None:
                 cost = average * filled
             elif price is not None:
