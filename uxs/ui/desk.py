@@ -136,7 +136,12 @@ class Desk:
             if isinstance(direction, tuple):
                 direction, price = direction
             
-            await self.wait_till_active()
+            try:
+                await asyncio.wait_for(self.wait_till_active(), 10)
+            except asyncio.TimeoutError:
+                logger2.error('Subscription(s) not active. Canceling buy/sell action.')
+                continue
+            
             r = None
             try:
                 r = await self.trader.place_order(direction, self.safe, price)
@@ -226,8 +231,9 @@ class Desk:
                 self._symbols[index_exchange].append(index_symbol)
             self.indexes[symbol] = [index_exchange, index_symbol]
         for exchange, xs in self.streamers.items():
+            # use orderbooks as they usually send more regular updates (latency is essential for arbitraging)
             self.has_tickers_all[exchange] = \
-                xs.has_got('all_tickers', ['bid','ask']) and not xs.has_got('all_tickers', 'emulated')
+                False #xs.has_got('all_tickers', ['bid','ask']) and not xs.has_got('all_tickers', 'emulated')
             self.has_ob_merge[exchange] = xs.has_merge_option('orderbook')
         for xs in self.streamers.values():
             xs.ob['sends_bidAsk'] = True
@@ -242,10 +248,10 @@ class Desk:
         if self.has_tickers_all[exchange]:
             xs.subscribe_to_all_tickers()
         elif self.has_ob_merge[exchange]:
-            xs.subscribe_to_orderbook(symbols)
+            xs.subscribe_to_orderbook(symbols, {'limit': 5})
         else:
             for symbol in symbols:
-                xs.subscribe_to_orderbook(symbol)
+                xs.subscribe_to_orderbook(symbol, {'limit': 5})
         if to_account:
             params = {} if 'symbol' not in xs.get_value('account', 'required')\
                       else {'symbol': symbols}
@@ -269,10 +275,13 @@ class Desk:
             if (x=='long' and p_xc <= p_trigger) or (x=='short' and p_xc >= p_trigger):
                 self.gui.switch_arb(x, False)
                 logger2.info('{} ARBITRAGE DETECTED'.format(x.upper()))
+                side = 'buy' if x=='long' else 'sell'
                 direction = 1 if x=='long' else 0
                 up_down = 'up' if x=='long' else 'down'
                 xs = self.streamers[self.exchange]
-                order_price = xs.api.round_price(self.cur_symbol, p_trigger, method=up_down)
+                rounded_price = xs.api.round_price(self.cur_symbol, p_trigger, method=up_down)
+                # Some exchanges don't allow ~>5 % deviation from current order book
+                order_price = self.trader.calc_price(self.cur_symbol, side, 0.05, orig_price=rounded_price)
                 self.relay((direction, order_price))
     
     
@@ -439,8 +448,7 @@ class Gui:
                     obj.pack(**info)
         
         self.orig_button_color = self.objects['ok'].cget("background")
-        self._display_range()
-        self._display_arb_diffs()
+        self.reset()
         self.config('select_symbol', fg='red')
         
         for exchange, xs in self.desk.streamers.items():
@@ -735,7 +743,7 @@ class Gui:
         self.desk.relay('')
     
     
-    def update_prices(self, d, force=True):
+    def update_prices(self, d, force=False, ignore_since_last=True):
         targets = [[self.desk.exchange, self.desk.cur_symbol, 'prices']]
         index_exchange, index_symbol = self.desk.indexes.get(self.desk.cur_symbol, [None, None])
         if index_symbol:
@@ -744,21 +752,23 @@ class Gui:
         for exchange, symbol, name in targets:
             xs = self.desk.streamers[exchange]
             is_ob = not self.desk.has_tickers_all[exchange]
-            if is_ob and not force and not any(x['symbol']==symbol for x in d):
+            symbol_matches = any(x['symbol']==symbol for x in d) if isinstance(d, list) else d['symbol']==symbol
+            if not force and not symbol_matches:
                 continue
             which = xs.orderbooks if is_ob else xs.tickers
-            if symbol not in which:
+            if symbol not in which or (is_ob and not force and not xs.is_subscribed_to(('orderbook',symbol), True)):
                 self.config(name, text='---')
                 continue
             if is_ob:
                 ob = xs.orderbooks[symbol]
-                bid, ask = ob['bids'][0][0], ob['asks'][0][0]
+                bid, ask = get_bidask(ob)
             else:
                 t = xs.tickers[symbol]
                 bid, ask = t['bid'], t['ask']
-            text = '{} | {}'.format(round_sd(bid, 6), round_sd(ask, 6))
+            text = '{} | {}'.format(round_sd(bid, 6) if bid else '-',
+                                    round_sd(ask, 6) if ask else '-')
             
-            if time.time() - self.prices_updated_ts[(exchange, symbol)] > 10 or force:
+            if time.time() - self.prices_updated_ts[(exchange, symbol)] > 10 or ignore_since_last:
                 self.config(name, text=text)
                 self.prices_updated_ts[(exchange, symbol)] = time.time()
     
@@ -936,7 +946,7 @@ class Trader:
         return amount
     
     
-    def calc_price(self, symbol, side, deviation, round_price=None):
+    def calc_price(self, symbol, side, deviation, round_price=None, orig_price=None):
         if self.desk.has_tickers_all[self.xs.exchange]:
             tSide = ['bid','ask'][side=='buy']
             bidAsk = self.xs.tickers[symbol][tSide]
@@ -945,6 +955,8 @@ class Trader:
             bidAsk = self.xs.orderbooks[symbol][obSide][0][0]
         sign = (-1)**(side=='sell')
         price = bidAsk * (1 + sign*deviation)
+        if orig_price is not None:
+            price = [max, min][side=='buy'](price, orig_price)
         if round_price is not None:
             method = ['up','down'][side=='buy']
             price2 = round_sd(price, round_price, method, accuracy=2)

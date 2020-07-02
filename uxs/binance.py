@@ -82,7 +82,8 @@ class binance(ExchangeSocket):
     }
     ob = {
         #'limits': [5, 10, 20], #not supported yet
-        'fetch_limit': 1000, # 5, 10, 20, 50, 100, 500, 1000, 5000
+        'fetch_limit': 1000,
+        'fetch_limits': [5, 10, 20, 50, 100, 500, 1000, 5000],
     }
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',

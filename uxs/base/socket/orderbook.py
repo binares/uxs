@@ -99,7 +99,7 @@ class OrderbookMaintainer:
         try:
             fetch_limit = self.xs.ob['fetch_limit']
             s = self.xs.get_subscription(('orderbook',symbol))
-            limit = s.params.get('limit')
+            limit = self.resolve_limit(s.params.get('limit'))
             # use "null" to purposefully leave `fetch_limit` to None
             # and prevent `limit` overriding it
             if fetch_limit == 'null':

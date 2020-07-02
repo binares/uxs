@@ -74,6 +74,9 @@ class kucoin(ExchangeSocket):
     }
     message = {'id': {'key': 'id'}}
     match_is_subset_of_trades = True
+    ob = {
+        'fetch_limits': [20, 100],
+    }
     order = {
         'update_filled_on_fill': True,
         'update_payout_on_fill': True,
