@@ -57,6 +57,7 @@ python -m uxs.test_xc coinsbit ticker=BTC/USDT,ETH/BTC d
 python -m uxs.test_xc coinsbit ob=BTC/USDT d
 python -m uxs.test_xc coinsbit ohlcv=BTC/USDT d
 python -m uxs.test_xc coinsbit trades=BTC/USDT d
+python -m uxs.test_xc coinsbit order
 
 python -m pytest
 python -m pytest test/test_auth.py -vv -ss
@@ -73,7 +74,8 @@ python -m examples.f_caching
 python -m examples.g_storing_tokens
 
 python -m uxs.ui.desk bitmex BTC/USD ETH/USD "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range
-python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 -- kucoin BTC/USDT ---- test
+python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{krakenfu,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 -- kucoin BTC/USDT ---- test
 python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range -- kucoin BTC/USDT ---- test
+python -m uxs.ui.desk krakenfu XRP/USD{binancefu,XRP/USDT} "amounts=XRP/USD=2000"
 
 python -m uxs.ui.stoploss bitmex BTC/USD ETH/USD

@@ -12,12 +12,14 @@ from ccxt import TICK_SIZE
 from fons.aio import call_via_loop_afut
 from fons.argv import parse_argv
 from fons.debug import safeAsyncTry
+from fons.dict_ops import deep_get
 from fons.iter import unique
 from fons.log import get_standard_5, quick_logging
 from fons.math.round import round_sd
 from fons.threads import EliThread
 import uxs
 from uxs.fintls.basics import calc_price
+from uxs.fintls.ob import get_bidask
 
 logger,logger2,tlogger,tloggers,tlogger0 = get_standard_5(__name__)
 
@@ -68,6 +70,8 @@ class Desk:
         self.base = None
         self.quote = None
         self.settle = None
+        self.arb_enabled = {'long': False, 'short': False}
+        self.arb_diffs = defaultdict(lambda: dict.fromkeys(['long','short'], (None, False)))
         self.amount_ranges = defaultdict(lambda: dict.fromkeys(['min','max'], (None, None)))
         self.order_deviation = '0.2%'
         # In minutes
@@ -128,10 +132,14 @@ class Desk:
                 continue
             
             print('{} - received: {}'.format(self.name, direction))
+            price = None
+            if isinstance(direction, tuple):
+                direction, price = direction
+            
             await self.wait_till_active()
             r = None
             try:
-                r = await self.trader.place_order(direction, self.safe)
+                r = await self.trader.place_order(direction, self.safe, price)
             except Exception as e:
                 logger2.exception(e)
             
@@ -218,7 +226,8 @@ class Desk:
                 self._symbols[index_exchange].append(index_symbol)
             self.indexes[symbol] = [index_exchange, index_symbol]
         for exchange, xs in self.streamers.items():
-            self.has_tickers_all[exchange] = xs.has_got('all_tickers', ['bid','ask'])
+            self.has_tickers_all[exchange] = \
+                xs.has_got('all_tickers', ['bid','ask']) and not xs.has_got('all_tickers', 'emulated')
             self.has_ob_merge[exchange] = xs.has_merge_option('orderbook')
         for xs in self.streamers.values():
             xs.ob['sends_bidAsk'] = True
@@ -241,6 +250,85 @@ class Desk:
             params = {} if 'symbol' not in xs.get_value('account', 'required')\
                       else {'symbol': symbols}
             xs.subscribe_to_account(params)
+    
+    
+    def check_for_arbitrage(self, changes=None):
+        index_exchange, index_symbol = self.indexes.get(self.cur_symbol, [None, None])
+        if not index_symbol or not any(self.arb_enabled.values()):
+            return
+        
+        mid_prices = self.get_mid_prices()
+        if not all(mid_prices.values()):
+            return
+        
+        for x in ('long', 'short'):
+            p_trigger = self.calc_arb_trigger_price(mid_prices, x)
+            p_xc = mid_prices[(self.exchange, self.cur_symbol)]
+            if p_trigger is None:
+                continue
+            if (x=='long' and p_xc <= p_trigger) or (x=='short' and p_xc >= p_trigger):
+                self.gui.switch_arb(x, False)
+                logger2.info('{} ARBITRAGE DETECTED'.format(x.upper()))
+                direction = 1 if x=='long' else 0
+                up_down = 'up' if x=='long' else 'down'
+                xs = self.streamers[self.exchange]
+                order_price = xs.api.round_price(self.cur_symbol, p_trigger, method=up_down)
+                self.relay((direction, order_price))
+    
+    
+    def calc_arb_trigger_price(self, mid_prices, longshort='long', value=None):
+        index_exchange, index_symbol = self.indexes.get(self.cur_symbol, [None, None])
+        diff, is_percentage = self.arb_diffs[self.cur_symbol][longshort]
+        if value is not None:
+            diff, is_percentage = value
+        if diff is None or is_percentage and diff <= -100:
+            return None
+        
+        p_ixc = mid_prices.get((index_exchange, index_symbol))
+        if p_ixc is None:
+            return None
+        
+        if is_percentage:
+            p_trigger = p_ixc / (1 + diff/100)
+        else:
+            p_trigger = p_ixc - diff
+        
+        xs = self.streamers[self.exchange]
+        min_price = deep_get([xs.markets], [self.cur_symbol, 'limits', 'price', 'min'])
+        price_pcn = deep_get([xs.markets], [self.cur_symbol, 'precision', 'price'])
+        if min_price is None and price_pcn is not None:
+            min_price = pow(10, -price_pcn) if xs.api.precisionMode!=TICK_SIZE else price_pcn
+        
+        if longshort=='short' and min_price and p_trigger < min_price:
+            p_trigger = min_price
+        elif p_trigger <= 0:
+            p_trigger = None
+        
+        return p_trigger
+    
+    
+    def get_mid_prices(self):
+        targets = [(self.exchange, self.cur_symbol)]
+        index_exchange, index_symbol = self.indexes.get(self.cur_symbol, [None, None])
+        if index_symbol:
+            targets += [(index_exchange, index_symbol)]
+        mid_prices = dict.fromkeys(targets, None)
+        
+        for exchange, symbol in targets:
+            xs = self.streamers[exchange]
+            is_ob = not self.has_tickers_all[exchange]
+            which = xs.orderbooks if is_ob else xs.tickers
+            if symbol not in which:
+                continue
+            if is_ob:
+                ob = xs.orderbooks[symbol]
+                bid, ask = get_bidask(ob)
+            else:
+                t = xs.tickers[symbol]
+                bid, ask = t['bid'], t['ask']
+            mid_prices[(exchange, symbol)] = (bid + ask) / 2 if bid and ask else (ask if ask else bid)
+            
+        return mid_prices
 
 
 class Gui:
@@ -276,32 +364,37 @@ class Gui:
         self.set_currencies()
         self._cur_symbol = tk.StringVar()
         self._cur_symbol.set(self.desk.cur_symbol)
+        self._long_arb_diff = tk.StringVar(value='')
+        self._short_arb_diff = tk.StringVar(value='')
         self._amount_min = tk.StringVar(value='')
         self._amount_max = tk.StringVar(value='')
         self._automate_value = tk.StringVar(value='5')
         self._order_deviation = tk.StringVar(value=self.desk.order_deviation)
+        self._last_arb_diff_inp_values = defaultdict(lambda: dict.fromkeys(['long','short'], ''))
+        arb_trader_frame = tk.Frame(root)
         create_order_frame =  tk.Frame(root)
         amount_frame = tk.Frame(root)
         automate_frame = tk.Frame(root)
-        sides = {
-            'long': {'side': tk.LEFT, 'anchor': tk.W},
-            'short': {'side': tk.LEFT, 'anchor': tk.W},
-            'automate': {'side': tk.LEFT, 'anchor': tk.W},
-            'automate_value': {'side': tk.LEFT, 'anchor': tk.W},
-            'amount_min': {'side': tk.LEFT, 'anchor': tk.W},
-            'amount_max': {'side': tk.LEFT, 'anchor': tk.W},
-        }
+        left_to_right = ['long','short','enable_long_arb','long_arb_diff',
+                         'enable_short_arb','short_arb_diff',
+                         'automate','automate_value','amount_min','amount_max',]
+        sides = {x: {'side': tk.LEFT, 'anchor': tk.W} for x in left_to_right}
         index_text = self.get_index_text()
         self.objects = OrderedDict([
             ['index_label', tk.Label(root, text=index_text)], 
             ['exchange_label', tk.Label(root, text=self.desk.exchange.upper(), fg='red')], 
             ['select_symbol', tk.OptionMenu(root, self._cur_symbol, *self.desk.symbols)],
-            ['ok', tk.Button(root, text='OK', command=self.ok)],
+            ['ok', tk.Button(root, text='OK/R', command=self.ok)],
             ['index_prices', tk.Label(root, text='---' if index_text else '', fg='red')],
             ['prices', tk.Label(root, text='---', fg='blue')],
-            ['create_order_frame', create_order_frame],
             ['long', tk.Button(create_order_frame, text='LONG', command=self.desk.buy, fg='green')],
             ['short', tk.Button(create_order_frame, text='SHORT', command=self.desk.sell, fg='red')],
+            ['create_order_frame', create_order_frame],
+            ['enable_long_arb', tk.Button(arb_trader_frame, text='L', command=lambda: self.switch_arb('long'))],
+            ['long_arb_diff', tk.Entry(arb_trader_frame, textvariable=self._long_arb_diff, width=7)],
+            ['enable_short_arb', tk.Button(arb_trader_frame, text='S', command=lambda: self.switch_arb('short'))],
+            ['short_arb_diff', tk.Entry(arb_trader_frame, textvariable=self._short_arb_diff, width=7)],
+            ['arb_trader_frame', arb_trader_frame],
             ['balances', tk.Label(root, text='---')],
             ['automate_frame', automate_frame],
             ['automate', tk.Button(automate_frame, text='AUTO: off', command=self.desk.automate)],
@@ -327,6 +420,7 @@ class Gui:
             'prices': (1, 1),
             'create_order_frame': (2, 1),
             'balances': (3, 1),
+            'arb_trader_frame': (0, 2),
             'order_deviation': (1, 2),
             'automate_frame': (2, 2),
             'amount_frame': (3, 2),
@@ -344,7 +438,9 @@ class Gui:
                     info = sides.get(name, {})
                     obj.pack(**info)
         
+        self.orig_button_color = self.objects['ok'].cget("background")
         self._display_range()
+        self._display_arb_diffs()
         self.config('select_symbol', fg='red')
         
         for exchange, xs in self.desk.streamers.items():
@@ -389,9 +485,13 @@ class Gui:
             self.config('index_prices', text='---' if index_text else '')
             self.update_prices([{'symbol': self.desk.cur_symbol}], True)
             self.update_balances({})
+            self.switch_arb('long', False)
+            self.switch_arb('short', False)
             self._display_range()
+            self._display_arb_diffs()
         else:
             self._check_range_changes()
+            self._check_arb_diff_changes()
             self._check_automate_value_changes()
         
         self._check_subscriptions()
@@ -415,12 +515,43 @@ class Gui:
             box.config(bg='white')
     
     
+    def _display_arb_diffs(self):
+        for x in ('long','short'):
+            value, is_percentage = self.desk.arb_diffs[self.desk.cur_symbol][x]
+            if value is None:
+                value = ''
+            str_value = str(value)
+            if is_percentage:
+                str_value += ' %'
+            name = '{}_arb_diff'.format(x)
+            var = getattr(self,'_'+name)
+            var.set(str_value)
+            box = self.objects[name]
+            box.config(state='normal')
+            box.config(bg='white')
+            button = self.objects['enable_{}_arb'.format(x)]
+            button.config(state='active')
+            if not self.desk.indexes.get(self.desk.cur_symbol, [None, None])[1]:
+                box.config(state='readonly')
+                button.config(state='disabled')
+    
+    
+    def reset(self):
+        self._display_range()
+        self._display_arb_diffs()
+    
+    
     def enter(self):
         ok, values = self._check_range_changes(True)
         if ok:
-            self.desk.amount_ranges[self.desk.cur_symbol]['min'] = values['min']
-            self.desk.amount_ranges[self.desk.cur_symbol]['max'] = values['max']
+            self.desk.amount_ranges[self.desk.cur_symbol].update(values)
             self._display_range()
+        
+        ok, values = self._check_arb_diff_changes(True)
+        if ok:
+            self.desk.arb_diffs[self.desk.cur_symbol].update(values)
+            self._display_arb_diffs()
+        
         ok, values = self._check_automate_value_changes(True)
         if ok:
             if self.desk.automate_value != values:
@@ -466,6 +597,55 @@ class Gui:
                 if not enter_pressed and self.desk.amount_ranges[self.desk.cur_symbol][x] != values[x]:
                     # value is correct but unsaved
                     color = 'green'
+                box.config(bg=color)
+        
+        return success, values
+    
+    
+    def _check_arb_diff_changes(self, enter_pressed=False):
+        _id = (self.desk.exchange, self.desk.cur_symbol)
+        mid_prices = self.desk.get_mid_prices()
+        p_xc = mid_prices[_id]
+        success = True
+        values = {}
+        
+        for x in ('long','short'):
+            name = '{}_arb_diff'.format(x)
+            var = getattr(self, '_'+name)
+            str_val = pretty_str_val = var.get().strip()
+            box = self.objects[name]
+            is_percentage = str_val.endswith('%')
+            try:
+                value = None
+                if str_val or self.desk.arb_enabled[x]:
+                    if is_percentage:
+                        str_val = str_val[:-1].strip()
+                    value = float(str_val)
+                    pretty_str_val = str(value) + ' %' if is_percentage else ''
+                is_new = (pretty_str_val != self._last_arb_diff_inp_values[_id][x])
+                if value is not None and all(mid_prices.values()) and is_new and p_xc:
+                    p_trigger = self.desk.calc_arb_trigger_price(mid_prices, x, (value, is_percentage))
+                    if p_trigger is None:
+                        raise AssertionError
+                    percent_diff = (p_trigger - p_xc) / p_trigger
+                    if abs(percent_diff) > 0.3:
+                        #logger2.error('{} ARBITRAGE DIFF LARGER THAN 30%, CHECK THE PARAMS.')
+                        raise AssertionError
+            except (ValueError, AssertionError):
+                box.config(bg='red')
+                success = False
+            except AssertionError:
+                box.config(bg='re')
+                success = False
+            else:
+                values[x] = (value, is_percentage)
+                color = 'white'
+                if not enter_pressed:
+                    if self.desk.arb_diffs[self.desk.cur_symbol][x] != values[x]:
+                        # value is correct but unsaved
+                        color = 'green'
+                else:
+                    self._last_arb_diff_inp_values[_id][x] = pretty_str_val
                 box.config(bg=color)
         
         return success, values
@@ -535,8 +715,17 @@ class Gui:
         self.xs.loop.call_soon_threadsafe(e.set)
         time.sleep(0.1)
         self.xs.loop.call_soon_threadsafe(e.clear)
+        self.reset()
     
-        
+    
+    def switch_arb(self, longshort='long', state=None):
+        if state is None:
+            state = not self.desk.arb_enabled[longshort]
+        self.desk.arb_enabled[longshort] = state
+        color = 'green' if state else self.orig_button_color
+        self.config('enable_{}_arb'.format(longshort), bg=color)
+    
+    
     def automate(self):
         if not self.desk.auto_on:
             self.config('automate', text='AUTO: on', bg='green')
@@ -567,7 +756,7 @@ class Gui:
             else:
                 t = xs.tickers[symbol]
                 bid, ask = t['bid'], t['ask']
-            text = '{} | {}'.format(round(bid, 2), round(ask, 2))
+            text = '{} | {}'.format(round_sd(bid, 6), round_sd(ask, 6))
             
             if time.time() - self.prices_updated_ts[(exchange, symbol)] > 10 or force:
                 self.config(name, text=text)
@@ -580,8 +769,9 @@ class Gui:
         cys = [self.desk.quote]
         cys += [self.desk.base] if not self.desk.settle else [self.desk.settle]
         for cy in cys:
-            if cy in self.xs.balances:
-                bals.append(round(self.xs.balances[cy]['free'], _round.get(cy, 2)))
+            bal = self.xs.balances.get(cy, {}).get('free')
+            if bal is not None:
+                bals.append(round(bal, _round.get(cy, 2)))
             else:
                 bals.append('--')
         text = '{} {} | {} {}'.format(cys[0], *bals, cys[1])
@@ -592,9 +782,11 @@ class Gui:
         xs = self.desk.streamers[exchange]
         if self.desk.has_tickers_all[exchange]:
             xs.add_callback(self.update_prices, 'ticker', -1)
+            xs.add_callback(self.desk.check_for_arbitrage, 'ticker', -1)
         else:
             for symbol in self.desk._symbols[exchange]:
                 xs.add_callback(self.update_prices, 'orderbook', symbol)
+                xs.add_callback(self.desk.check_for_arbitrage, 'orderbook', symbol)
         if exchange == self.desk.exchange:
             xs.add_callback(self.update_balances, 'balance', -1)
     
@@ -765,7 +957,7 @@ class Trader:
         return price
     
     
-    async def place_order(self, rInt=None, safe=False):
+    async def place_order(self, rInt=None, safe=False, price=None):
         symbol = self.desk.cur_symbol
         # random order
         if rInt is None:
@@ -775,7 +967,8 @@ class Trader:
         type = 'market' if deviation=='market' else 'limit'
         deviation = float(deviation[:-1])/100 if deviation!='market' else 0
         round_price = self.desk.round_price
-        price = self.calc_price(symbol, side, deviation, round_price)
+        if price is None:
+            price = self.calc_price(symbol, side, deviation, round_price)
         limits = self.adjust_user_limits(symbol, self.desk.amount_ranges[symbol])
         if not self.desk.include['amount_range']:
             limits['min'] = limits['max']
