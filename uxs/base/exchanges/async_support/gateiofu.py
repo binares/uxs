@@ -165,43 +165,34 @@ class gateiofu(Exchange):
             },
             'precisionMode': TICK_SIZE,
             'options': {
-                'settleCurrencyIds': [
+                'settleIds': [
                     'btc',
                     'usdt',
                 ],
-                #'limits': {
-                #   'cost': {
-                #        'min': {
-                #           'BTC': 0.0001,
-                #            'ETH': 0.001,
-                #            'USDT': 1,
-                #        },
-                #    },
-                #},
             },
         })
 
     async def fetch_markets(self, params={}):
-        settleCurrencyIds = self.options['settleCurrencyIds']
-        settleCurrencyIdsByMarketId = {}
+        settleIds = self.options['settleIds']
+        settleIdsByMarketId = {}
         markets = []
-        for i in range(0, len(settleCurrencyIds)):
-            settleCurrencyId = settleCurrencyIds[i]
+        for i in range(0, len(settleIds)):
+            settleId = settleIds[i]
             query = self.omit(params, 'type')
-            query['settle'] = settleCurrencyId
+            query['settle'] = settleId
             response = await self.publicGetContracts(query)
             if not  (isinstance(response, list)):
                 raise ExchangeError(self.id + ' fetchMarkets got an unrecognized response')
             for j in range(0, len(response)):
                 market = response[j]
-                settleCurrencyIdsByMarketId[market['name']] = settleCurrencyId
+                settleIdsByMarketId[market['name']] = settleId
             markets = self.array_concat(markets, response)
         result = []
         for i in range(0, len(markets)):
             market = markets[i]
             id = market['name']
-            settleCurrencyId = settleCurrencyIdsByMarketId[id]
-            settleCurrency = self.safeCurrencyCode(settleCurrencyId.upper())
+            settleId = settleIdsByMarketId[id]
+            settle = self.safe_currency_code(settleId.upper())
             # all of their symbols are separated with an underscore
             # but not boe_eth_eth(BOE_ETH/ETH) which has two underscores
             # https://github.com/ccxt/ccxt/issues/4894
@@ -215,29 +206,32 @@ class gateiofu(Exchange):
             base = self.safe_currency_code(baseId)
             quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
-            type = 'swap' if (market['type'] == 'inverse') else 'future'
-            spot = False
-            swap = (type == 'swap')
-            future = (type == 'future')
-            maker = self.safeFloat(market, 'maker_fee_rate')
-            taker = self.safeFloat(market, 'taker_fee_rate')
+            marketType = self.safe_string(market, 'type')
+            inverse = (marketType == 'inverse')
+            linear = (marketType == 'direct')
+            quanto = (settle != base and settle != quote)
+            # The following is yet open to interpretation
+            # for USDT markets `quanto_multiplier` self is the contract value in base currency
+            # for USD quanto markets its the contract value in BTC, but since they are also ==1USD, is the latter more intuitive
+            # for BTC/USD market it is '0'(but contract = 1USD)
+            lotSize = self.safe_float(market, 'quanto_multiplier') if (quote == 'USDT') else 1
+            maker = self.safe_float(market, 'maker_fee_rate')
+            taker = self.safe_float(market, 'taker_fee_rate')
             precision = {
-                'amount': market['order_size_min'],
-                'price': self.safeFloat(market, 'order_price_round'),
+                'amount': self.safe_float(market, 'order_size_min'),
+                'price': self.safe_float(market, 'order_price_round'),
             }
             amountLimits = {
-                'min': market['order_size_min'],
-                'max': market['order_size_max'],
+                'min': self.safe_float(market, 'order_size_min'),
+                'max': self.safe_float(market, 'order_size_max'),
             }
             priceLimits = {
                 'min': precision['price'],
                 'max': None,
             }
-            defaultCost = amountLimits['min'] * priceLimits['min']
-            minCost = defaultCost
-            #minCost = self.safe_float(self.options['limits']['cost']['min'], quote, defaultCost)
+            # cost be currently None for until derivatives are unified
             costLimits = {
-                'min': minCost,
+                'min': None,
                 'max': None,
             }
             limits = {
@@ -258,12 +252,16 @@ class gateiofu(Exchange):
                 'taker': taker,
                 'precision': precision,
                 'limits': limits,
-                'type': type,
-                'spot': spot,
-                'future': future,
-                'swap': swap,
-                'settleCurrency': settleCurrency,
-                'settleCurrencyId': settleCurrencyId,
+                'lotSize': lotSize,
+                'type': 'swap',
+                'spot': False,
+                'future': False,
+                'swap': True,
+                'linear': linear,
+                'inverse': inverse,
+                'quanto': quanto,
+                'settle': settle,
+                'settleId': settleId,
                 'info': market,
             })
         return result
@@ -272,7 +270,7 @@ class gateiofu(Exchange):
         await self.load_markets()
         market = self.market(symbol)
         request = {
-            'settle': market['settleCurrencyId'],
+            'settle': market['settleId'],
             'contract': market['id'],
         }
         if limit is not None:
@@ -303,13 +301,17 @@ class gateiofu(Exchange):
         return self.parse_order_book(response, None, 'bids', 'asks', 'p', 's')
 
     def parse_ohlcv(self, ohlcv, market=None, timeframe='1m', since=None, limit=None):
+        volume = None
+        # volume is always given in quote currency, thus it only suits the inverse and quanto markets(which order size is in quote)
+        if (market is not None) and (market['inverse'] or market['quanto']):
+            volume = self.safe_float(ohlcv, 'v'); 
         return [
-            ohlcv['t'] * 1000,
-            float(ohlcv['o']),
-            float(ohlcv['h']),
-            float(ohlcv['l']),
-            float(ohlcv['c']),
-            float(ohlcv['v']),
+            self.safe_timestamp(ohlcv, 't'),
+            self.safe_float(ohlcv, 'o'),
+            self.safe_float(ohlcv, 'h'),
+            self.safe_float(ohlcv, 'l'),
+            self.safe_float(ohlcv, 'c'),
+            volume,
         ]
 
     async def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
@@ -319,7 +321,7 @@ class gateiofu(Exchange):
         # If prefix contract with mark_, the contract's mark price candlesticks are returned
         # if prefix with index_, index price candlesticks will be returned.
         request = {
-            'settle': market['settleCurrencyId'],
+            'settle': market['settleId'],
             'contract': market['id'],
             'interval': self.timeframes[timeframe],
         }

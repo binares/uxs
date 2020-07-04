@@ -12,6 +12,7 @@ from .bitmex import bitmex
 from .bittrex import bittrex
 from .dragonex import dragonex
 from .hitbtc import hitbtc
+from .krakenfu import krakenfu
 
-__all__ = ['binancefu','bitmex','bittrex','dragonex','hitbtc']
+__all__ = ['binancefu','bitmex','bittrex','dragonex','hitbtc','krakenfu']
 

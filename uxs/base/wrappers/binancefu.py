@@ -18,3 +18,12 @@ class binancefu:
     
     def _get_lot_size(self, market):
         return 1 if market.get('type')=='future' else None
+    
+    
+    def _get_pnl_function(self, market):
+        return 'linear'
+    
+    
+    def _get_settle_currency(self, market):
+        return market['quote']
+

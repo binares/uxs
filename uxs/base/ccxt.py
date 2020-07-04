@@ -36,6 +36,7 @@ DUST_SPREAD_LIMIT = 0.5
 RETURN_ASYNC_EXCHANGE = True
 FEE_FROM_TARGET = ['binance','poloniex']
 COST_LIMIT_WITH_FEE = []
+PUBLIC_AUTH_REQUIRED = ['bitclave', 'coinsuper'] # for public operations
 _E_REPLACE = {
     'binancefu': 'binance',
     'huobi':'huobipro',
@@ -157,6 +158,24 @@ class ccxtWrapper:
                 if i == attempts-1: raise e
     
     
+    def _get_pnl_function(self, market):
+        """linear, inverse, ..."""
+        return None
+    
+    
+    def _deduce_settle_currency(self, market):
+        if market['linear']:
+            return market['quote']
+        elif market['inverse']:
+            return market['base']
+        else:
+            return None
+    
+    
+    def _get_settle_currency(self, market):
+        return market.get('settle')
+    
+    
     def _get_lot_size(self, market):
         type = market.get('type')
         lotSize = None
@@ -174,12 +193,42 @@ class ccxtWrapper:
             market['lotSize'] = self._get_lot_size(market)
     
     
+    def _set_market_types(self):
+        if self.markets is None:
+            return
+        for market in self.markets.values():
+            type = market.get('type')
+            if type == 'perpetual':
+                type = 'swap'
+            types = ('spot','swap','future','prediction')
+            if type is None:
+                type = next((t for t in types if market.get(t)), 'spot')
+            market.update({
+                'type': type,
+                **{t: (type==t) for t in types}
+            })
+            linearities = ['linear','inverse']
+            which = next((x for x in linearities if market.get(x)), None)
+            if which is None:
+                which = self._get_pnl_function(market)
+            if which is None and type=='spot':
+                which = 'linear'
+            if which is not None:
+                market.update({x: (which==x) for x in linearities})
+            else:
+                market.update({x: market.get(x) for x in linearities})
+            market['settle'] = settle = self._get_settle_currency(market)
+            if market.get('quanto') is None:
+                market['quanto'] = settle not in (market['base'], market['quote']) if settle else None
+    
+    
     def set_markets(self, markets, currencies=None):
         import uxs.base.poll as poll
         super().set_markets(markets,currencies)
         if self.markets is None:
             return None
         self._set_lot_sizes()
+        self._set_market_types()
         default = poll.load_profile('__default__',get_name(self),'markets')
         custom = []
         if getattr(self,'_profile_name',None) is not None:

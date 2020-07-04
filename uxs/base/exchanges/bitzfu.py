@@ -136,17 +136,15 @@ class bitzfu(bitz):
             settleId = self.safe_string(market, 'settleAnchor')
             maker = self.safe_float(market, 'makerFee')
             taker = self.safe_float(market, 'takerFee')
-            base = baseId.upper()
-            quote = quoteId.upper()
-            settle = settleId.upper()
-            base = self.safe_currency_code(base)
-            quote = self.safe_currency_code(quote)
-            settle = self.safe_currency_code(settle)
+            base = self.safe_currency_code(baseId.upper())
+            quote = self.safe_currency_code(quoteId.upper())
+            settle = self.safe_currency_code(settleId.upper())
+            quanto = (settle != base and settle != quote)
             symbol = base + '/' + quote
             # To preserve the uniqueness of all symbols
-            if (settle != base) and (settle != quote):
+            if quanto:
                 symbol = settle + '_' + symbol
-            lotSize = 1.0
+            lotSize = 1.0  # for BZ settled quanto contracts it is 1 USD
             if settle != 'BZ':
                 lotSize = self.safe_float(market, 'contractValue')
             precision = {
@@ -159,10 +157,13 @@ class bitzfu(bitz):
                 if (base == 'BTC') or (base == 'ETH'):
                     precision['price'] *= 5
             active = (self.safe_integer(market, 'status') == 1)
-            isReverse = (self.safe_integer(market, 'isreverse') == 1)
-            type = 'swap' if isReverse else 'future'
+            expiry = self.safe_string(market, 'expiry')
+            type = 'swap' if (expiry == '0000-00-00 00:00:00') else 'future'
             future = (type == 'future')
             swap = (type == 'swap')
+            isReverse = self.safe_string(market, 'isreverse')
+            inverse = (isReverse == '1')
+            linear = (isReverse == '-1')
             result.append({
                 'info': market,
                 'id': id,
@@ -179,11 +180,14 @@ class bitzfu(bitz):
                 'swap': swap,
                 'prediction': False,
                 'type': type,
+                'linear': linear,
+                'inverse': inverse,
+                'quanto': quanto,
                 'taker': taker,
                 'maker': maker,
                 'active': active,
-                'precision': precision,
                 'lotSize': lotSize,
+                'precision': precision,
                 'limits': {
                     'amount': {
                         'min': self.safe_float(market, 'minAmount'),
@@ -468,22 +472,28 @@ class bitzfu(bitz):
             base = self.safe_currency_code(baseId)
             quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
-            if int(contractId) >= 200:
+            if (int(contractId) >= 200) and (int(contractId) < 300):
                 symbol = 'BZ_' + symbol
         side = self.safe_string(trade, 'type')
         price = self.safe_float(trade, 'price')
         amount = self.safe_float(trade, 'num')
-        cost = amount
+        cost = None
+        if (price is not None) and (amount is not None) and (market is not None):
+            if market['quanto']:
+                cost = amount  # the cost in BZ can't be calculated currently(should those markets open up)
+            elif market['linear']:
+                cost = amount * price
+            else:
+                cost = amount / price
+            cost *= market['lotSize']
         fee = None
         if market is not None:
             tradeFee = self.safe_float(trade, 'tradeFee')
             if tradeFee is not None:
-                tradeFee *= -1
-                base, quote = symbol.split('/')
-                currency = base if market['swap'] else quote
                 fee = {
                     'cost': tradeFee,
-                    'currency': currency,
+                    'currency': market['settle'],
+                    'rate': None,
                 }
         return {
             'timestamp': timestamp,
@@ -546,12 +556,12 @@ class bitzfu(bitz):
         #      "14183930623.27000000"  # turnover
         #  ]
         return [
-            int(ohlcv[0]),
-            float(ohlcv[1]),
-            float(ohlcv[2]),
-            float(ohlcv[3]),
-            float(ohlcv[4]),
-            float(ohlcv[5]),
+            self.safe_integer(ohlcv, 0),
+            self.safe_float(ohlcv, 1),
+            self.safe_float(ohlcv, 2),
+            self.safe_float(ohlcv, 3),
+            self.safe_float(ohlcv, 4),
+            self.safe_float(ohlcv, 5),
         ]
 
     def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
@@ -646,10 +656,12 @@ class bitzfu(bitz):
             timestamp *= 1000
         cost = None
         if (price is not None) and (filled is not None) and (market is not None):
-            if market['swap']:
-                cost = filled
-            else:
+            if market['quanto']:
+                cost = filled  # the cost in BZ can't be calculated currently(should those markets open up)
+            elif market['linear']:
                 cost = filled * price
+            else:
+                cost = filled / price
             cost *= market['lotSize']
         status = self.parse_order_status(self.safe_string(order, 'orderStatus'))
         return {

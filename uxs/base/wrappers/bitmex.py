@@ -59,7 +59,16 @@ class bitmex:
     
     def _get_lot_size(self, market):
         return market['info'].get('lotSize')
-
+    
+    
+    def _get_pnl_function(self, market):
+        if market.get('prediction'):
+            return None
+        return 'inverse' if market['info']['isInverse'] else 'linear'
+    
+    
+    def _get_settle_currency(self, market):
+        return self.safe_currency_code(market['info'].get('settlCurrency'))
 
 
 if __name__ == '__main__':

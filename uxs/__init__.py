@@ -7,7 +7,7 @@ import yaml
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
 
 from uxs.base.ccxt import (get_name, get_exchange, get_sn_exchange, init_exchange,
-                           list_exchanges, ccxtWrapper, asyncCCXTWrapper)
+                           list_exchanges, ccxtWrapper, asyncCCXTWrapper, PUBLIC_AUTH_REQUIRED)
 
 from uxs.base._settings import *
 
@@ -144,8 +144,8 @@ user: cryptowat.ch
 #############################
 
 The package has a built-in encryption mechanism for encrypting the tokens file (from prying eyes).
-To do so call uxs.encrypt_tokens(a_password), and manually delete the original file
+To do so call `uxs.encrypt_tokens(a_password)`, and manually delete the original file
 (make sure to remember the password, or your tokens will be lost!).
-Now uxs.cache_password(a_password) must be called each time after importing the package.
-To undo the decryption call uxs.decrypt_tokens(), and manually delete the encrypted file.
+Henceforth `uxs.cache_password(a_password)` must be called each time after importing the package.
+To undo the decryption call `uxs.decrypt_tokens()`, and manually delete the encrypted file.
 """

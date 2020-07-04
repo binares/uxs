@@ -78,7 +78,6 @@ class krakenfu(Exchange):
                         'accounts',
                         'openorders',
                         'recentorders',
-                        'historicorders',
                         'fills',
                         'transfers',
                     ],
@@ -183,14 +182,16 @@ class krakenfu(Exchange):
             active = True
             id = market['symbol']
             type = None
-            prediction = (market['type'].find(' index') >= 0)
+            index = (market['type'].find(' index') >= 0)
             linear = None
-            if not prediction:
+            inverse = None
+            if not index:
                 linear = (market['type'].find('_vanilla') >= 0)
+                inverse = not linear
                 settleTime = self.safe_string(market, 'lastTradingTime')
                 type = 'swap' if (settleTime is None) else 'future'
             else:
-                type = 'prediction'
+                type = 'index'
             swap = (type == 'swap')
             future = (type == 'future')
             symbol = id
@@ -203,23 +204,20 @@ class krakenfu(Exchange):
             # swap == perpetual
             if swap:
                 symbol = base + '/' + quote
+            lotSize = self.safe_float(market, 'contractSize')
             precision = {
                 'amount': None,
-                'price': None,
+                'price': self.safe_float(market, 'tickSize'),
             }
-            lotSize = self.safe_float(market, 'contractSize')
-            tickSize = self.safe_float(market, 'tickSize')
-            if lotSize is not None:
-                precision['amount'] = 1.0
-            if tickSize is not None:
-                precision['price'] = tickSize
+            if not index:
+                precision['amount'] = 1.0  # self seems to be the case for all markets
             limits = {
                 'amount': {
                     'min': precision['amount'],
                     'max': None,
                 },
                 'price': {
-                    'min': tickSize,
+                    'min': precision['price'],
                     'max': None,
                 },
                 'cost': {
@@ -241,8 +239,9 @@ class krakenfu(Exchange):
                 'spot': False,
                 'swap': swap,
                 'future': future,
-                'prediction': prediction,
+                'prediction': False,
                 'linear': linear,
+                'inverse': inverse,
                 'lotSize': lotSize,
                 'info': market,
             })
@@ -335,7 +334,7 @@ class krakenfu(Exchange):
         volume = self.safe_float(ticker, 'vol24h')
         baseVolume = None
         quoteVolume = None
-        if (market is not None) and (not market['prediction']):
+        if (market is not None) and (market['type'] != 'index'):
             if market['linear']:
                 baseVolume = volume  # pv_xrpxbt volume given in XRP
             else:
@@ -448,16 +447,21 @@ class krakenfu(Exchange):
         if type is not None:
             type = self.parse_order_type(type)
         symbol = None
-        if (market is None) and (symbolId is not None):
-            market = self.safe_value(self.markets_by_id, symbolId)
-        if (symbol is None) and (market is not None):
+        if symbolId is not None:
+            if symbolId in self.markets_by_id:
+                market = self.markets_by_id[symbolId]
+            else:
+                market = None
+                symbol = symbolId
+        if market is not None:
             symbol = market['symbol']
         cost = None
-        if (amount is not None) and (market is not None):
-            if not market['linear']:
-                cost = amount  # assuming cost is in quote currency
-            elif price is not None:
-                cost = price * amount
+        if (amount is not None) and (price is not None) and (market is not None):
+            if market['linear']:
+                cost = amount * price  # in quote
+            else:
+                cost = amount / price  # in base
+            cost *= market['lotSize']
         fee = None
         takerOrMaker = None
         fillType = self.safe_string(trade, 'fillType')
@@ -560,8 +564,8 @@ class krakenfu(Exchange):
         return response
 
     async def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
+        # The returned orderEvents are yet again in entirely different format, what a mess
         raise NotSupported(self.id + ' fetchOrders not supprted yet')
-        # This only works on mainnet
         # await self.load_markets()
         # market = None
         # request = {}
@@ -569,20 +573,15 @@ class krakenfu(Exchange):
         #     market = self.market(symbol)
         #     request['symbol'] = market['id']
         # }
-        # if since is not None:
-        #     request['after'] = since
-        # }
-        # response = await self.privateGetHistoricorders(request)
-        # return self.parse_orders(response, market, since, limit)
+        # response = await self.privateGetRecentorders(self.extend(request, params))
+        # return self.parse_orders([response], market, since, limit)
 
     async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         await self.load_markets()
         market = None
-        request = {}
         if symbol is not None:
             market = self.market(symbol)
-        request = self.deep_extend(request, params)
-        response = await self.privateGetOpenorders(request)
+        response = await self.privateGetOpenorders(params)
         return self.parse_orders(response['openOrders'], market, since, limit)
 
     def parse_order_type(self, orderType):
@@ -840,27 +839,6 @@ class krakenfu(Exchange):
         #     "lastUpdateTime":"2019-09-05T17:01:17.410Z"
         # }
         #
-        # "FETCH ORDERS"
-        # timestamp               Unix timestamp     The timestamp of the order event
-        # uid                     UUID               A structure containing information on the send order request, see below
-        # event_type              string             One of ORDER_PLACED ORDER_CANCELLED ORDER_REJECTED EXECUTION
-        # order_uid               UUID               The unique identifier of the order
-        # order_tradeable         string             The tradeable(symbol) of the futures contract
-        # order_direction         string             BUY for buy order and SELL for a sell
-        # order_quantity          positive float     The order quantity(size)
-        # order_filled            positive float     The order filled amount
-        # order_timestamp         Unix timestamp     The order timestamp
-        # order_type              string             One of: LIMIT IMMEDIATE_OR_CANCEL POST_ONLY LIQUIDATION ASSIGNMENT STOP
-        # order_client_id         string             The provided client order id
-        # order_stop_price        positive float     The stop price of the order.
-        # info                    string             One of: MAKER_ORDER TAKER_ORDER
-        # algo_id                 string             The id of the algorithm that placed the order
-        # execution_timestamp     Unix timestamp     The execution timestamp
-        # execution_quantity      positive integer   The executed quantity
-        # execution_price         positive float     The price that the orders got executed
-        # execution_mark_price    positive float     The market price at the time of the execution
-        # execution_limit_filled  boolean            True if the maker order of the execution was filled in its entirety otherwise False
-        #
         orderEvents = self.safe_value(order, 'orderEvents', [])
         details = None
         isPrior = False
@@ -939,12 +917,13 @@ class krakenfu(Exchange):
             amount = filled + remaining
         cost = None
         if (filled is not None) and (market is not None):
-            if not market['linear']:
-                cost = filled  # assuming cost is in quote currency
-            elif average is not None:
-                cost = average * filled
-            elif price is not None:
-                cost = price * filled
+            whichPrice = average if (average is not None) else price
+            if whichPrice is not None:
+                if market['linear']:
+                    cost = filled * whichPrice  # in quote
+                else:
+                    cost = filled / whichPrice  # in base
+                cost *= market['lotSize']
         id = self.safe_string_2(order, 'order_id', 'orderId')
         if id is None:
             id = self.safe_string_2(details, 'orderId', 'uid')
@@ -973,14 +952,9 @@ class krakenfu(Exchange):
     async def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
         await self.load_markets()
         market = None
-        request = {}
         if symbol is not None:
             market = self.market(symbol)
-            request['symbol'] = market['id']
-        if since is not None:
-            request['lastFillTime'] = self.iso8601(since)
-        request = self.deep_extend(request, params)
-        response = await self.privateGetFills(request)
+        response = await self.privateGetFills(params)
         # {
         #    "result":"success",
         #    "serverTime":"2016-02-25T09:45:53.818Z",
