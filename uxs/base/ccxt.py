@@ -762,7 +762,9 @@ class ccxtWrapper:
         else:
             size = amount/(1-fee_rate)
             
-        return self.round_amount(symbol, size, price, True, method=method, **kw)
+        limit = kw.pop('limit', True)
+        
+        return self.round_amount(symbol, size, price, limit, method=method, **kw)
                 
     
     def calc_payout_from_cost(self, symbol, side, amount, price, takerOrMaker='taker',

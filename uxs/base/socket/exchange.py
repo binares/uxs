@@ -53,8 +53,9 @@ class ExchangeSocket(WSClient):
          'account', 'match', 'balance', 'order', 'fill', 'position',
          'fetch_tickers', 'fetch_ticker', 'fetch_order_book',
          'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
-         'fetch_orders', 'fetch_order', 'fetch_orders', 'fetch_open_orders',
-         'fetch_my_trades', 'create_order', 'edit_order', 'cancel_order',
+         'fetch_order', 'fetch_orders', 'fetch_open_orders',
+         'fetch_closed_orders', 'fetch_my_trades',
+         'create_order', 'edit_order', 'cancel_order',
         ], False)
     
     channel_defaults = {
@@ -152,6 +153,11 @@ class ExchangeSocket(WSClient):
             'required': ['symbol','since', 'limit'],
             'is_private': True,
         },
+        'fetch_closed_orders': {
+            'type': 'fetch',
+            'required': ['symbol', 'since', 'limit'],
+            'is_private': True,
+        },
         'fetch_my_trades': {
             'type': 'fetch',
             'required': ['symbol', 'since', 'limit'],
@@ -192,7 +198,7 @@ class ExchangeSocket(WSClient):
     ORDER_KEYWORDS = (
         'id', 'symbol', 'side', 'price', 'amount', 'timestamp', 
         'remaining', 'filled', 'payout', 'datetime',
-        'type', 'stop', 'cost', 'average',
+        'type', 'stop', 'cost', 'average', 'lastTradeTimestamp',
     )
     FILL_KEYWORDS = (
         'id', 'symbol', 'side', 'price', 'amount', 'timestamp',
@@ -232,7 +238,7 @@ class ExchangeSocket(WSClient):
         'fetch_ticker': 15,
         'fetch_order_book': 15,
         'fetch_trades': 60,
-        'fetch_balance': 10,
+        'fetch_balance': 60,
         'fetch_open_orders': 8,
         'fetch_orders': 8,
         'fetch_order': 15,
@@ -283,6 +289,8 @@ class ExchangeSocket(WSClient):
         # usually payouts are not sent with order updates
         # automatically calculate it from each fill
         'update_payout_on_fill': True,
+        'update_lastTradeTimestamp_on_fill': True,
+        'update_balance': 'if-not-subbed-to-balance',
     }
     # Will be extended by .api.timeframes
     timeframes = {}
@@ -344,6 +352,7 @@ class ExchangeSocket(WSClient):
          ['fetchBalance','fetch_balance'],
          ['fetchOrder','fetch_order'],
          ['fetchOrders','fetch_orders'],
+         ['fetchClosedOrders','fetch_closed_orders'],
          ['fetchMyTrades','fetch_my_trades'],
          ['createOrder','create_order'],
          ['editOrder','edit_order'],
@@ -504,7 +513,7 @@ class ExchangeSocket(WSClient):
             'trades': ['fetch_trades'],
             'ohlcv': ['fetch_ohlcv'],
             'balance': ['fetch_balance'],
-            'order': ['fetch_orders','fetch_order','fetch_open_orders','fetch_my_trades'],
+            'order': ['fetch_my_trades','fetch_orders'], # 'fetch_order','fetch_open_orders',
             'fill': [],
             'position': [],
         }
@@ -512,8 +521,8 @@ class ExchangeSocket(WSClient):
         for x in ['fetch_tickers', 'fetch_ticker', 'fetch_order_book',
                   'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
                   'fetch_orders', 'fetch_order', 'fetch_open_orders',
-                  'fetch_my_trades', 'create_order', 'edit_order',
-                  'cancel_order'] + list(emulation_methods):
+                  'fetch_closed_orders', 'fetch_my_trades', 'create_order',
+                  'edit_order', 'cancel_order'] + list(emulation_methods):
             methods = emulation_methods.get(x, [x])
             camel = camel_map.get(x, to_camelcase(x))
             camel_methods = [camel_map.get(m, to_camelcase(m)) for m in methods]
@@ -1067,10 +1076,33 @@ class ExchangeSocket(WSClient):
         self.update_balances(data, **kw)
     
     
+    def update_balances_from_order_delta(self, o_new, o_prev={}):
+        diffs = {k: (o_new[k] - o_prev[k] if o_prev.get(k) is not None else o_new[k])
+                 for k in ['payout','remaining','filled','amount','cost']}
+        m = self.markets[o_new['symbol']]
+        direction = as_direction(o_new['side'])
+        cy_in = m['quote'] if direction else m['base']
+        cy_out = m['base'] if direction else m['quote']
+        if o_prev.get('amount') is None:
+            d_in_used = o_new['cost'] if direction else o_new['amount']
+            d_in_free = -d_in_used
+        else:
+            if direction:
+                d_in_used = -self.api.calc_cost_from_payout(
+                    o_new['symbol'], direction, diffs['payout'], o_new['price'], limit=False)
+            else:
+                d_in_used = diffs['remaining']
+            d_in_free = 0
+        d_payout = diffs['payout']
+        data = [(cy_in, d_in_free, d_in_used),
+                (cy_out, d_payout, 0)]
+        self.update_balances_delta(data)
+    
+    
     def add_order(self, id, symbol, side, amount, price=None, timestamp=None, 
-                  remaining=None, filled=None, payout=0, datetime=None,
-                  type='limit', stop=None, cost=None, average=None, params={}, *,
-                  set_event=True, enable_sub=False):
+                  remaining=None, filled=None, payout=0, datetime=None, type='limit',
+                  stop=None, cost=None, average=None, lastTradeTimestamp=None,
+                  params={}, *, set_event=True, enable_sub=False):
         if remaining is None:
             remaining = amount
         if filled is None and remaining is not None:
@@ -1087,7 +1119,11 @@ class ExchangeSocket(WSClient):
                            'datetime': datetime},
                            **params)
             return self.update_order(id=id, remaining=remaining, filled=filled, payout=payout,
-                                     cost=cost, average=average, params=params)
+                                     cost=cost, average=average, lastTradeTimestamp=lastTradeTimestamp,
+                                     params=params)
+        
+        # filled, payout, remaining calculated from fills
+        cum = {'f': .0, 'r': remaining, 'p': .0}
         
         o = dict(
             {'id': id,
@@ -1103,12 +1139,19 @@ class ExchangeSocket(WSClient):
              'average': average,
              'filled': filled,
              'remaining': remaining,
-             'payout': payout
+             'payout': payout,
+             'lastTradeTimestamp': lastTradeTimestamp,
+             'cum': cum,
             }, **params)
         
         self.orders[id] = o
         if remaining:
             self.open_orders[id] = o
+        
+        if self.is_order_balance_updating_enabled(o):
+            try: self.update_balances_from_order_delta(o)
+            except Exception as e:
+                logger.exception(e)
         
         if enable_sub:
             self.change_subscription_state(('account',), 1, True)
@@ -1151,7 +1194,7 @@ class ExchangeSocket(WSClient):
     def update_order_from_dict(self, d, *, set_event=True, enable_sub=False, drop=None):
         if drop is not None:
             d = self.drop(d, drop)
-        KEYWORDS = ['id','remaining','filled','payout','cost','average']
+        KEYWORDS = ['id','remaining','filled','payout','cost','average','lastTradeTimestamp']
         kw = {k: d[k] for k in KEYWORDS if k in d}
         params = {k: d[k] for k in d if k not in KEYWORDS}
         
@@ -1159,22 +1202,21 @@ class ExchangeSocket(WSClient):
     
     
     def update_order(self, id, remaining=None, filled=None, payout=None, cost=None, average=None,
-                     params={}, *, set_event=True, enable_sub=False):
+                     lastTradeTimestamp=None, params={}, *, from_fills=False, set_event=True,
+                     enable_sub=False):
         try: o = self.orders[id]
         except KeyError:
             logger2.error('{} - not recognized order: {}'.format(self.name, id))
             return
         
         if 'price' in params and params['price']==0:
-            params = params.copy()
-            params['price'] = None
+            params = dict(params, price=None)
         
-        o_prev = o.copy()
+        o_prev = _copy.deepcopy(o)
+        amount_difference = None
         
         if params.get('amount') is not None and o['amount'] is not None:
             amount_difference = params['amount'] - o['amount']
-        else:
-            amount_difference = None
         
         self.dict_update(params, o)
         
@@ -1200,27 +1242,44 @@ class ExchangeSocket(WSClient):
         
         def modify_remaining(prev, new):
             #Order size was edited, thus the "remaining" can increase
-            if amount_difference != 0:
+            if amount_difference not in (None, 0):
                 return new
             else:
                 return min(prev, new)
         
         
-        for name,value,op in [('remaining', remaining, modify_remaining),
-                              ('filled', filled, max),
-                              ('payout', payout, max),
-                              ('cost', cost, max)]:
-            prev = o[name]
-            if prev is not None and value is not None:
-                value = op(prev, value)
-            if value is not None:
-                o[name] = value
+        def cumulate(d, r=remaining, f=filled, p=payout, c=cost, l=lastTradeTimestamp):
+            for name,al,value,op in [('remaining', 'r', r, modify_remaining),
+                                     ('filled', 'f', f, max),
+                                     ('payout', 'p', p, max),
+                                     ('cost', 'c', c, max),
+                                     ('lastTradeTimestamp', 'l', l, max)]:
+                which = name if name in d else (al if al in d else None)
+                if not which:
+                    continue
+                prev = d[which]
+                if prev is not None and value is not None:
+                    value = op(prev, value)
+                if value is not None:
+                    d[which] = value
+        
+        if from_fills:
+            cumulate(o['cum'])
+        else:
+            cumulate(o)
+        
+        cumulate(o, *[o['cum'][x] for x in ['r','f','p']])
         
         if not o['remaining']:
             try:
                 del self.open_orders[id]
             except KeyError:
                 pass
+        
+        if self.is_order_balance_updating_enabled(o):
+            try: self.update_balances_from_order_delta(o, o_prev)
+            except Exception as e:
+                logger.exception(e)
         
         if enable_sub:
             self.change_subscription_state(('account',), 1, True)
@@ -1342,19 +1401,25 @@ class ExchangeSocket(WSClient):
             insert_fill(f)
             o_params = {}
             
+            is_new = not o['lastTradeTimestamp'] or o['lastTradeTimestamp'] < f['timestamp']
+            
+            if is_new and self.order['update_lastTradeTimestamp_on_fill']:
+                o_params['lastTradeTimestamp'] = f['timestamp']
+            
+            #if is_new:
             if self.order['update_filled_on_fill']:
-                o_params['filled'] = o['filled'] + amount
+                o_params['filled'] = o['cum']['f'] + amount
             
             if self.order['update_payout_on_fill']:
                 payout = self.api.calc_payout(symbol,o['side'],amount,price,fee_rate,fee=fee) \
                     if payout is None else payout
-                o_params['payout'] = o['payout'] + payout
+                o_params['payout'] = o['cum']['p'] + payout
             
             if self.order['update_remaining_on_fill']:
-                o_params['remaining'] = o['remaining'] - amount
+                o_params['remaining'] = o['cum']['r'] - amount
             
             if o_params:
-                self.update_order(order, **o_params, set_event=set_order_event)
+                self.update_order(order, **o_params, from_fills=True, set_event=set_order_event)
         
         else:
             tlogger.debug('{} - adding {} to unprocessed_fills'.format(
@@ -1531,8 +1596,8 @@ class ExchangeSocket(WSClient):
                     method = None
                     if self.has_got('fetch_my_trades'):
                         method = 'fetch_my_trades'
-                    elif self.has_got('fetch_open_orders'):
-                        method = 'fetch_open_orders'
+                    elif self.has_got('fetch_orders'):
+                        method = 'fetch_orders'
                     if not method: pass
                     elif self.has_got(method,'symbolRequired'):
                         symbols = list(unique(o['symbol'] for o in self.open_orders.values()))
@@ -1795,11 +1860,32 @@ class ExchangeSocket(WSClient):
     
     
     async def fetch_order(self, id, symbol=None, params={}):
-        return await self.api.fetch_order(id, symbol, params)
+        r = await self.api.fetch_order(id, symbol, params)
+        try:
+            self.add_ccxt_order(r, from_method='fetch_order')
+        except Exception as e:
+            logger.exception(e)
+        return r
     
     
     async def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
-        return await self.api.fetch_orders(symbol, since, limit, params)
+        orders = await self.api.fetch_orders(symbol, since, limit, params)
+        for o in orders:
+            try:
+                self.add_ccxt_order(o, from_method='fetch_orders')
+            except Exception as e:
+                logger.exception(e)
+        return orders
+    
+    
+    async def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
+        orders = await self.api.fetch_closed_orders(symbol, since, limit, params)
+        for o in orders:
+            try:
+                self.add_ccxt_order(o, from_method='fetch_closed_orders')
+            except Exception as e:
+                logger.exception(e)
+        return orders
     
     
     async def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
@@ -1822,13 +1908,7 @@ class ExchangeSocket(WSClient):
         orders = await self.api.fetch_open_orders(symbol, since, limit, params)
         for o in orders:
             try:
-                keywords = ['id','symbol','side','price','amount','timestamp',
-                            'remaining','filled','datetime','type','stop']
-                params = {k:v for k,v in o.items() if k not in keywords}
-                self.add_order(o['id'], o['symbol'], o['side'], o['amount'], price=o['price'], 
-                               timestamp=o.get('timestamp'), remaining=o.get('remaining'), filled=o.get('filled'),
-                               datetime=o.get('datetime'), type=o.get('type'),  stop=o.get('stop'),
-                               params=params)
+                self.add_ccxt_order(o, from_method='fetch_open_orders')
             except Exception as e:
                 logger.exception(e)
         return orders
@@ -1869,7 +1949,7 @@ class ExchangeSocket(WSClient):
                     'price': price,
                     'timestamp': self.api.milliseconds(),
                 }
-                self.add_ccxt_order(r, order, 'create')
+                self.add_ccxt_order(r, order, 'create_order')
             
             return r
     
@@ -1902,12 +1982,13 @@ class ExchangeSocket(WSClient):
             error = None
             #tlogger.debug('Canceling order: {},{}'.format(id, symbol))
             try: r = await self.api.cancel_order(id, symbol, params)
-            except ccxt.OrderNotFound as e: error = e
+            except ccxt.OrderNotFound as e:
+                error = e
+            # Canceling due to not being found is somewhat dangerous,
+            # as the latest filled updates may not be received yet
             cancel_automatically = self.is_order_auto_canceling_enabled()
             if cancel_automatically:
-                #tlogger.debug('Automatically setting "remaining" to 0: {},{}'.format(id, symbol))
-                self.update_order(id, remaining=0)
-                #tlogger.debug('Order {},{} now: {}'.format(id, symbol, self.orders.get(id)))
+                await self.safely_mark_order_closed(id)
             if error is not None:
                 raise error
             return r
@@ -1934,7 +2015,12 @@ class ExchangeSocket(WSClient):
             o = _copy.deepcopy(self.orders[order_id])
             return o
         else:
-            r = await self.api.edit_order(id, symbol, *args)
+            try: r = await self.api.edit_order(id, symbol, *args)
+            except ccxt.OrderNotFound as e:
+                cancel_automatically = self.is_order_auto_canceling_enabled()
+                if cancel_automatically:
+                    await self.safely_mark_order_closed(id)
+                raise e
             if self.order['add_automatically']:
                 order = {
                     'id': r['id'] if r.get('id') else id,
@@ -1945,13 +2031,13 @@ class ExchangeSocket(WSClient):
                 }
                 for key, value in zip(['type','side','amount','price'], args):
                     order[key] = value
-                self.add_ccxt_order(r, order, 'edit')
+                self.add_ccxt_order(r, order, 'edit_order')
             return r
     
     
-    def add_ccxt_order(self, response, order={}, from_method='create', overwrite=None):
+    def add_ccxt_order(self, response, order={}, from_method='create_order', overwrite=None):
         if overwrite is None:
-            overwrite = (from_method=='edit')
+            overwrite = (from_method=='edit_order')
         parsed = self.parse_ccxt_order(response, from_method)
         exists = 'id' in response and response['id'] in self.orders
         
@@ -1964,7 +2050,69 @@ class ExchangeSocket(WSClient):
     
     
     def parse_ccxt_order(self, r, *args):
-        return {'order': {}, 'fills': []}
+        o = _copy.deepcopy(r)
+        o['payout'] = None
+        
+        if o.get('amount') is not None:
+            if o.get('filled') is not None and o.get('remaining') is None:
+                o['remaining'] = max(.0, o['amount'] - o['filled'])
+            elif o.get('remaining') is not None and o.get('filled') is None:
+                o['filled'] = max(.0, o['amount'] - o['remaining'])
+        
+        if o.get('status'):
+            if o['status'] not in ('open','expired'):
+                o['remaining'] = .0
+        
+        params = self.api.lazy_parse(o, ('symbol','side','amount','price'))
+        if all(params.values()):
+            params.update({x: o[x] for x in ('takerOrMaker','fee') if o.get(x) is not None})
+            try:
+                o['payout'] = self.api.calc_payout(**params)
+            except Exception as e:
+                logger.error('{} - could not calculate payout for order: {}'.format(self.name, o))
+                logger.exception(e)
+        
+        fills = o.pop('trades', [])
+        if fills is None:
+            fills = []
+         
+        return {'order': o, 'fills': fills}
+    
+    
+    async def safely_mark_order_closed(self, id):
+        """Used when OrderNotFound is raised"""
+        o = self.orders[id]
+        symbol = o['symbol']
+        if not o['remaining']:
+            return 
+        if self.has_got('fetch_my_trades') and self.order['update_filled_on_fill']:
+            try: await self.fetch_my_trades(symbol)
+            except Exception as e:
+                logger.error('{} - error fetching my trades to mark order {} {} as closed: {}'
+                             .format(self.name, id, symbol, repr(e)))
+                logger.exception(e)
+            else:
+                self.update_order(id, remaining=0)
+        elif self.has_got('fetch_order', 'closed'):
+            try: o2 = self.fetch_order(id, o['symbol'])
+            except Exception as e:
+                logger.error('{} - error fetching order {} {} to mark it as closed: {}'
+                             .format(self.name, id, symbol, repr(e)))
+                logger.exception(e)
+            else:
+                o3 = self.parse_ccxt_order(o2)['order']
+                self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
+        elif self.has_got('fetch_closed_orders'):
+            try: co = await self.fetch_closed_orders(o['symbol'])
+            except Exception as e:
+                logger.error('{} - error fetching closed orders to mark {} {} as closed: {}'
+                             .format(self.name, id, symbol, repr(e)))
+                logger.exception(e)
+            else:
+                o2 = next((x for x in co if x['id']==id), None)
+                if o2 is not None:
+                    o3 = self.parse_ccxt_order(o2)['order']
+                    self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
     
     
     def is_order_auto_canceling_enabled(self):
@@ -1974,7 +2122,8 @@ class ExchangeSocket(WSClient):
                 return not self.is_active()
             elif coa.startswith('if-not-subbed-to-'):
                 sub_name = coa[len('if-not-subbed-to-'):]
-                return not self.sh.is_subscribed_to({'_': sub_name}, True)
+                alt_cond = False if sub_name!='account' else not self.has_got('order','ws')
+                return not self.sh.is_subscribed_to({'_': sub_name}, True) or alt_cond
             else:
                 return True
         else:
@@ -1986,6 +2135,21 @@ class ExchangeSocket(WSClient):
         sc = get_stop_condition(as_ob_fill_side(side), closed=False)
         return any(sc(price,o['price']) for o in self.open_orders.values() 
                         if o['symbol']==symbol and o['side']==fill_side)
+    
+    
+    def is_order_balance_updating_enabled(self, order=None):
+        # This needs some more thinking. lastTradeTimestamp is not sufficient.
+        return False
+        ################
+        ub = self.order['update_balance']
+        if order is None or not order['lastTradeTimestamp'] or not self._last_fetches['fetch_balance'] \
+                or order['lastTradeTimestamp'] < self._last_fetches['fetch_balance'] * 1000:
+            return False
+        if isinstance(ub, str):
+            return ub=='if-not-subbed-to-balance' and \
+                (not self.has_got('balance','ws') or not self.is_subscribed_to(('account',),True))
+        else:
+            return bool(ub)
     
     
     async def wait_on(self, stream, id=-1):

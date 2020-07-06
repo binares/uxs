@@ -8,6 +8,9 @@ from fons.log import get_standard_5
 
 logger,logger2,tlogger,tloggers,tlogger0 = get_standard_5(__name__)
 
+# Notes
+# edit_order returns correct filled amount (thanks to previous order also being returned)
+# edit_order(.., amount) changes "remaining" to that new amount (regardless of previous filled)
 
 def _extract_error(r):
     if isinstance(r, dict) and r.get('event') == 'error':
@@ -90,13 +93,18 @@ class krakenfu(ExchangeSocket):
     ob = {
         'receives_snapshot': True,
         'force_create': None, # the fetched one doesn't have nonce
+        'on_unsync': 'restart', # -||-
     }
     order = {
+        'cancel_automatically': 'if-not-subbed-to-account',
+        # Fill is sent before order update, hence in case of edit order (with new larger amount)
+        # it could close the order prematurely
+        'update_remaining_on_fill': False,
         # Orders alone can't be relied on, as no "filled"
         # is included in the final (closed) message
-        'update_remaining_on_fill': False,
         'update_filled_on_fill': True,
         'update_payout_on_fill': False,
+        'update_balance': False,
     }
     trade = {
         'sort_by': lambda x: x['info']['seq'],
@@ -473,12 +481,7 @@ class krakenfu(ExchangeSocket):
             orders = r['orders']
         elif 'order' not in r:
             if r.get('is_cancel'):
-                # To ensure that ccxt order response is received before canceling here,
-                # so that ccxt could set the final "filled" (and presumably cancel it by itself)
-                async def _update_after():
-                    await asyncio.sleep(1)
-                    self.update_order(id=r['order_id'], remaining=0, enable_sub=True)
-                asyncio.ensure_future(_update_after())
+                self.update_order(id=r['order_id'], remaining=0, enable_sub=True)
             orders = []
         else:
             _order = dict(r['order'],
@@ -488,14 +491,13 @@ class krakenfu(ExchangeSocket):
         
         for o in orders:
             parsed = self.parse_order(o)
-            del parsed['filled']
             #del parsed['remaining']
             self.add_order_from_dict(parsed, enable_sub=True)
     
     
     def parse_order(self, o):
         symbol = self.convert_symbol(o['instrument'].lower(), 0)
-        remaining = o['qty'] if not o.get('is_cancel') else 0
+        remaining = o['qty'] if not o.get('is_cancel') else 0 # qty does indeed show remaining
         amount = o['qty'] + o['filled']
         side = 'buy' if not o['direction'] else 'sell'
         return {
@@ -510,19 +512,6 @@ class krakenfu(ExchangeSocket):
             'remaining': remaining,
             'timestamp': o['time'],
             'info': o,
-        }
-    
-    
-    def parse_ccxt_order(self, r, *args):
-        tlogger.debug('ccxt_order: {}'.format(r))
-        return {
-            'order': {
-                'amount': r['amount'],
-                # fills will update these 2
-                'remaining': r['remaining'],
-                'filled': None, #filled,
-            },
-            'fills': r['trades'],
         }
     
     
