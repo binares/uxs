@@ -39,6 +39,7 @@ COST_LIMIT_WITH_FEE = []
 PUBLIC_AUTH_REQUIRED = ['bitclave', 'coinsuper'] # for public operations
 _E_REPLACE = {
     'binancefu': 'binance',
+    'btsefu': 'btse',
     'huobi':'huobipro',
     'coinbase-pro':'coinbasepro',
     'gdax':'coinbasepro',
