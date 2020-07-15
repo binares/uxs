@@ -25,12 +25,10 @@ class _58coin(Exchange):
                 'createOrder': False,
                 'fetchBalance': False,
                 # 'fetchClosedOrders': False,
-                'fetchL2OrderBook': False,
                 # 'fetchMyTrades': True,
                 'fetchOHLCV': True,
                 # 'fetchOpenOrders': True,
                 # 'fetchOrder': True,
-                'fetchOrderBook': False,
                 # 'fetchOrders': True,
                 # 'fetchOrderTrades': False,
                 'fetchTicker': False,
@@ -279,6 +277,18 @@ class _58coin(Exchange):
         #      ]
         #  }
         return self.parse_ohlcvs(self.safe_value(response, 'data', []), market, timeframe, since, limit)
+
+    async def fetch_order_book(self, symbol, limit=None, params={}):
+        await self.load_markets()
+        market = self.market(symbol)
+        request = {
+            'symbol': market['id'],
+        }
+        if limit is not None:
+            request['limit'] = limit  # default 60
+        response = await self.publicGetOrderBook(self.extend(request, params))
+        orderbook = self.parse_order_book(self.safe_value(response, 'data', {}))
+        return orderbook
 
     def nonce(self):
         return self.milliseconds()
