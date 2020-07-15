@@ -20,8 +20,6 @@ class tradeogre(Exchange):
                 'fetchCurrencies': True,
                 'fetchTicker': True,
                 'fetchTickers': False,
-                'fetchOrderBook': False,
-                'fetchL2OrderBook': False,
                 'fetchOHLCV': False,
                 'fetchTrades': False,
                 'fetchBalance': True,
@@ -170,6 +168,30 @@ class tradeogre(Exchange):
             'info': ticker,
         }
 
+    async def fetch_order_book(self, symbol, limit=None, params={}):
+        await self.load_markets()
+        market = self.market(symbol)
+        request = {
+            'symbol': market['id'],
+        }
+        response = await self.publicGetOrders(self.extend(request, params))
+        # parseOrderBook in python won't you do parseBidsAsks on non-array bidasks, hence it must be done here
+        response['bids'] = self.parse_order_book_branch(self.safe_value(response, 'buy', {}))
+        response['asks'] = self.parse_order_book_branch(self.safe_value(response, 'sell', {}))
+        return self.parse_order_book(response)
+
+    def parse_order_book_branch(self, bidasks, priceKey=None, amountKey=None):
+        if isinstance(bidasks, list):
+            return []  # arrays are always empty
+        priceKeys = list(bidasks.keys())
+        parsedData = []
+        for i in range(0, len(priceKeys)):
+            amountKey = priceKeys[i]
+            price = float(amountKey)
+            amount = float(bidasks[amountKey])
+            parsedData.append([price, amount])
+        return parsedData
+
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         url = self.urls['api'][api]
         if api == 'private':
@@ -178,6 +200,6 @@ class tradeogre(Exchange):
             auth = base64.b64encode(auth)
             headers = {'Authorization': 'Basic ' + self.decode(auth)}
         url += '/' + path
-        if path == 'ticker' and method == 'GET':
+        if (path == 'ticker' or path == 'orders' or path == 'history') and method == 'GET':
             url += '/' + params['symbol']
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
