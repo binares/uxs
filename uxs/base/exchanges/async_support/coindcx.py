@@ -288,9 +288,12 @@ class coindcx(Exchange):
             'pair': coindcxPair,
         }
         response = await self.publicGetMarketDataOrderbook(self.extend(request, params))
+        # parseOrderBook in python won't you do parseBidsAsks on non-array bidasks, hence it must be done here
+        response['bids'] = self.parse_order_book_branch(self.safe_value(response, 'bids', {}))
+        response['asks'] = self.parse_order_book_branch(self.safe_value(response, 'asks', {}))
         return self.parse_order_book(response)
 
-    def parse_bids_asks(self, bidasks, priceKey=None, amountKey=None):
+    def parse_order_book_branch(self, bidasks, priceKey=None, amountKey=None):
         priceKeys = list(bidasks.keys())
         parsedData = []
         for i in range(0, len(priceKeys)):
