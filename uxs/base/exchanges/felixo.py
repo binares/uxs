@@ -25,13 +25,11 @@ class felixo(Exchange):
                 'createOrder': False,
                 'fetchBalance': False,
                 # 'fetchClosedOrders': False,
-                'fetchL2OrderBook': False,
                 'fetchMarkets': 'emulated',
                 # 'fetchMyTrades': True,
                 'fetchOHLCV': False,
                 # 'fetchOpenOrders': True,
                 # 'fetchOrder': True,
-                'fetchOrderBook': False,
                 # 'fetchOrders': True,
                 # 'fetchOrderTrades': False,
                 'fetchTicker': False,
@@ -89,7 +87,7 @@ class felixo(Exchange):
             },
             'options': {
                 'symbol': {
-                    'quoteIds': ['USDT', 'USDC', 'TRY', 'BTC'],
+                    'quoteIds': ['USDT', 'USDC', 'TRY', 'BTC', 'FLX'],
                     'reversed': False,
                 },
             },
@@ -217,45 +215,17 @@ class felixo(Exchange):
             tickers.append(self.parse_ticker(rawTickers[i]))
         return self.filter_by_array(tickers, 'symbol', symbols)
 
-    def parse_ohlcv(self, ohlcv, market=None, timeframe='1m', since=None, limit=None):
-        #  [
-        #      1521119063000,  # Open time
-        #      "0.00000000",  # Open
-        #      "0.00000000",  # High
-        #      "0.00000000",  # Low
-        #      "0.00000000",  # Close
-        #      "0.00000000",  # Base Volume
-        #      "0.00000000",  # Quote volume
-        #  ]
-        return [
-            self.safe_integer(ohlcv, 0),
-            self.safe_float(ohlcv, 1),
-            self.safe_float(ohlcv, 2),
-            self.safe_float(ohlcv, 3),
-            self.safe_float(ohlcv, 4),
-            self.safe_float(ohlcv, 5),
-        ]
-
-    def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
+    def fetch_order_book(self, symbol, limit=None, params={}):
         self.load_markets()
         market = self.market(symbol)
         request = {
             'symbol': market['id'],
-            'period': self.timeframes[timeframe],
         }
-        if since is not None:
-            request['since'] = since
         if limit is not None:
-            request['limit'] = limit  # default 200
-        response = self.publicGetCandles(self.extend(request, params))
-        #  {
-        #      "code": 0,
-        #      "message": null,
-        #      "data": [
-        #          ...
-        #      ]
-        #  }
-        return self.parse_ohlcvs(self.safe_value(response, 'data', []), market, timeframe, since, limit)
+            request['limit'] = limit  # Default 100; max 1000. Valid limits: [5, 10, 20, 50, 100, 500, 1000]
+        response = self.publicGetOrderbook(self.extend(request, params))
+        orderbook = self.parse_order_book(response, self.safe_timestamp(response, 'timestamp'))
+        return orderbook
 
     def parse_symbol_id_joined(self, symbolId):
         # Convert by detecting and converting currencies in symbol
