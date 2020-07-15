@@ -210,7 +210,7 @@ class biki(Exchange):
         periodDurationInSeconds = self.parse_timeframe(timeframe)
         request = {
             'symbol': self.market_id(symbol),
-            'period': periodDurationInSeconds / 60,  # in minute
+            'period': int(periodDurationInSeconds / 60),  # in minute
         }
         # max limit = 1001
         # since & limit not supported
@@ -227,16 +227,17 @@ class biki(Exchange):
         return self.parse_ohlcvs(data, market, timeframe, since, limit)
 
     def parse_ticker(self, ticker, market=None):
-        timestamp = self.milliseconds()
+        timestamp = self.safe_integer(ticker, 'time')
         symbol = None
         if market:
             symbol = market['symbol']
         last = self.safe_float(ticker, 'last')
         percentage = self.safe_float(ticker, 'rose')
-        open = self.safe_float(ticker, 'open')
+        open = None
         change = None
         average = None
         if (last is not None) and (percentage is not None):
+            open = last / (1 + percentage)
             change = last - open
             average = self.sum(last, open) / 2
         return {
@@ -258,7 +259,7 @@ class biki(Exchange):
             'percentage': percentage,
             'average': average,
             'baseVolume': self.safe_float(ticker, 'vol'),
-            'quoteVolume': None,
+            'quoteVolume': self.safe_float(ticker, 'amount'),
             'info': ticker,
         }
 
@@ -268,7 +269,7 @@ class biki(Exchange):
         ticker = await self.publicGetGetTicker(self.extend({
             'symbol': self.market_id(symbol),
         }, params))
-        return self.parse_ticker(ticker, market)
+        return self.parse_ticker(self.safe_value(ticker, 'data'), market)
 
     def parse_trade(self, trade, market=None):
         # API doc says 'ts', but in fact it is 'ctime'
@@ -276,7 +277,7 @@ class biki(Exchange):
         # take either of orderid or orderId
         price = self.safe_float(trade, 'price')
         amount = self.safe_float(trade, 'amount')
-        type = self.safe_string(trade, 'type')
+        side = self.safe_string(trade, 'type')
         cost = None
         if price is not None:
             if amount is not None:
@@ -292,7 +293,7 @@ class biki(Exchange):
             'symbol': symbol,
             'order': None,
             'type': None,
-            'side': type == 'buy' if '1' else 'sell',
+            'side': side,
             'takerOrMaker': None,
             'price': price,
             'amount': amount,
