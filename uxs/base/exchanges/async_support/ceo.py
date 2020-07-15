@@ -39,7 +39,7 @@ class ceo(zb):
                 '1008': AuthenticationError,
             },
             'urls': {
-                'api': 'https://www.ceoex.com/api',
+                'api': 'https://api.ceo3.com/api',
                 'www': 'https://www.ceoex.com',
                 'doc': 'https://www.ceoex.com/apiDoc/con',
             },
