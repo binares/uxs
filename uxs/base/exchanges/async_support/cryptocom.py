@@ -24,7 +24,7 @@ class cryptocom(Exchange):
                 'fetchMarkets': True,
                 'fetchCurrencies': False,
                 'fetchOrderBook': True,
-                'fetchOHLCV': True,
+                'fetchOHLCV': 'emulated',
                 'fetchTrades': True,
                 'fetchTicker': True,
                 'fetchTickers': True,
@@ -59,7 +59,6 @@ class cryptocom(Exchange):
                     'get': [
                         'symbols',  # List all available market symbols
                         'ticker',  # Get tickers in all available markets
-                        'klines',  # Get k-line data over a specified period
                         'trades',  # Get last 200 trades in a specified market
                         'ticker/price',  # Get latest execution price for all markets
                         'depth',  # Get the order book for a particular market
@@ -119,6 +118,7 @@ class cryptocom(Exchange):
             id = self.safe_string(market, 'symbol')
             baseId = self.safe_string(market, 'base_coin')
             quoteId = self.safe_string(market, 'count_coin')
+            tickerId = baseId.lower() + quoteId.lower()
             base = self.safe_currency_code(baseId)
             quote = self.safe_currency_code(quoteId)
             symbol = base + '/' + quote
@@ -129,6 +129,7 @@ class cryptocom(Exchange):
             result.append({
                 'info': market,
                 'id': id,
+                'tickerId': tickerId,
                 'symbol': symbol,
                 'base': base,
                 'quote': quote,
@@ -154,38 +155,6 @@ class cryptocom(Exchange):
                 },
             })
         return result
-
-    def parse_ohlcv(self, ohlcv, market=None, timeframe='1m', since=None, limit=None):
-        # they return [Timestamp, Volume, Close, High, Low, Open]
-        return [
-            int(ohlcv[0]) * 1000,  # t
-            float(ohlcv[1]),  # o
-            float(ohlcv[2]),  # h
-            float(ohlcv[3]),  # l
-            float(ohlcv[4]),  # c
-            float(ohlcv[5]),  # v
-        ]
-
-    async def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
-        await self.load_markets()
-        market = self.market(symbol)
-        request = {
-            'symbol': market['id'],
-            'period': self.timeframes[timeframe],
-        }
-        response = await self.publicGetKlines(self.extend(request, params))
-        #      {
-        #       "code": "0",
-        #       "msg": "suc",
-        #       "data": [
-        #          [1588707000, 0.00000704, 0.00000707, 0.00000702, 0.00000704, 95172.49040524],
-        #          [1588707900, 0.00000703, 0.00000706, 0.00000702, 0.00000703, 54371.82911970],
-        #          ...
-        #          [1588708800, 0.00000704, 0.00000706, 0.00000702, 0.00000702, 65486.62800270],
-        #       ]
-        #      }
-        data = self.safe_value(response, 'data', [])
-        return self.parse_ohlcvs(data, market, timeframe, since, limit)
 
     async def fetch_order_book(self, symbol, limit=None, params={}):
         await self.load_markets()
@@ -295,15 +264,19 @@ class cryptocom(Exchange):
         result = {}
         for i in range(0, len(tickers)):
             ticker = tickers[i]
-            marketId = self.safe_string(ticker, 'symbol')
-            if marketId is not None:
-                if marketId in self.markets_by_id:
-                    market = self.markets_by_id[marketId]
-                    symbol = market['symbol']
-                    result[symbol] = self.parse_ticker(ticker, market)
-                else:
-                    result[marketId] = self.parse_ticker(ticker)
+            tickerId = self.safe_string(ticker, 'symbol')
+            market = self.find_market_by_ticker_id(tickerId)
+            if market is not None:
+                result[market['symbol']] = self.parse_ticker(ticker, market)
+            else:
+                result[tickerId] = self.parse_ticker(ticker)
         return result
+
+    def find_market_by_ticker_id(self, tickerId):
+        for i in range(0, len(self.symbols)):
+            market = self.markets[self.symbols[i]]
+            if market['tickerId'] == tickerId:
+                return market
 
     async def fetch_ticker(self, symbol, params={}):
         await self.load_markets()
