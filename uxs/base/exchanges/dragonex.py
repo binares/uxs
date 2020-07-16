@@ -261,27 +261,6 @@ class dragonex(Exchange):
             result[code] = account
         return self.parse_balance(result)
 
-    def parse_order_book(self, orderbook, timestamp=None, bidsKey='bids', asksKey='asks', priceKey='price', amountKey='volume'):
-        result = {}
-        buysList = []
-        sellsList = []
-        for i in range(0, len(self.safe_value(orderbook, 'data', {})['buys'])):
-            buys = []
-            buys.append(self.safe_integer(self.safe_value(orderbook, 'data', {})['buys'][i], priceKey, 0))
-            buys.append(self.safe_integer(self.safe_value(orderbook, 'data', {})['buys'][i], amountKey, 0))
-            buysList.append(buys)
-        for i in range(0, len(self.safe_value(orderbook, 'data', {})['sells'])):
-            sells = []
-            sells.append(self.safe_integer(self.safe_value(orderbook, 'data', {})['sells'][i], priceKey, 0))
-            sells.append(self.safe_integer(self.safe_value(orderbook, 'data', {})['sells'][i], amountKey, 0))
-            sellsList.append(sells)
-        result[bidsKey] = buysList
-        result[asksKey] = sellsList
-        result['timestamp'] = timestamp
-        result['nonce'] = None
-        result['datetime'] = None
-        return result
-
     def fetch_order_book(self, symbol, limit=None, params={}):
         self.load_markets()
         market = self.market(symbol)
@@ -291,7 +270,8 @@ class dragonex(Exchange):
         if limit is not None:
             request['limit'] = limit  # default = maximum = 100
         response = self.v1GetMarketDepth(self.extend(request, params))
-        return self.parse_order_book(response)
+        data = self.safe_value(response, 'data', {})
+        return self.parse_order_book(data, None, 'buys', 'sells', 'price', 'volume')
 
     def parse_ticker(self, ticker, market=None):
         ticker = self.safe_value(self.safe_value(ticker, 'data', {}), 'list', [])[0]
