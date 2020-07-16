@@ -309,8 +309,15 @@ class nominex(Exchange):
                     quote = self.safe_currency_code(quoteId)
                     symbol = base + '/' + quote
         last = self.safe_float(ticker, 'price')
+        change = self.safe_float(ticker, 'dailyChange')
+        open = None
+        average = None
+        if last is not None and change is not None:
+            open = last - change
+            average = (open + last) / 2
         volume = self.safe_float(ticker, 'baseVolume')
         quoteVolume = self.safe_float(ticker, 'quoteVolume')
+        vwap = (quoteVolume / volume) if (quoteVolume is not None and volume is not None and volume != 0) else None
         return {
             'symbol': symbol,
             'timestamp': timestamp,
@@ -321,14 +328,14 @@ class nominex(Exchange):
             'bidVolume': self.safe_float(ticker, 'bidSize'),
             'ask': self.safe_float(ticker, 'ask'),
             'askVolume': self.safe_float(ticker, 'askSize'),
-            'vwap': None,
-            'open': last - self.safe_float(ticker, 'dailyChange'),
+            'vwap': vwap,
+            'open': open,
             'close': last,
             'last': last,
-            'previousClose': last - self.safe_float(ticker, 'dailyChange'),
-            'change': self.safe_float(ticker, 'dailyChange'),
+            'previousClose': None,
+            'change': change,
             'percentage': self.safe_float(ticker, 'dailyChangeP'),
-            'average': (quoteVolume / volume) if (volume is not None and volume != 0) else None,
+            'average': average,
             'baseVolume': volume,
             'quoteVolume': quoteVolume,
             'info': ticker,
