@@ -93,6 +93,15 @@ class coindcx(Exchange):
                 '1w': '1w',
                 '1M': '1M',
             },
+            'fees': {
+                'byExchange': {
+                    'I': 0.001,  # coindcx
+                    'HB': 0.002,  # hitbtc
+                    'H': 0.002,  # huobi
+                    'B': 0.001,  # binance
+                    'BM': None,  # bitmex
+                },
+            },
             'timeout': 10000,
             'rateLimit': 2000,
             'exceptions': {
@@ -116,6 +125,8 @@ class coindcx(Exchange):
             baseId = self.safe_string(market, 'target_currency_short_name')
             base = self.safe_currency_code(baseId)
             symbol = base + '/' + quote
+            exchangeCode = self.safe_string(market, 'ecode')
+            feeRate = self.safe_float(self.fees['byExchange'], exchangeCode)
             active = False
             if market['status'] == 'active':
                 active = True
@@ -141,6 +152,8 @@ class coindcx(Exchange):
                 'baseId': baseId,
                 'quoteId': quoteId,
                 'active': active,
+                'taker': feeRate,
+                'maker': feeRate,
                 'precision': precision,
                 'limits': limits,
                 'info': market,
@@ -263,20 +276,28 @@ class coindcx(Exchange):
             takerOrMaker = 'maker' if trade['m'] else 'taker'
         price = self.safe_float_2(trade, 'p', 'price')
         amount = self.safe_float_2(trade, 'q', 'quantity')
+        fee = None
+        feeCost = self.safe_float(trade, 'fee_amount')
+        if feeCost is not None and market is not None:
+            fee = {
+                'cost': feeCost,
+                'currency': market['quote'],
+                'rate': self.safe_float(self.fees['byExchange'], self.safeString(trade, 'ecode')),  # taker and maker are equal
+            }
         return {
             'id': self.safe_string(trade, 'id'),
             'info': trade,
             'timestamp': timestamp,
             'datetime': self.iso8601(timestamp),
             'symbol': symbol,
-            'order': None,
+            'order': self.safe_string(trade, 'order_id'),
             'type': None,
             'takerOrMaker': takerOrMaker,
             'side': self.safe_string(trade, 'side'),
             'price': price,
             'amount': amount,
             'cost': price * amount,
-            'fee': self.safe_float(trade, 'fee_amount'),
+            'fee': fee,
         }
 
     def fetch_order_book(self, symbol, limit=None, params={}):
@@ -406,6 +427,17 @@ class coindcx(Exchange):
         marketId = self.safe_string(market, 'symbol')
         if market is None:
             market = self.safe_value(self.markets_by_id, marketId)
+        amount = self.safe_float(order, 'total_quantity')
+        remaining = self.safe_float(order, 'remaining_quantity')
+        average = self.safe_float(order, 'avg_price')
+        filled = None
+        cost = None
+        if amount is not None and remaining is not None:
+            filled = amount - remaining
+            if average is not None:
+                cost = filled * average
+        if average == 0:
+            average = None
         symbol = None
         quoteSymbol = None
         fee = None
@@ -433,10 +465,11 @@ class coindcx(Exchange):
             'type': type,
             'side': self.safe_string(order, 'side'),
             'price': self.safe_float_2(order, 'price', 'price_per_unit'),
-            'amount': self.safe_float(order, 'total_quantity'),
-            'filled': None,
-            'remaining': None,
-            'cost': None,
+            'amount': amount,
+            'filled': filled,
+            'remaining': remaining,
+            'cost': cost,
+            'average': average,
             'trades': None,
             'fee': fee,
             'info': order,
@@ -463,6 +496,7 @@ class coindcx(Exchange):
             body = self.json(query)
             signature = self.hmac(self.encode(body), self.encode(self.secret))
             headers = {
+                'Content-Type': 'application/json',
                 'X-AUTH-APIKEY': self.apiKey,
                 'X-AUTH-SIGNATURE': signature,
             }
