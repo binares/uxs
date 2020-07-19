@@ -67,10 +67,7 @@ async def _crash(params, delay=0):
     s = xs.get_subscription(params)
     cnx = s.cnx
     print('crashing {} : {} socket'.format(s, cnx.name))
-    if not cnx.signalr:
-        await call_via_loop_afut(cnx.conn.__aexit__, sys.exc_info(), loop=cnx.loop)
-    else:
-        cnx.conn.close()
+    await call_via_loop_afut(cnx._exit_conn, loop=cnx.loop)
 
 async def _corrupt_sync(symbol, delay=0):
     await asyncio.sleep(delay)

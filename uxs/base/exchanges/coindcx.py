@@ -6,6 +6,7 @@
 from ccxt.base.exchange import Exchange
 from ccxt.base.errors import ExchangeError
 from ccxt.base.errors import PermissionDenied
+from ccxt.base.errors import ArgumentsRequired
 from ccxt.base.errors import BadRequest
 from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
@@ -131,8 +132,8 @@ class coindcx(Exchange):
             if market['status'] == 'active':
                 active = True
             precision = {
-                'amount': self.safe_integer(market, 'base_currency_precision'),
-                'price': self.safe_integer(market, 'target_currency_precision'),
+                'amount': self.safe_integer(market, 'target_currency_precision'),
+                'price': self.safe_integer(market, 'base_currency_precision'),
             }
             limits = {
                 'amount': {
@@ -186,12 +187,21 @@ class coindcx(Exchange):
         return result
 
     def parse_ticker(self, ticker):
+        # Sometimes the bid and ask are plain wrong, not trustworthy
         timestamp = self.safe_timestamp(ticker, 'timestamp')
         tickersMarket = self.safe_string(ticker, 'market')
         if not (tickersMarket in self.markets_by_id):
             return None
         market = self.markets_by_id[tickersMarket]
         last = self.safe_float(ticker, 'last_price')
+        percentage = self.safe_float(ticker, 'change_24_hour')
+        open = None
+        change = None
+        average = None
+        if last is not None and percentage is not None:
+            open = last / (1 + percentage / 100)
+            change = last - open
+            average = (open + last) / 2
         return {
             'symbol': market['symbol'],
             'info': ticker,
@@ -204,13 +214,13 @@ class coindcx(Exchange):
             'ask': self.safe_float(ticker, 'ask'),
             'askVolume': None,
             'vwap': None,
-            'open': None,
+            'open': open,
             'close': last,
             'last': last,
             'previousClose': None,
-            'change': self.safe_float(ticker, 'change_24_hour'),
-            'percentage': None,
-            'average': None,
+            'change': change,
+            'percentage': percentage,
+            'average': average,
             'baseVolume': self.safe_float(ticker, 'volume'),
             'quoteVolume': None,
         }
@@ -223,6 +233,8 @@ class coindcx(Exchange):
         coindcxTimeframe = self.timeframes[timeframe]
         if coindcxTimeframe is None:
             raise ExchangeError(self.id + ' has no "' + timeframe + '" timeframe')
+        if limit is None:
+            limit = 500
         request = {
             'pair': coindcxPair,
             'interval': coindcxTimeframe,
@@ -246,6 +258,8 @@ class coindcx(Exchange):
         self.load_markets()
         market = self.market(symbol)
         coindcxPair = self.get_pair_from_info(market)
+        if limit is None:
+            limit = 30
         request = {
             'pair': coindcxPair,
             'limit': limit,
@@ -256,6 +270,8 @@ class coindcx(Exchange):
     def fetch_my_trades(self, symbol=None, since=None, limit=500, params={}):
         # https://coindcx-official.github.io/rest-api/?javascript#account-trade-history
         self.load_markets()
+        if limit is None:
+            limit = 500
         request = {
             'timestamp': self.milliseconds(),
             'limit': limit,
@@ -271,9 +287,15 @@ class coindcx(Exchange):
             market = self.safe_value(self.markets_by_id, marketId)
         if market is not None:
             symbol = market['symbol']
+        side = self.safe_string(trade, 'side')
         takerOrMaker = None
-        if 'm' in trade:
-            takerOrMaker = 'maker' if trade['m'] else 'taker'
+        if 'm' in trade:  # m stands for whether the buyer is market maker or not
+            takerSide = 'sell' if trade['m'] else 'buy'
+            if side is None:
+                takerOrMaker = 'taker'
+                side = takerSide
+            else:
+                takerOrMaker = 'taker' if (side == takerSide) else 'maker'
         price = self.safe_float_2(trade, 'p', 'price')
         amount = self.safe_float_2(trade, 'q', 'quantity')
         fee = None
@@ -293,7 +315,7 @@ class coindcx(Exchange):
             'order': self.safe_string(trade, 'order_id'),
             'type': None,
             'takerOrMaker': takerOrMaker,
-            'side': self.safe_string(trade, 'side'),
+            'side': side,
             'price': price,
             'amount': amount,
             'cost': price * amount,
@@ -301,6 +323,7 @@ class coindcx(Exchange):
         }
 
     def fetch_order_book(self, symbol, limit=None, params={}):
+        # May return corrupted ob, like fetchTicker does with bid / ask
         # https://coindcx-official.github.io/rest-api/?shell#order-book
         self.load_markets()
         market = self.market(symbol)
@@ -355,6 +378,8 @@ class coindcx(Exchange):
 
     def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
         self.load_markets()
+        if symbol is None:
+            raise ArgumentsRequired(self.id + ' fetchOpenOrders requires a symbol argument')
         market = self.market(symbol)
         request = {
             'market': self.safe_value(market, 'id'),

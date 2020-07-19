@@ -4,7 +4,7 @@ import time
 import math
 
 from fons.aio import call_via_loop_afut
-from uxs.fintls.ob import update_branch, infer_side
+from uxs.fintls.ob import update_branch, infer_side, create_orderbook
 import fons.log
 
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
@@ -86,7 +86,7 @@ class OrderbookMaintainer:
         if isinstance(symbol_or_ob, str):
             return asyncio.ensure_future(self._fetch_and_create(symbol_or_ob))
         
-        ob = symbol_or_ob
+        ob = create_orderbook(symbol_or_ob) # to ensure it is correctly formatted
         self._assign(ob)
             
         f = asyncio.Future()
@@ -113,7 +113,16 @@ class OrderbookMaintainer:
             if limit is not None:
                 fetched['bids'] = fetched['bids'][:limit]
                 fetched['asks'] = fetched['asks'][:limit]
-            tlogger.debug('fetched ob {} nonce {}'.format(symbol, fetched.get('nonce')))
+            rev_back = ''
+            if self.xs.ob['uses_nonce'] and self.xs.ob['ignore_fetch_nonce']:
+                since = time.time() - self.xs.ob['assume_fetch_max_age']
+                cache = self.cache[symbol]['updates']
+                i, item = next(((i,x) for i,x in enumerate(reversed(cache))
+                                if x['time_added'] < since), (None,None))
+                fetched['nonce'] = self.resolve_nonce(item['nonce'])[1] if item else -2
+                rev_back = ' (rev-back: -{})'.format(i if item else 'inf')
+            tlogger.debug('{} - fetched ob {} nonce {}{}'.format(
+                           self.xs.name, symbol, fetched.get('nonce'), rev_back))
             ob = dict({'symbol': symbol}, **fetched)
         except Exception as e:
             logger2.error(e)
@@ -237,6 +246,7 @@ class OrderbookMaintainer:
                 update[x] = []
         cache_size = self.xs.ob['cache_size'] 
         cache = self.cache[update['symbol']]['updates']
+        update['time_added'] = time.time()
         #update = dict(update, nonce=self.resolve_nonce(update['nonce']))
         cache.append(update)
         
@@ -449,6 +459,13 @@ class OrderbookMaintainer:
             s.params['limit'] = limit
             if s.merger is not None:
                 s.merger.params['limit'] = limit
+    
+    
+    def get_last_cached_nonce(self, symbol, default=None):
+        cache = self.cache[symbol]['updates']
+        if len(cache):
+            return self.resolve_nonce(cache[-1].get('nonce'))[1]
+        return default
     
     
     @staticmethod

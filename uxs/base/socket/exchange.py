@@ -268,6 +268,9 @@ class ExchangeSocket(WSClient):
         # the number of latest updates to be kept in cache
         'cache_size': 50,
         'uses_nonce': True,
+        # set this to True if uses_nonce and fetch_order_book doesn't return nonce
+        'ignore_fetch_nonce': False,
+        'assume_fetch_max_age': 5,
         'receives_snapshot': False,
         # what to do when update's nonce is unsynced
         'on_unsync': None, # reload (re-fetch) / restart (unsub-resub)
@@ -517,6 +520,7 @@ class ExchangeSocket(WSClient):
             'fill': [],
             'position': [],
         }
+        do_not_fetch_on_sub = ['ticker','all_tickers','orderbook','trades','ohlcv']
         
         for x in ['fetch_tickers', 'fetch_ticker', 'fetch_order_book',
                   'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
@@ -553,6 +557,9 @@ class ExchangeSocket(WSClient):
                 deep_update(self.has, ccxt_update)
             
             self.has[camel] = _copy.deepcopy(deep_get([self.has], get))
+            
+            if x in do_not_fetch_on_sub and emulated:
+                self.channels[x]['fetch_data_on_sub'] = False
             
             if emulated and x in self.channels and self.channels[x].get('url') is None:
                 self.channels[x]['url'] = ''
@@ -1107,6 +1114,8 @@ class ExchangeSocket(WSClient):
             remaining = amount
         if filled is None and remaining is not None:
             filled = amount - remaining
+        if payout is None and filled==0:
+            payout = 0
         
         datetime, timestamp = resolve_times([datetime, timestamp])
         
@@ -1561,6 +1570,9 @@ class ExchangeSocket(WSClient):
         """Poll everything that can't be accessed via websocket"""
         def get_emulated_subs():
             return [s for s in self.subscriptions if self.has_got(s.channel,'emulated')]
+        def is_time(method, id):
+            interval = deep_get([self.intervals], method, return2=self.intervals['default'])
+            return time.time() - self._last_fetches[id] > interval
         methods = {
             'all_tickers': 'fetch_tickers',
             'ticker': 'fetch_ticker',
@@ -1581,7 +1593,7 @@ class ExchangeSocket(WSClient):
                                 return2=self.max_missed_intervals['default'])
                 interval = deep_get([self.intervals], methods.get(s.channel),
                                      return2=self.intervals['default'])
-                if s.channel in methods and now - self._last_fetches[id] > mmi*interval:
+                if now - self._last_fetches[id] > mmi*interval:
                     self.change_subscription_state(s, 0)
             
             if pending:
@@ -1590,6 +1602,7 @@ class ExchangeSocket(WSClient):
             
             if self.is_subscribed_to(('account',)):
                 s = self.get_subscription(('account',))
+                id = ('account',)
                 if self.has_got('account','balance','emulated'):
                     coros['balance'] = self.poll_fetch_and_activate(s, 'fetch_balance')
                 if self.has_got('account','order','emulated'):
@@ -1600,29 +1613,31 @@ class ExchangeSocket(WSClient):
                         method = 'fetch_orders'
                     if not method: pass
                     elif self.has_got(method,'symbolRequired'):
-                        symbols = list(unique(o['symbol'] for o in self.open_orders.values()))
+                        _id = lambda symbol: id + (symbol,)
+                        symbols = unique((o['symbol'] for o in self.open_orders.values()
+                                          if is_time(method, _id(o['symbol']))), astype=list)
                         for symbol in symbols:
-                            coros['order'+':'+symbol] = self.poll_fetch_and_activate(s, method, (symbol,))
-                    else:
+                            coros['order'+':'+symbol] = self.poll_fetch_and_activate(s, method, (symbol,), _id(symbol))
+                    elif is_time(method, id):
                         coros['order'] = self.poll_fetch_and_activate(s, method)
             
             for s in get_emulated_subs():
-                if s.channel in methods:
-                    coros[s.id_tuple] = self.poll_fetch_and_activate(s, methods[s.channel])
+                method = methods.get(s.channel)
+                id = s.id_tuple + (method,)
+                if method and is_time(method, id):
+                    coros[s.id_tuple] = self.poll_fetch_and_activate(s, method, id=id)
             
             pending = [asyncio.ensure_future(c) for c in coros.values()]
             if not pending:
                 await asyncio.sleep(0.1)
     
     
-    async def poll_fetch_and_activate(self, subscription, method, args=None):
+    async def poll_fetch_and_activate(self, subscription, method, args=None, id=None):
         s = subscription
         if args is None:
             args = s.id_tuple[1:]
-        id = args + (method,)
-        interval = deep_get([self.intervals], method, return2=self.intervals['default'])
-        if time.time() - self._last_fetches[id] < interval:
-            return
+        if id is None:
+            id = s.id_tuple + (method,)
         tlogger.debug('{} - polling {}{}'.format(self.name, method, args))
         r = await getattr(self, method) (*args)
         self._last_fetches[id] = time.time()
@@ -2052,6 +2067,7 @@ class ExchangeSocket(WSClient):
     def parse_ccxt_order(self, r, *args):
         o = _copy.deepcopy(r)
         o['payout'] = None
+        o['average'] = o.get('average') if o.get('average')!=0 else None
         
         if o.get('amount') is not None:
             if o.get('filled') is not None and o.get('remaining') is None:
@@ -2063,8 +2079,9 @@ class ExchangeSocket(WSClient):
             if o['status'] not in ('open','expired'):
                 o['remaining'] = .0
         
-        params = self.api.lazy_parse(o, ('symbol','side','amount','price'))
-        if all(params.values()):
+        params = self.api.lazy_parse(o, ('symbol','side'), {'amount': 'filled', 'price': ['average','price']})
+        
+        if None not in params.values() and params['price']!=0:
             params.update({x: o[x] for x in ('takerOrMaker','fee') if o.get(x) is not None})
             try:
                 o['payout'] = self.api.calc_payout(**params)
@@ -2442,7 +2459,7 @@ class ExchangeSocket(WSClient):
         else:
             via_loop.call_soon_threadsafe(func)
         for b in broadcast:
-            self.broadcast_event(id, b)
+            self.broadcast_event(_, b)
     
     
     @staticmethod
