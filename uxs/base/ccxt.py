@@ -132,6 +132,8 @@ class ccxtWrapper:
             api.ids = self.ids
             api.currencies = self.currencies
             api.currencies_by_id = self.currencies_by_id
+            api.base_currencies = self.base_currencies
+            api.quote_currencies = self.quote_currencies
     
     
     def _ensure_no_nulls(self):
@@ -157,6 +159,15 @@ class ccxtWrapper:
                 logger.exception(e)
                 time.sleep(sleep)
                 if i == attempts-1: raise e
+    
+    
+    def _set_trading_fees(self, fees):
+        if self.markets is None:
+            return
+        for symbol, _fees in fees.items():
+            for x in ('taker','maker'):
+                if _fees.get(x) is not None and symbol in self.markets:
+                    self.markets[symbol][x] = _fees[x]
     
     
     def _get_pnl_function(self, market):
@@ -225,15 +236,15 @@ class ccxtWrapper:
     
     def set_markets(self, markets, currencies=None):
         import uxs.base.poll as poll
-        super().set_markets(markets,currencies)
+        super().set_markets(markets, currencies)
         if self.markets is None:
             return None
         self._set_lot_sizes()
         self._set_market_types()
-        default = poll.load_profile('__default__',get_name(self),'markets')
+        default = poll.load_profile('__default__', get_name(self), 'markets')
         custom = []
         if getattr(self,'_profile_name',None) is not None:
-            custom = poll.load_profile(self._profile_name,get_name(self),'markets')
+            custom = poll.load_profile(self._profile_name, get_name(self), 'markets')
         for item in default + custom:
             self.update_markets(item.data)
         self._ensure_synchronization()
@@ -241,11 +252,32 @@ class ccxtWrapper:
         return self.markets
     
     
+    def load_markets(self, reload=False):
+        prev_markets = self.markets
+        super().load_markets(reload)
+        if (not prev_markets or reload) and self.has['fetchTradingFees']:
+            try:
+                self.load_trading_fees()
+            except Exception as e:
+                logger.error('{} - could not load trading fees: {}'.format(self.id, repr(e)))
+                logger.exception(e)
+        return self.markets
+    
+    
+    def load_trading_fees(self, reload=False):
+        if not self.markets:
+            return
+        no_fees = any(m.get('taker') is None or m.get('maker') is None for m in self.markets.values())
+        if (no_fees or reload):
+            fees = self.fetch_trading_fees()
+            self._set_trading_fees(fees)
+    
+    
     def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
         return poll.sn_load_markets(self, limit)
-        
-        
+    
+    
     def update_markets(self, changed, deep=True, dismiss_new=True):
         """{symbol: {taker: x, maker: y}}"""
         from_markets = {x: deepcopy(y) for x,y in changed.items() if '/' in x}
@@ -1093,6 +1125,27 @@ class asyncCCXTWrapper(ccxtWrapper):
     async def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
         return await poll.load_markets(self, limit)
+    
+    
+    async def load_markets(self, reload=False):
+        prev_markets = self.markets
+        await super(ccxtWrapper, self).load_markets(reload)
+        if (not prev_markets or reload) and self.has['fetchTradingFees']:
+            try:
+                await self.load_trading_fees()
+            except Exception as e:
+                logger.error('{} - could not load trading fees: {}'.format(self.id, repr(e)))
+                logger.exception(e)
+        return self.markets
+    
+    
+    async def load_trading_fees(self, reload=False):
+        if not self.markets:
+            return
+        no_fees = any(m.get('taker') is None or m.get('maker') is None for m in self.markets.values())
+        if (no_fees or reload):
+            fees = await self.fetch_trading_fees()
+            self._set_trading_fees(fees)
     
     
     async def create_order(self, symbol, type, side, amount, price=None, params={}):

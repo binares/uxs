@@ -2,4 +2,8 @@
 Wrapper extensions for async methods.
 """
 
-__all__ = []
+from .luno import luno
+
+__all__ = [
+    'luno',
+]
