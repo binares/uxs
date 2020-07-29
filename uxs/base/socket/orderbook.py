@@ -11,6 +11,15 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
 
 class OrderbookMaintainer:
+    """Maintains orderbooks of ExchangeSocket"""
+    config_key = 'ob'
+    channel = 'orderbook'
+    data_key = 'orderbooks'
+    fetch_method = 'fetch_order_book'
+    update_method = 'update_orderbooks'
+    name = 'ob'
+    
+    
     def __init__(self, xs):
         """:type xs: ExchangeSocket"""
         self.xs = xs
@@ -31,7 +40,7 @@ class OrderbookMaintainer:
                 cfg['on_activate'] = [cfg['on_activate']]
             else:
                 cfg['on_activate'] = list(cfg['on_activate'])
-            if self.xs.ob['force_create'] is not None: #and not xs.ob['receives_snapshot']:
+            if self.cfg['force_create'] is not None: #and not cfg['receives_snapshot']:
                 cfg['on_activate'].append(self._init_orderbooks)
                 
         self.ids_count = defaultdict(int)
@@ -51,11 +60,11 @@ class OrderbookMaintainer:
         symbols, holds = self.store_update(update)
         
         for symbol in symbols:
-            if self.xs.orderbooks.get(symbol) is None:
-                if self.xs.sh.is_subscribed_to(('orderbook',symbol), active=None):
-                    self._schedule_orderbook_creation(symbol)
+            if self.data.get(symbol) is None:
+                if self.xs.sh.is_subscribed_to(self.id_tuple(symbol), active=None):
+                    self._schedule_creation(symbol)
             else:
-                for hold,id in holds[symbol]:
+                for hold, id in holds[symbol]:
                     asyncio.ensure_future(
                                 self._push_cache_after(symbol, hold, id))
                 self._push_cache(symbol, force_till_id)
@@ -65,11 +74,11 @@ class OrderbookMaintainer:
         updates = [update] if isinstance(update, dict) else update
         symbols = set()
         holds = defaultdict(list)
-        receives_snapshot = self.xs.ob['receives_snapshot']
+        receives_snapshot = self.cfg['receives_snapshot']
         
         for update in updates:
             symbol = update['symbol']
-            ob = self.xs.orderbooks.get(symbol)
+            ob = self.data.get(symbol)
             if ob is not None or not receives_snapshot:
                 self._add_to_cache(update)
                 symbols.add(symbol)
@@ -86,7 +95,7 @@ class OrderbookMaintainer:
         if isinstance(symbol_or_ob, str):
             return asyncio.ensure_future(self._fetch_and_create(symbol_or_ob))
         
-        ob = create_orderbook(symbol_or_ob) # to ensure it is correctly formatted
+        ob = self.build_ob(symbol_or_ob) # to ensure it is correctly formatted
         self._assign(ob)
             
         f = asyncio.Future()
@@ -95,10 +104,14 @@ class OrderbookMaintainer:
         return f
     
     
+    def build_ob(self, ob):
+        return create_orderbook(ob)
+    
+    
     async def _fetch_and_create(self, symbol):
         try:
-            fetch_limit = self.xs.ob['fetch_limit']
-            s = self.xs.get_subscription(('orderbook',symbol))
+            fetch_limit = self.cfg['fetch_limit']
+            s = self.xs.get_subscription(self.id_tuple(symbol))
             limit = self.resolve_limit(s.params.get('limit'))
             # use "null" to purposefully leave `fetch_limit` to None
             # and prevent `limit` overriding it
@@ -107,22 +120,22 @@ class OrderbookMaintainer:
             elif fetch_limit is None and limit is not None:
                 fetch_limit = limit
             args = (fetch_limit,) if fetch_limit is not None else ()
-            tlogger.debug('{} - creating orderbook {}.'.format(self.xs.name, symbol))
-            #self.orderbooks[symbol] = await self.xs.api.fetch_order_book(symbol)
-            fetched = await self.xs.fetch_order_book(symbol, *args)
+            tlogger.debug('{} - creating {} {}.'.format(self.xs.name, self.name, symbol))
+            #self.data[symbol] = await getattr(self.api, self.fetch_method)(symbol)
+            fetched = await getattr(self.xs, self.fetch_method)(symbol, *args)
             if limit is not None:
                 fetched['bids'] = fetched['bids'][:limit]
                 fetched['asks'] = fetched['asks'][:limit]
             rev_back = ''
-            if self.xs.ob['uses_nonce'] and self.xs.ob['ignore_fetch_nonce']:
-                since = time.time() - self.xs.ob['assume_fetch_max_age']
+            if self.cfg['uses_nonce'] and self.cfg['ignore_fetch_nonce']:
+                since = time.time() - self.cfg['assume_fetch_max_age']
                 cache = self.cache[symbol]['updates']
                 i, item = next(((i,x) for i,x in enumerate(reversed(cache))
                                 if x['time_added'] < since), (None,None))
                 fetched['nonce'] = self.resolve_nonce(item['nonce'])[1] if item else -2
                 rev_back = ' (rev-back: -{})'.format(i if item else 'inf')
-            tlogger.debug('{} - fetched ob {} nonce {}{}'.format(
-                           self.xs.name, symbol, fetched.get('nonce'), rev_back))
+            tlogger.debug('{} - fetched {} {} nonce {}{}'.format(
+                           self.xs.name, self.name, symbol, fetched.get('nonce'), rev_back))
             ob = dict({'symbol': symbol}, **fetched)
         except Exception as e:
             logger2.error(e)
@@ -137,24 +150,25 @@ class OrderbookMaintainer:
         if 'nonce' not in ob:
             ob['nonce'] = None
         
-        if self.xs.ob['uses_nonce'] and ob['nonce'] is None:
-            raise ValueError("Orderbook '{}' can't be assigned because it is missing nonce"
-                             .format(symbol))
+        if self.cfg['uses_nonce'] and ob['nonce'] is None:
+            raise ValueError("{} '{}' can't be assigned because it is missing nonce"
+                             .format(self.name, symbol))
         
         # Should the differences between old and new ob be sent to callbacks?
-        self.xs.orderbooks[symbol] = self._deep_overwrite(ob)
+        self.data[symbol] = self._deep_overwrite(ob)
         #print('nonce: {}'.format(nonce))
-        self.is_synced[symbol] = True
-        is_synced, performed_update = self._push_cache(symbol)
+        self.is_synced[symbol] = True # this will reset in ._push_cache
+        is_synced, performed_update = self._push_cache(symbol) 
         if is_synced and not performed_update:
             # To notify that the orderbook was in fact updated (created)
-            self.xs.update_orderbooks([{'symbol': symbol,
-                                        'bids': [],
-                                        'asks': [],
-                                        'nonce': ob['nonce']}],
-                                      enable_sub=True)
+            method = getattr(self.xs, self.update_method)
+            method([{'symbol': symbol,
+                     'bids': [],
+                     'asks': [],
+                     'nonce': ob['nonce']}],
+                    enable_sub=True)
         
-        if self.xs.ob['purge_cache_on_create']:
+        if self.cfg['purge_cache_on_create']:
             # We want to start clean, in case new nonces start from 0 again
             # or if orderbook was received via fetch and doesn't have a nonce
             # (while snapshot/updates do)
@@ -163,8 +177,8 @@ class OrderbookMaintainer:
     
     def _deep_overwrite(self, new_ob):
         # This ensures that the id() of orderbook dict and its bids/asks lists
-        # never change, even if `del self.xs.orderbooks[symbol]` has been evoked
-        prev = self.xs._orderbooks[new_ob['symbol']]
+        # never change, even if `del self.data[symbol]` has been evoked
+        prev = self._data[new_ob['symbol']]
         prev.update({k:v for k,v in new_ob.items() if k not in ('bids','asks')})
         for k in ('bids','asks'):
             if prev.get(k) is not None:
@@ -177,9 +191,9 @@ class OrderbookMaintainer:
         
     
     def _change_status(self, symbol, status):
-        if self.xs.sh.is_subscribed_to(('orderbook',symbol)):
+        if self.xs.sh.is_subscribed_to(self.id_tuple(symbol)):
             # This will also delete the orderbook (assuming delete_data_on_unsub=True)
-            self.xs.sh.change_subscription_state(('orderbook',symbol), status, True)
+            self.xs.sh.change_subscription_state(self.id_tuple(symbol), status, True)
     
     
     def _resolve_hold(self, update, holds):
@@ -244,7 +258,7 @@ class OrderbookMaintainer:
         for x in keys:
             if update.get(x) is None:
                 update[x] = []
-        cache_size = self.xs.ob['cache_size'] 
+        cache_size = self.cfg['cache_size'] 
         cache = self.cache[update['symbol']]['updates']
         update['time_added'] = time.time()
         #update = dict(update, nonce=self.resolve_nonce(update['nonce']))
@@ -265,14 +279,14 @@ class OrderbookMaintainer:
                                   as `force_till_id=None`
         """
         # Nonce of update entry may be given as closed range [start_nonce, end_nonce]
-        ob = self.xs.orderbooks.get(symbol)
+        ob = self.data.get(symbol)
         if ob is None:
             return False, False
         
         now = time.time()
-        uses_nonce = self.xs.ob['uses_nonce']
-        on_unsync = self.xs.ob['on_unsync']
-        on_unassign = self.xs.ob['on_unassign']
+        uses_nonce = self.cfg['uses_nonce']
+        on_unsync = self.cfg['on_unsync']
+        on_unassign = self.cfg['on_unassign']
         if on_unassign is None:
             on_unassign = 'reload' if uses_nonce else 'restart'
         cur_nonce = ob['nonce']
@@ -305,7 +319,7 @@ class OrderbookMaintainer:
         
         def _reset(method, reason):
             if self._is_time(symbol, method):
-                logger.debug('{} - {}ing orderbook {} due to {}.'.format(self.xs.name, method, symbol, reason))
+                logger.debug('{} - {}ing {} {} due to {}.'.format(self.xs.name, method, self.name, symbol, reason))
                 self._renew(symbol, method)
         
         is_synced = self.is_synced[symbol]
@@ -329,7 +343,7 @@ class OrderbookMaintainer:
             for side in ('bids','asks'):
                 to_push[side] += u[side]
             for item in u['unassigned']:
-                price, amount = item
+                price, amount = item[0], item[1]
                 inferred_side = self.infer_side(ob, price, to_push)
                 if inferred_side is None:
                     self._warn_uninferrable(symbol, item, to_push)
@@ -348,7 +362,7 @@ class OrderbookMaintainer:
         # If not synced should the orderbook be updated?
         if cur_nonce != ob['nonce'] or to_push.get('bids') or to_push.get('asks'):
             performed_update = True
-            self.xs.update_orderbooks([to_push], enable_sub=is_synced)
+            getattr(self.xs, self.update_method) ([to_push], enable_sub=is_synced) # update the orderbook
         #print(ob['nonce'])
         
         if not uses_nonce:
@@ -371,12 +385,12 @@ class OrderbookMaintainer:
         if method not in ('reload','restart'):
             raise ValueError('{} - incorrect ob renew method: {}'.format(self.xs.name, method))
         if method == 'reload':
-            self._schedule_orderbook_creation(symbol)
+            self._schedule_creation(symbol)
         else:
             self._restart_subscription(symbol)
     
     
-    def _schedule_orderbook_creation(self, symbol):
+    def _schedule_creation(self, symbol):
         if self._is_time(symbol, 'reload'):
             future = self.create_orderbook(symbol)
             future.t_created = time.time()
@@ -384,12 +398,14 @@ class OrderbookMaintainer:
     
     
     def _restart_subscription(self, symbol):
+        
         async def unsub_and_resub(s):
             await s.unsub()
             await asyncio.sleep(0.05)
             return await s.push()
+        
         if self._is_time(symbol, 'restart'):
-            s = self.xs.get_subscription(('orderbook',symbol))
+            s = self.xs.get_subscription(self.id_tuple(symbol))
             future = asyncio.ensure_future(unsub_and_resub(s))
             future.t_created = time.time()
             self.cache[symbol]['last_restart_execution'] = future
@@ -400,25 +416,25 @@ class OrderbookMaintainer:
         if method not in ('reload','restart'):
             raise ValueError('{} - incorrect ob renew method: {}'.format(self.xs.name, method))
         future = self.cache[symbol]['last_{}_execution'.format(method)]
-        if not self.xs.is_subscribed_to(('orderbook',symbol), active=None):
+        if not self.xs.is_subscribed_to(self.id_tuple(symbol), active=None):
             return False
-        return future is None or future.done() and time.time() > future.t_created + self.xs.ob['{}_interval'.format(method)]
+        return future is None or future.done() and time.time() > future.t_created + self.cfg['{}_interval'.format(method)]
     
     
     def _warn(self, symbol):
         t = self.cache[symbol]['last_warned']
-        if t is None or time.time() > t + self.xs.ob['reload_interval']:
+        if t is None or time.time() > t + self.cfg['reload_interval']:
             self.cache[symbol]['last_warned'] = time.time()
-            logger.debug('{} - orderbook {} nonce is unsynced with cache'.format(self.xs.name, symbol))
+            logger.debug('{} - {} {} nonce is unsynced with cache'.format(self.xs.name, self.name, symbol))
     
     
     def _warn_uninferrable(self, symbol, item, to_push):
-        ob = self.xs.orderbooks.get(symbol)
+        ob = self.data.get(symbol)
         bids = ob['bids'][:10] if ob is not None else None
         asks = ob['asks'][:10] if ob is not None else None
-        tlogger.debug('{} - ob {} encountered uninferrable item: {}\n\n'
+        tlogger.debug('{} - {} {} encountered uninferrable item: {}\n\n'
                       'asks[:10] {}\n\nbids[:10] {}\n\nto_push: {}\n'
-                      .format(self.xs.name, symbol, item, asks, bids, to_push))
+                      .format(self.xs.name, self.name, symbol, item, asks, bids, to_push))
     
     
     async def _init_orderbooks(self, cnx):
@@ -426,17 +442,16 @@ class OrderbookMaintainer:
         Force create orderbooks (that haven't already been automatically created on 1st .send_update/.send_ob) 
         X seconds after cnx activation
         """
-        wait = self.xs.ob['force_create']
+        wait = self.cfg['force_create']
         if wait is None:
             return
         await asyncio.sleep(wait)
 
         for s in self.xs.sh.subscriptions:
             symbol = s.params.get('symbol')
-            if s.channel != 'orderbook' or s.cnx != cnx: continue
+            if s.channel != self.channel or s.cnx != cnx: continue
             elif not s.state and self._is_time(symbol, 'reload'):
-                #asyncio.ensure_future(self.fetch_order_book(s['symbol']))
-                logger.debug('{} - force creating orderbook {}'.format(self.xs.name, symbol))
+                logger.debug('{} - force creating {} {}'.format(self.xs.name, self.name, symbol))
                 call_via_loop_afut(self._fetch_and_create, (symbol,), loop=self.xs.loop)
     
     
@@ -448,14 +463,14 @@ class OrderbookMaintainer:
     def resolve_limit(self, limit):
         if limit is None:
             return None
-        limits = sorted(self.xs.ob['limits'])
+        limits = sorted(self.cfg['limits'])
         return next((x for x in limits if limit<=x), None)
     
     
     def set_limit(self, symbol, limit):
         symbols = [symbol] if isinstance(symbol, str) else symbol
         for symbol in symbols:
-            s = self.xs.get_subscription(('orderbook',symbol))
+            s = self.xs.get_subscription(self.id_tuple(symbol))
             s.params['limit'] = limit
             if s.merger is not None:
                 s.merger.params['limit'] = limit
@@ -473,7 +488,23 @@ class OrderbookMaintainer:
         if not hasattr(nonce,'__iter__'):
             return (nonce,nonce)
         return nonce
-        
+    
+    
+    def id_tuple(self, symbol):
+        return (self.channel, symbol)
+    
     @property
     def send_ob(self):
         return self.send_orderbook
+    
+    @property
+    def cfg(self):
+        return getattr(self.xs, self.config_key)
+    
+    @property
+    def data(self):
+        return getattr(self.xs, self.data_key)
+    
+    @property
+    def _data(self):
+        return getattr(self.xs, '_'+self.data_key)

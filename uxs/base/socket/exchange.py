@@ -4,7 +4,7 @@ import asyncio
 import itertools
 import time
 import ccxt
-from collections import (defaultdict, deque)
+from collections import (defaultdict, deque, OrderedDict)
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
@@ -13,9 +13,11 @@ from ..auth import get_auth2, EXTRA_TOKEN_KEYWORDS
 from ..ccxt import init_exchange, _ccxtWrapper
 from .. import poll
 from .orderbook import OrderbookMaintainer
+from .l3 import L3Maintainer
 from .errors import (ExchangeSocketError, ConnectionLimit)
 from uxs.fintls.basics import (as_ob_fill_side, as_direction)
 from uxs.fintls.ob import (get_stop_condition, create_orderbook, update_branch, assert_integrity)
+from uxs.fintls.l3 import (create_l3_orderbook, update_l3_branch, assert_l3_integrity, l3_to_l2)
 from uxs.fintls.utils import resolve_times
 from wsclient import WSClient
 
@@ -49,7 +51,7 @@ class ExchangeSocket(WSClient):
     
     # Used on .subscribe_to_{x} , raises ValueError when doesn't have
     has = dict.fromkeys([
-         'all_tickers', 'ticker', 'orderbook', 'trades', 'ohlcv',
+         'all_tickers', 'ticker', 'orderbook', 'trades', 'ohlcv', 'l3',
          'account', 'match', 'balance', 'order', 'fill', 'position',
          'fetch_tickers', 'fetch_ticker', 'fetch_order_book',
          'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
@@ -107,6 +109,11 @@ class ExchangeSocket(WSClient):
             'delete_data_on_unsub': False,
             'required': ['symbol','timeframe'],
         },
+        'l3': {
+            'required': ['symbol'],
+            'auto_activate': False,
+            'delete_data_on_unsub': False, # ccxt does not have fetchL3 method for reloading
+        },
         # Fetch
         'fetch_tickers': {
             'type': 'fetch',
@@ -119,6 +126,11 @@ class ExchangeSocket(WSClient):
             'is_private': False,
         },
         'fetch_order_book': {
+            'type': 'fetch',
+            'required': ['symbol','limit'],
+            'is_private': False,
+        },
+        'fetch_l3_order_book': {
             'type': 'fetch',
             'required': ['symbol','limit'],
             'is_private': False,
@@ -281,6 +293,9 @@ class ExchangeSocket(WSClient):
         # whether or not bid and ask of ticker if modified on orderbook update
         'sends_bidAsk': False,
     }
+    
+    l3 = dict(ob)
+    
     order = {
         # these two don't matter if the websocket itself
         # receives new order/cancel order updates
@@ -315,6 +330,7 @@ class ExchangeSocket(WSClient):
         'order': 100, 
         'fill': 100,
         'orderbook': 1000,
+        'l3': 1000,
         'trades': 10000,
         'ohlcv': 100,
         'event': 1000,
@@ -339,6 +355,7 @@ class ExchangeSocket(WSClient):
          ['convert_currency','convert_cy'],
          ['convert_tf','convert_timeframe'],
          ['fetch_orderbook','fetch_order_book'],
+         ['fetch_l3_orderbook','fetch_l3_order_book'],
          ['subscribe_to_ob','subscribe_to_orderbook'],
          ['unsubscribe_to_ob','unsubscribe_to_orderbook'],
          ['sub_to_ob','subscribe_to_orderbook'],
@@ -350,6 +367,7 @@ class ExchangeSocket(WSClient):
          ['fetchTicker','fetch_ticker'],
          ['fetchTickers','fetch_tickers'],
          ['fetchOrderBook','fetch_order_book'],
+         ['fetchL3OrderBook','fetch_l3_order_book'],
          ['fetchOHLCV','fetch_ohlcv'],
          ['fetchMyTrades','fetch_my_trades'],
          ['fetchBalance','fetch_balance'],
@@ -365,6 +383,7 @@ class ExchangeSocket(WSClient):
         'fetch_limits',
         'channel_ids',
         'intervals',
+        'l3',
         'max_missed_intervals',
         'ob',
         'order',
@@ -442,8 +461,8 @@ class ExchangeSocket(WSClient):
             self.api.sync_with_other(self.pro)
             self.snapi.sync_with_other(self.pro)
         
-        names = ['ticker','orderbook','trades','ohlcv','balance',
-                 'fill','order','position','empty','recv']
+        names = ['ticker','orderbook','trades','ohlcv','l3',
+                 'balance','fill','order','position','empty','recv',]
         #query_names = ['fetch_order_book','fetch_ticker','fetch_tickers','fetch_balance']
         self.events = defaultdict(lambda: defaultdict(lambda: asyncio.Event(loop=self.loop)))
         for n in names:
@@ -452,14 +471,14 @@ class ExchangeSocket(WSClient):
         self.events['recv'][-1] = self.station.get_event('recv',0,0)
         self._init_events()
         
-        self.callbacks = {x: {} for x in ['orderbook','ticker','trades',
-                                          'ohlcv','position','balance',
-                                          'order','fill']}
+        self.callbacks = {x: {} for x in ['orderbook','ticker','trades','ohlcv','l3',
+                                          'position','balance','order','fill']}
         self.tickers = {}
         self.balances = {'free': {}, 'used': {}, 'total': {}}
         self.orderbooks = {}
         self.trades = {}
         self.ohlcv = {}
+        self.l3_books = {}
         self.unprocessed_fills = defaultdict(list)
         self.orders = {}
         self.open_orders = {}
@@ -471,11 +490,12 @@ class ExchangeSocket(WSClient):
         # (sub becomes inactive: ticker, orderbook) on one of the content items,
         # it is restored (in cleared form) from the backup on the next
         # .update_tickers / .update_orderbooks
-        for attr in ('tickers','balances','orderbooks','positions'):
+        for attr in ('tickers','balances','orderbooks','positions','l3_books'):
             setattr(self, '_'+attr, defaultdict(dict))
         self._balances.update(self.balances)
         
         self.orderbook_maintainer = self.OrderbookMaintainer_cls(self)
+        self.l3_maintainer = L3Maintainer(self)
         self._last_fetches = defaultdict(float)
         self._last_markets_loaded_ts = 0
         
@@ -489,7 +509,7 @@ class ExchangeSocket(WSClient):
         currencies = self.api.markets if self.api.markets is not None else {}
         
         for market in markets:
-            for x in ['ticker','orderbook','trades','ohlcv','position']:
+            for x in ['ticker','orderbook','trades','ohlcv','l3','position']:
                 if market not in self.events[x]:
                     self.events[x][market] = asyncio.Event(loop=self.loop)
         
@@ -508,57 +528,62 @@ class ExchangeSocket(WSClient):
         if not isinstance(self.has['account'], dict):
             self.has['account'] = dict.fromkeys(under_account, self.has_got('account'))
         
-        camel_map = {'fetch_ohlcv': 'fetchOHLCV'}
-        emulation_methods = {
-            'ticker': ['fetch_ticker'],
-            'all_tickers': ['fetch_tickers'],
-            'orderbook': ['fetch_order_book'],
-            'trades': ['fetch_trades'],
-            'ohlcv': ['fetch_ohlcv'],
-            'balance': ['fetch_balance'],
-            'order': ['fetch_my_trades','fetch_orders'], # 'fetch_order','fetch_open_orders',
-            'fill': [],
-            'position': [],
+        camel_map = {
+            'fetch_ohlcv': 'fetchOHLCV',
+            'fetch_l3_order_book': 'fetchL3OrderBook',
         }
-        do_not_fetch_on_sub = ['ticker','all_tickers','orderbook','trades','ohlcv']
+        emulation_methods = OrderedDict([
+            ['l3', ['fetch_l3_order_book']],
+            ['ticker', ['fetch_ticker']],
+            ['all_tickers', ['fetch_tickers']],
+            ['orderbook', ['fetch_order_book']],
+            ['trades', ['fetch_trades']],
+            ['ohlcv', ['fetch_ohlcv']],
+            ['balance', ['fetch_balance']],
+            ['order', ['fetch_my_trades','fetch_orders']], # 'fetch_order','fetch_open_orders',
+            ['fill', []],
+            ['position', []],
+        ])
+        do_not_fetch_on_emulated_sub = ['ticker','all_tickers','orderbook','trades','ohlcv','l3']
         
         for x in ['fetch_tickers', 'fetch_ticker', 'fetch_order_book',
-                  'fetch_trades', 'fetch_ohlcv', 'fetch_balance',
-                  'fetch_orders', 'fetch_order', 'fetch_open_orders',
-                  'fetch_closed_orders', 'fetch_my_trades', 'create_order',
-                  'edit_order', 'cancel_order'] + list(emulation_methods):
+                  'fetch_trades', 'fetch_ohlcv', 'fetch_l3_order_book',
+                  'fetch_balance', 'fetch_orders', 'fetch_order',
+                  'fetch_open_orders', 'fetch_closed_orders', 'fetch_my_trades',
+                  'create_order', 'edit_order', 'cancel_order'] + list(emulation_methods):
             methods = emulation_methods.get(x, [x])
             camel = camel_map.get(x, to_camelcase(x))
             camel_methods = [camel_map.get(m, to_camelcase(m)) for m in methods]
-            ccxt_has = any(self.api.has.get(cm) for cm in camel_methods) if x not in emulation_methods else None
-            self_has = self.has_got(x)
-            ws_has = self.has_got(x, 'ws') if x not in emulation_methods else self_has
-            if x in under_account:
-                self_has = self_has or self.has_got('account', x)
-                ws_has = ws_has or self_has or self.has_got('account', x, 'ws')
-            emulation_opt = None if x not in emulation_methods else any(self.has_got(m) for m in methods)
-            if x == 'balance':
-                emulation_opt = emulation_opt and self.has_got('fetch_balance',['free','used'])
-            any_has = self_has or ws_has or ccxt_has or emulation_opt
-            emulated = not any([self_has, ccxt_has, ws_has]) and emulation_opt
-            any_has, emulated = bool(any_has), bool(emulated)
+            get = [x] if x not in under_account else ['account', x]
+            initial_vals = {}
+            for k in ('ws', 'emulated', 'ccxt'):
+                try: initial_vals[k] = (self.has[x] if x not in under_account else self.has['account'][x]).pop(k)
+                except Exception: pass
+            self_has = self.has_got(*get)
+            ws_has = initial_vals.get('ws') 
+            ccxt_has = initial_vals.get('ccxt') # applies to fetch methods only
+            emulated = initial_vals.get('emulated') # applies to stream methods only
+            if ws_has is None:
+                ws_has =  self_has if x in emulation_methods and emulated is None else False
+            if ccxt_has is None:
+                ccxt_has = None if x in emulation_methods else any(self.api.has.get(cm) for cm in camel_methods)
+            if emulated is None:
+                emulated = any(self.has_got(m) for m in methods) if x in emulation_methods else None
+                if x == 'balance':
+                    emulated = emulated and self.has_got('fetch_balance', ['free','used'])
+                emulated = bool(not any([self_has, ws_has]) and emulated)
+                if x=='orderbook' and self.has_got('l3','ws') and not ws_has:
+                    emulated = 'l3'
+            any_has = bool(self_has or ws_has or ccxt_has or emulated)
             
-            get = [x]
-            update = {x: {'_': any_has, 'ws': ws_has, 'emulated': emulated}}
-            ccxt_update = {x: {'ccxt': ccxt_has}}
+            update = {x: {'_': any_has, 'ws': ws_has, 'emulated': emulated, 'ccxt': ccxt_has}}
             if x in under_account:
                 update = {'account': update}
-                ccxt_update = {'account': ccxt_update}
-                get = ['account'] + get
-            
             deep_update(self.has, update)
-            
-            if deep_get([self.has], get+['ccxt']) is None:
-                deep_update(self.has, ccxt_update)
             
             self.has[camel] = _copy.deepcopy(deep_get([self.has], get))
             
-            if x in do_not_fetch_on_sub and emulated:
+            if x in do_not_fetch_on_emulated_sub and emulated:
                 self.channels[x]['fetch_data_on_sub'] = False
             
             if emulated and x in self.channels and self.channels[x].get('url') is None:
@@ -576,6 +601,13 @@ class ExchangeSocket(WSClient):
             'ccxt': None,
             'emulated': any(self.has_got(x,'emulated') for x in under_account)
         })
+        if self.has['account']['emulated']:
+            acc_emul = [self.has[x]['emulated'] for x in under_account]
+            strs = list(set(v for v in acc_emul if isinstance(v, str)))
+            if len(strs) > 1:
+                self.has['account']['emulated'] = strs
+            elif len(strs) == 1:
+                self.has['account']['emulated'] = strs[0]
         
         if not self.has['account']['ws'] and self.channels['account'].get('url') is None:
             self.channels['account']['url'] = ''
@@ -681,6 +713,25 @@ class ExchangeSocket(WSClient):
         pass
     
     
+    def get_dependencies(self, subscription):
+        s = subscription
+        deps = []
+        if self.has_got('l3') and self.has_got(s.channel, 'emulated'):
+            emulated = self.has[s.channel]['emulated']
+            if emulated=='l3' or isinstance(emulated, (list, tuple)) and 'l3' in emulated:
+                if 'symbol' not in self.get_value(s.channel, 'required'):
+                    raise ValueError("{} - {} can't assign dependency 'l3' due to it not having 'symbol' param"
+                                     .format(self.name, s))
+                symbol = s.params['symbol']
+                is_merged = self.is_param_merged(symbol)
+                if not is_merged or self.has_merge_option('l3'):
+                    id_tuples = [('l3', symbol)]
+                else:
+                    id_tuples = [('l3', _symbol) for _symbol in symbol]
+                deps += id_tuples
+        return deps
+    
+    
     def update_tickers(self, data, *, action='update', set_event=True, enable_sub=False):
         """
         :param data:
@@ -774,7 +825,7 @@ class ExchangeSocket(WSClient):
         self._update_tickers_from_ob([ob['symbol'] for ob in data])
     
     
-    def update_orderbooks(self, data, *, set_event=True, enable_sub=False):
+    def update_orderbooks(self, data, *, set_event=True, enable_sub=False, is_delta=False):
         """
         :param data:
             [
@@ -791,15 +842,16 @@ class ExchangeSocket(WSClient):
         
         for d in data:
             symbol = d['symbol']
-            uniq_bid_changes,uniq_ask_changes = {},{}
+            amount_pcn = self.markets.get(symbol, {}).get('precision', {}).get('amount')
+            uniq_bid_changes, uniq_ask_changes = {}, {}
             
-            for side,uniq_changes in zip(('bids','asks'),(uniq_bid_changes,uniq_ask_changes)):
+            for side, uniq_changes in zip(('bids', 'asks'), (uniq_bid_changes, uniq_ask_changes)):
                 branch = self.orderbooks[symbol][side]
                 for item in d[side]:
-                    p,sprev,snew = update_branch(item,branch,side)
-                    try: sprev = uniq_changes.pop(p)[1]
+                    p, a0, a = update_branch(item, branch, side, is_delta=is_delta, round_to=amount_pcn)
+                    try: a0 = uniq_changes.pop(p)[1]
                     except KeyError: pass
-                    uniq_changes[p] = [p,sprev,snew]
+                    uniq_changes[p] = [p, a0, a]
             
             prev_nonce = self.orderbooks[symbol].get('nonce')
             if 'nonce' in d:
@@ -858,6 +910,123 @@ class ExchangeSocket(WSClient):
         
         if data:
             self.update_tickers(data, set_event=set_ticker_event)
+    
+    
+    def create_l3_orderbooks(self, data, *, set_event=True, enable_sub=False): 
+        """
+        :param data:
+            [
+                {
+                 'symbol': <str>,
+                 'bids': [[bPrice0, bQnt0, bId0], ...],
+                 'asks': [[aPrice0, aQnt0, aId0], ...],
+                 'nonce': <int> or None]}
+                },
+                ...
+            ]
+        """
+        for l3 in data:
+            symbol = l3['symbol']
+            amount_pcn = self.markets.get(symbol, {}).get('precision', {}).get('amount')
+            self.l3_books[symbol] = new = \
+                self.l3_maintainer._deep_overwrite(create_l3_orderbook(l3))
+            if enable_sub:
+                self.change_subscription_state(('l3', symbol), 1, True)
+            if set_event:
+                self.safe_set_event('l3', symbol, {'_': 'l3',
+                                                   'symbol': symbol,
+                                                   'bids_count': len(new['bids']),
+                                                   'aks_count': len(new['asks'])})
+            if self.l3['assert_integrity']:
+                assert_l3_integrity(self.l3_books[symbol])
+            
+            if self.l3_maintainer.is_subbed_to_l2_ob(symbol):
+                l2_ob = l3_to_l2(self.l3_books[symbol], amount_pcn)
+                self.create_orderbooks([l2_ob], enable_sub=True)
+        
+        if data and set_event:
+            self.safe_set_event('l3', -1)
+        
+        # self._update_tickers_from_ob([ob['symbol'] for ob in data])
+    
+    
+    def update_l3_orderbooks(self, data, *, set_event=True, enable_sub=False):
+        """
+        :param data:
+            [
+                {
+                 'symbol': <str>,
+                 'bids': [[bPrice0, bQnt0, bId0], ...],
+                 'asks': [[aPrice0, aQnt0, aId0], ...],
+                 'nonce': <int> or None]}
+                },
+                ...
+            ]
+        """
+        cb_data = []
+        create_l2 = set()
+        push_to_l2 = set()
+        
+        for d in data:
+            symbol = d['symbol']
+            amount_pcn = self.markets.get(symbol, {}).get('precision', {}).get('amount')
+            bid_deltas, ask_deltas = defaultdict(float), defaultdict(float)
+            
+            for side, deltas in zip(('bids', 'asks'), (bid_deltas, ask_deltas)):
+                branch = self.l3_books[symbol][side]
+                for item in d[side]:
+                    p, a, id, p0, a0 = update_l3_branch(item, branch, side)
+                    if p0 == p:
+                        deltas[p] += (a - a0)
+                    else:
+                        deltas[p0] -= a0
+                        deltas[p] += a
+                if amount_pcn is not None:
+                    for p, a in deltas.items():
+                        deltas[p] = round(a, amount_pcn)
+            
+            prev_nonce = self.l3_books[symbol].get('nonce')
+            if 'nonce' in d:
+                self.l3_books[symbol]['nonce'] = d['nonce']
+            
+            if enable_sub:
+                self.change_subscription_state(('l3', symbol), 1, True)
+            
+            if set_event:
+                self.safe_set_event('l3', symbol, {'_': 'l3',
+                                                   'symbol': symbol,
+                                                   'bids_count': len(d['bids']),
+                                                   'aks_count': len(d['asks'])})
+            
+            cb_input = {'_': 'l3',
+                        'symbol': symbol,
+                        'data': {'symbol': symbol,
+                                 'bids': list(bid_deltas.items()), 
+                                 'asks': list(ask_deltas.items()),
+                                 'nonce': (prev_nonce, d.get('nonce'))}}
+            self.exec_callbacks(cb_input, 'l3', symbol)
+            cb_data.append(cb_input)
+            
+            if self.l3['assert_integrity']:
+                assert_l3_integrity(self.orderbooks[symbol])
+                
+            if self.l3_maintainer.is_subbed_to_l2_ob(symbol):
+                if self.orderbooks.get(symbol) is None:
+                    create_l2.add(symbol)
+                push_to_l2.add(symbol)
+        
+        if cb_data:
+            if set_event:
+                self.safe_set_event('l3', -1)
+            self.exec_callbacks(cb_data, 'l3', -1)
+        
+        push_data = [x['data'] for x in cb_data if x['symbol'] in push_to_l2]
+        for symbol in create_l2:
+            self.l3_maintainer.assign_l2(symbol)
+        if push_data:
+            self.update_orderbooks(push_data, is_delta=True, enable_sub=True)
+        
+        # self._update_tickers_from_ob([d['symbol'] for d in data])
     
     
     def update_trades(self, data, key=None, *, set_event=True, enable_sub=False):
@@ -979,7 +1148,7 @@ class ExchangeSocket(WSClient):
             cb_data.append(cb_input)
         
         if cb_data:
-            if enable_sub:
+            if enable_sub and self.is_subscribed_to(('account',)):
                 self.change_subscription_state(('account',), 1, True)
             if set_event:
                 self.safe_set_event('position', -1)
@@ -1051,7 +1220,7 @@ class ExchangeSocket(WSClient):
             cb_data.append(cb_input)
         
         if cb_data:
-            if enable_sub:
+            if enable_sub and self.is_subscribed_to(('account',)):
                 self.change_subscription_state(('account',), 1, True)
             if set_event:
                 self.safe_set_event('balance', -1)
@@ -1162,7 +1331,7 @@ class ExchangeSocket(WSClient):
             except Exception as e:
                 logger.exception(e)
         
-        if enable_sub:
+        if enable_sub and self.is_subscribed_to(('account',)):
             self.change_subscription_state(('account',), 1, True)
                 
         if set_event:
@@ -1290,7 +1459,7 @@ class ExchangeSocket(WSClient):
             except Exception as e:
                 logger.exception(e)
         
-        if enable_sub:
+        if enable_sub and self.is_subscribed_to(('account',)):
             self.change_subscription_state(('account',), 1, True)
         
         if set_event:
@@ -1333,7 +1502,7 @@ class ExchangeSocket(WSClient):
         if loc is not None:
             tlogger.debug('{} - fill {} already registered.'.format(
                 self.name,(id,symbol,side,price,amount,order)))
-            if enable_sub:
+            if enable_sub and self.is_subscribed_to(('account',)):
                 self.change_subscription_state(('account',), 1, True)
             return
         
@@ -1439,8 +1608,8 @@ class ExchangeSocket(WSClient):
                  'fee': fee, 'datetime': datetime, 'type': type, 'takerOrMaker': takerOrMaker,
                  'cost': cost, 'params': params, 'set_event': set_event,
                  'set_order_event': set_order_event})
-            
-        if enable_sub:
+        
+        if enable_sub and self.is_subscribed_to(('account',)):
             self.change_subscription_state(('account',), 1, True)
     
     
@@ -1502,7 +1671,7 @@ class ExchangeSocket(WSClient):
     
     def fetch_data(self, s, prev_state):
         #If subsciption has been enabled, fetch all data
-        # (except for orderbook, that is handled by .orderbook_maintainer)
+        # (except for orderbook & l3, that is handled by .orderbook_maintainer / .l3_maintainer)
         _map = {'all_tickers': 'fetch_tickers',
                 'ticker': 'fetch_ticker',
                 'trades': 'fetch_trades',
@@ -1523,6 +1692,7 @@ class ExchangeSocket(WSClient):
             'ticker': ['tickers'],
             'account': ['balances','positions'],
             'orderbook': ['orderbooks'],
+            'l3': ['l3_books'],
         }
         attrs = _map.get(s.channel, [s.channel])
         if s.channel not in self.channels:
@@ -1561,15 +1731,17 @@ class ExchangeSocket(WSClient):
                     try: del container[s.id_tuple[-1]]
                     except KeyError: pass
         
-        if s.channel == 'orderbook':
+        if s.channel in ('orderbook','l3'):
             symbol = s.id_tuple[1]
-            self.orderbook_maintainer.is_synced[symbol] = False
+            maintainer = getattr(self, s.channel+'_maintainer')
+            maintainer.is_synced[symbol] = False
     
     
     async def poll_loop(self):
         """Poll everything that can't be accessed via websocket"""
         def get_emulated_subs():
-            return [s for s in self.subscriptions if self.has_got(s.channel,'emulated')]
+            return [s for s in self.subscriptions if self.has_got(s.channel, 'emulated') and
+                                                     self.has[s.channel]['emulated'] != 'l3']
         def is_time(method, id):
             interval = deep_get([self.intervals], method, return2=self.intervals['default'])
             return time.time() - self._last_fetches[id] > interval
@@ -1578,6 +1750,7 @@ class ExchangeSocket(WSClient):
             'ticker': 'fetch_ticker',
             'orderbook': 'fetch_order_book',
             'trades': 'fetch_trades',
+            'l3': 'fetch_l3_order_book',
         }
         pending = []
         while self.is_running():
@@ -1595,6 +1768,9 @@ class ExchangeSocket(WSClient):
                                      return2=self.intervals['default'])
                 if now - self._last_fetches[id] > mmi*interval:
                     self.change_subscription_state(s, 0)
+                    symbol = s.params.get('symbol')
+                    if s.channel=='l3' and self.l3_maintainer.is_subbed_to_l2_ob(symbol):
+                        self.change_subscription_state(('orderbook', symbol), 0) 
             
             if pending:
                 _, pending = await asyncio.wait(pending, timeout=0.1)
@@ -1602,24 +1778,25 @@ class ExchangeSocket(WSClient):
             
             if self.is_subscribed_to(('account',)):
                 s = self.get_subscription(('account',))
-                id = ('account',)
-                if self.has_got('account','balance','emulated'):
-                    coros['balance'] = self.poll_fetch_and_activate(s, 'fetch_balance')
+                id_bal = ('account','fetch_balance')
+                if self.has_got('account','balance','emulated') and is_time('fetch_balance', id_bal):
+                    coros['balance'] = self.poll_fetch_and_activate(s, 'fetch_balance', id=id_bal)
                 if self.has_got('account','order','emulated'):
                     method = None
                     if self.has_got('fetch_my_trades'):
                         method = 'fetch_my_trades'
                     elif self.has_got('fetch_orders'):
                         method = 'fetch_orders'
+                    id_order = ('account', method)
                     if not method: pass
-                    elif self.has_got(method,'symbolRequired'):
-                        _id = lambda symbol: id + (symbol,)
+                    elif self.has_got(method, 'symbolRequired'):
+                        _id = lambda symbol: id_order + (symbol,)
                         symbols = unique((o['symbol'] for o in self.open_orders.values()
                                           if is_time(method, _id(o['symbol']))), astype=list)
                         for symbol in symbols:
                             coros['order'+':'+symbol] = self.poll_fetch_and_activate(s, method, (symbol,), _id(symbol))
-                    elif is_time(method, id):
-                        coros['order'] = self.poll_fetch_and_activate(s, method)
+                    elif is_time(method, id_order):
+                        coros['order'] = self.poll_fetch_and_activate(s, method, id=id_order)
             
             for s in get_emulated_subs():
                 method = methods.get(s.channel)
@@ -1645,10 +1822,10 @@ class ExchangeSocket(WSClient):
         s = next((_s for _s in self.subscriptions if _s.id_tuple==s.id_tuple), None)
         if s is None:
             return
-        if s.channel != 'orderbook':
+        if s.channel not in ('orderbook', 'l3'):
             self.change_subscription_state(s, 1)
         else:
-            self.ob_maintainer.send_orderbook(r)
+            getattr(self, s.channel+'_maintainer').send_orderbook(r)
         #if method == 'fetch_open_orders':
         #    if not self.has('fill')
     
@@ -1810,6 +1987,22 @@ class ExchangeSocket(WSClient):
                 })
     
     
+    def subscribe_to_l3(self, symbol, params={}):
+        return self.sh.add_subscription(
+            self.ip.extend({
+                '_': 'l3',
+                'symbol': self.merge(symbol),
+            }, params))
+    
+    
+    def unsubscribe_to_l3(self, symbol):
+        return self.sh.remove_subscription(
+            {
+                '_': 'l3',
+                'symbol': symbol,
+            })
+    
+    
     async def fetch_balance(self, params={}):
         if not self.test:
             balances = await poll.fetch(self.api, 'balances', 0, kwargs={'params': params})
@@ -1832,6 +2025,10 @@ class ExchangeSocket(WSClient):
         else:
             ob = await self.api.fetch_order_book(symbol, limit, params)
         return {'symbol': symbol, **ob, 'nonce': ob.get('nonce')}
+    
+    
+    async def fetch_l3_order_book(self, symbol, limit=None):
+        raise ccxt.NotSupported(self.exchange + ' does not support fetchL3OrderBook yet')
     
     
     async def fetch_tickers(self, symbols=None, params={}):

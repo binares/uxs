@@ -143,29 +143,32 @@ async def fetch_tickers(symbols=(), sub=True, unsub=False, resub=False, merge=Fa
         
     
 async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, resub=False,
-                           merge=False, unsync=False, unassign=False, params={}):
+                           merge=False, unsync=False, unassign=False, params={}, is_l3=False):
     await asyncio.sleep(2)
     """try: print('orderbook {}: {}'.format(symbols[0], await xs.fetch_order_book(symbols[0])))
     except Exception as e:
         logger2.exception(e)"""
-        
+    channel = 'orderbook' if not is_l3 else 'l3'
+    name = 'ob' if not is_l3 else 'l3'
+    method = 'subscribe_to_'+channel
+    attr = 'orderbooks' if not is_l3 else 'l3_books'
     if not sub: pass
     elif not merge:
         for symbol in symbols:
-            xs.subscribe_to_orderbook(symbol, params)
-    else: xs.subscribe_to_orderbook(symbols, params)
+            getattr(xs, method) (symbol, params)
+    else: getattr(xs, method) (symbols, params)
         
     def _print_ob_changes(inp, symbol=symbols[0]):
-        print('(d)ob  {}: {}'.format(symbol, inp['data']))
+        print('(d){}  {}: {}'.format(name, symbol, inp['data']))
         
     def _print_last_n(symbol=symbols[0]):
-        ob = xs.orderbooks.get(symbol,{})
-        print('(d)ob {} asks[:{}]: {}'.format(symbol, _print, ob.get('asks',[])[:_print]))
-        print('(d)ob {} bids[:{}]: {}'.format(symbol, _print, ob.get('bids',[])[:_print]))
+        ob = getattr(xs, attr).get(symbol,{})
+        print('(d){} {} asks[:{}]: {}'.format(name, symbol, _print, ob.get('asks',[])[:_print]))
+        print('(d){} {} bids[:{}]: {}'.format(name, symbol, _print, ob.get('bids',[])[:_print]))
     
     _symbols = symbols if not merge else [symbols]
     for symbol in _symbols:
-        params2 = dict({'_': 'orderbook', 'symbol': symbol}, **params)
+        params2 = dict({'_': channel, 'symbol': symbol}, **params)
         if sub and unsub: asyncio.ensure_future(_unsub(params2, unsub, merge))
         if sub and resub: asyncio.ensure_future(_resub(params2, resub, merge))
     
@@ -175,10 +178,10 @@ async def fetch_order_book(symbols, _print='changes', sub=True, unsub=False, res
         asyncio.ensure_future(_corrupt_assignation(symbols[0], unassign))
     
     if _print == 'changes':
-        xs.add_callback(_print_ob_changes, 'orderbook', symbols[0])
+        xs.add_callback(_print_ob_changes, channel, symbols[0])
     else:
         while True:
-            e = xs.events['orderbook'][symbols[0]]
+            e = xs.events[channel][symbols[0]]
             (await e.wait()), e.clear()
             _print_last_n()
     #while True:
@@ -306,16 +309,13 @@ def main():
     activities = ['u','unsub','r','resub','s','stop','c','crash','unsync','unassign']
     apply = dict.fromkeys(activities, _to_float)
     apply.update(dict.fromkeys(['d','display','ticker','tickers',
-                                'all_tickers','ob','trades','ohlcv',
+                                'all_tickers','ob','l3','trades','ohlcv',
                                 'account','pos','position','positions'], _split))
     apply['log'] = apply['loggers'] = _to_int
     
     p = parse_argv(sys.argv[1:], apply)
     
-    nr_test_loggers = p.get(p.which(['log','loggers']))
-    if nr_test_loggers is None:
-        nr_test_loggers = 2
-    
+    nr_test_loggers = 2 if not p.contains('verbose') else 3
     fons.log.quick_logging(nr_test_loggers)
 
     unsub = p.which(['u','unsub'], False)
@@ -373,6 +373,7 @@ def main():
     
     t_param = p.which(['ticker','tickers','all_tickers'], '')
     ob_param = p.which(['ob'], '')
+    l3_param = p.which(['l3'], '')
     trades_param = p.which(['trades',], '')
     ohlcv_param = p.which(['ohlcv',], '')
     o_param = next((x for x in p if x.startswith('order+') or x.startswith('order-') or x=='order'), '')
@@ -392,8 +393,10 @@ def main():
     if t_param:
         t_symbols, t_merge = _get_items(t_param, ())
         coros += [fetch_tickers(t_symbols, sub=True, unsub=unsub, resub=resub, merge=t_merge)]
-        
-    if ob_param:
+    
+    def do_ob(ob_param):
+        nonlocal coros
+        is_l3 = (ob_param=='l3')
         ob_symbols, ob_merge = _get_items(ob_param)
         ob_limit = p.get('ob_limit')
         ob_params = {}
@@ -408,9 +411,16 @@ def main():
         unsync = p.get('unsync', False)
         unassign = p.get('unassign', False)
         coros += [fetch_order_book(ob_symbols, ob_print, sub=True, unsub=unsub, resub=resub,
-                                   merge=ob_merge, unsync=unsync, unassign=unassign, params=ob_params)]
-        if crash: coros += [_crash({'_': 'orderbook', 'symbol': ob_symbols[0]}, crash)]
-        
+                                   merge=ob_merge, unsync=unsync, unassign=unassign, params=ob_params, is_l3=is_l3)]
+        channel = 'l3' if is_l3 else 'orderbook'
+        if crash: coros += [_crash({'_': channel, 'symbol': ob_symbols[0]}, crash)]
+    
+    if ob_param:
+        do_ob(ob_param)
+    
+    if l3_param:
+        do_ob(l3_param)
+    
     if trades_param:
         tr_symbols, tr_merge = _get_items(trades_param)
         coros += [fetch_trades(tr_symbols, sub=True, unsub=unsub, resub=resub, merge=tr_merge)]

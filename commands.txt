@@ -62,6 +62,11 @@ python -m uxs.test_xc coindcx ob=BTC/USDT trades=BTC/USDT u r c
 python -m uxs.test_xc coindcx order d
 python -m uxs.test_xc coindcx order+BTC/USDT,limit,buy,0.002,9200 d
 python -m uxs.test_xc coindcx order+BTC/USDT,limit,sell,0.002,9000 d
+python -m uxs.test_xc luno l3=ETH/BTC d
+python -m uxs.test_xc luno ob=ETH/BTC u r d
+python -m uxs.test_xc luno trades=ETH/BTC d verbose
+python -m uxs.test_xc luno order
+python -m uxs.test_xc luno order+XRP/BTC,limit,buy,0.002,9200 d
 
 python -m pytest
 python -m pytest test/test_auth.py -vv -ss

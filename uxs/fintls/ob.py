@@ -205,26 +205,33 @@ def create_orderbook(data, add_time=False, bids_key='bids', asks_key='asks', pri
     }
 
 
-def update_branch(item, branch, side='bids'):
-    rate, qnt = parse_item(item)
-    new_item = [rate, qnt]
-    if not rate: return (.0, .0, .0)
-    #if side in('bid','bids'): op = lambda x,rate: x[0] >= rate
-    #else: op = lambda x,rate: x[0] <= rate
+def update_branch(item, branch, side='bids', is_delta=False, round_to=None):
+    """:param round_to: adding deltas is imprecise, new amount is rounded"""
+    rate, amount = new_item = parse_item(item)
+    if not rate:
+        return (.0, .0, .0)
     op = rate.__le__ if side in ('ask','asks') else rate.__ge__
-    loc,ob_item = next(((i,x) for i,x in enumerate(branch) if op(x[0])),(-1,[rate,0.0]))
-    are_equal_prices = (ob_item[0] == rate)
+    empty_place = (-1, [rate, .0])
+    loc, ob_item = next(((i,x) for i,x in enumerate(branch) if op(x[0])), empty_place)
+    prev_rate, prev_amount = ob_item
+    new_amount = amount
     if loc != -1:
-        if are_equal_prices:
-            if qnt: branch[loc] = new_item
-            else: branch.pop(loc)
-        elif qnt: branch.insert(loc,new_item)
-    elif qnt:
+        if prev_rate == rate: # prices are equal -> item is swapped out / removed
+            if is_delta:
+                new_amount = max(.0, prev_amount + amount)
+                if round_to is not None:
+                    new_amount = round(new_amount, round_to)
+                new_item = [rate, new_amount]
+            if new_amount:
+                branch[loc] = new_item
+            else:
+                branch.pop(loc)
+        elif new_amount > 0:
+            branch.insert(loc, new_item)
+    elif new_amount > 0:
         branch.append(new_item)
-    #assert sorted(branch,key=lambda x:x[0],reverse=(side in ('bid','bids')))
-    #rate,prev_qnt,new_qnt
-    prev_qnt = ob_item[1] if are_equal_prices else 0.0
-    return (rate, prev_qnt, qnt)
+    
+    return (rate, prev_amount, max(.0, new_amount))
     
     
 def assert_integrity(ob):

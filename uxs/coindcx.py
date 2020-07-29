@@ -41,6 +41,7 @@ class coindcx(ExchangeSocket):
             'timestamp': True, 'datetime': True, 'symbol': True, 'id': False,
             'order': False, 'type': False, 'takerOrMaker': True, 'side': True,
             'price': True, 'amount': True, 'cost': True, 'fee': False},
+        'fetch_open_orders': {'symbolRequired': True},
     }
     has['fetch_ticker'] = has['fetch_tickers'].copy()
     connection_defaults = {

@@ -143,7 +143,7 @@ class gateiofu(ExchangeSocket):
             symbols = [params['symbol']] if issubclass(cls, str) else params['symbol']
             for symbol in symbols:
                 if self.markets and symbol in self.markets:
-                    settle.append(self.markets[symbol]['settleCurrency'])
+                    settle.append(self.markets[symbol]['settleId'])
                 else:
                     base, quote = symbol.split('/')
                     settle.append('USDT' if quote.lower()=='usdt' else 'BTC')
