@@ -35,13 +35,11 @@ class bitmex(ExchangeSocket):
     }
     channels = {
         'account': {
-            'required': ['symbol'],
-            'identifying': (),
-            #Multiple symbols can actually be given at once,
-            # but since they are not in id_tuple ("identifying")
-            # it doesn't count as "merged"
-            'merge_option': False,
             'auth': {'apply_to_packs': [0]},
+        },
+        'own_market': {
+            'auth': {'apply_to_packs': [0]},
+            'merge_option': True,
         },
         'orderbook': {
             'merge_option': True,
@@ -55,7 +53,8 @@ class bitmex(ExchangeSocket):
                         'change': True, 'percentage': True, 'average': False, 'vwap': True,
                         'baseVolume': True, 'quoteVolume': True, 'active': True},
         'orderbook': True,
-        'account': {'balance': True, 'order': True, 'fill': True, 'position': True},
+        'account': {'balance': True, 'position': True},
+        'own_market': {'order': True, 'fill': True},
         'fetch_tickers': True,
         'fetch_ticker': True,
         'fetch_order_book': True,
@@ -91,7 +90,8 @@ class bitmex(ExchangeSocket):
     }
     channel_ids = {
         # This can be overriden to include 'transact' and 'wallet' in the subscription
-        'account': ['execution:<symbol>','order:<symbol>','margin','position'], #'transact','wallet'
+        'account': ['margin','position'], #'transact','wallet'
+        'own_market': ['execution:<symbol>','order:<symbol>'],
         #'ticker': ['instrument:{symbol}'],
         'all_tickers': ['instrument'],
         'orderbook': ['orderBookL2:<symbol>'],
@@ -123,11 +123,17 @@ class bitmex(ExchangeSocket):
 
         if 'subscribe' in message:
             if message['success']:
-                _channel = message['subscribe']
-                if _channel == 'position':
+                split = message['subscribe'].split(':')
+                _channel, _symbol = (split[0], None) if len(split)<2 else split
+                if _channel in ('position', 'margin', 'execution', 'order'):
                     async def change_state():
+                        if _channel in ('position', 'margin'):
+                            s = {'_': 'account'}
+                        else:
+                            s = {'_': 'own_market', 'symbol': self.convert_symbol(_symbol, 0)}
                         await asyncio.sleep(1)
-                        self.change_subscription_state({'_': 'account'}, 1)
+                        if self.is_subscribed_to(s):
+                            self.change_subscription_state(s, 1, True)
                     asyncio.ensure_future(change_state())
                 logger.debug("Subscribed to %s." % message['subscribe'])
             else:

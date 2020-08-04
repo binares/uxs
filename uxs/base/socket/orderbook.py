@@ -285,6 +285,7 @@ class OrderbookMaintainer:
         
         now = time.time()
         uses_nonce = self.cfg['uses_nonce']
+        nonce_increment = self.cfg['nonce_increment']
         on_unsync = self.cfg['on_unsync']
         on_unassign = self.cfg['on_unassign']
         if on_unassign is None:
@@ -324,8 +325,16 @@ class OrderbookMaintainer:
         
         is_synced = self.is_synced[symbol]
         
-        def _is_synced(n0, cur_nonce, n1):
-            return n0 <= cur_nonce + 1 <= n1
+        def _is_delta_synced(n0, cur_nonce, n1):
+            return n0 <= cur_nonce + nonce_increment <= n1
+        
+        def _is_increasing(n0, cur_nonce, n1):
+            return cur_nonce < n0 <= n1
+        
+        if isinstance(nonce_increment, int):
+            _is_synced = _is_delta_synced
+        else:
+            _is_synced = _is_increasing
         
         for u in eligible:
             n0,n1 = self.resolve_nonce(u.get('nonce'))

@@ -28,24 +28,14 @@ class luno(ExchangeSocket):
         },
         'drop_unused_connection': True,
     }
-    channels = {
-        'account': {
-            'required': ['symbol'],
-            'identifying': (),
-        },
-    }
     connection_defaults = {
         'ping_interval': 30,
         'connect_timeout': 5,
         'reconnect_try_interval': 5, # initial connect often fails
     }
     has = {   
-        'l3': True,
-        'trades': {'emulated': 'l3'},
-        'account': {
-            'order': {'emulated': 'l3'},
-            'fill': {'emulated': 'l3'}
-        },
+        'l3': {'trades': dict.fromkeys(['id', 'symbol', 'amount', 'price', 'cost',
+                                        'takerOrMaker', 'order', 'timestamp', 'orders'], True)},
         'fetch_balance': {'free': True, 'used': True, 'total': True},
         'fetch_my_trades': {'symbolRequired': True},
         'fetch_tickers': {
@@ -135,7 +125,8 @@ class luno(ExchangeSocket):
             ob = dict(ob_0, bids=[], asks=[])
             updates = []
             if r.get('trade_updates'):
-                _updates, trades = self.parse_l3_trade_updates(r['trade_updates'], symbol, ob_0['timestamp'])
+                _updates, trades = \
+                    self.parse_l3_trade_updates(r['trade_updates'], symbol, r['timestamp'], r['sequence'])
                 updates += _updates
             if r.get('create_update'):
                 updates += [self.parse_l3_create_update(r['create_update'])]
@@ -156,23 +147,14 @@ class luno(ExchangeSocket):
             if subbed_to_trades:
                 self.change_subscription_state(('trades',symbol), 1)
         
-        if subbed_to_trades:
-            self.update_trades([{'symbol': symbol, 'trades': trades}], enable_sub=is_active)
-        
-        for t in trades:
-            taker_id = t['info']['taker_order_id']
-            maker_id = t['info']['maker_order_id']
-            for tOM, id in [('taker', taker_id),('maker', maker_id)]:
-                if id in self.orders:
-                    f = dict(t, order=id, takerOrMaker=tOM)
-                    self.add_fill_from_dict(f, enable_sub=is_active)
+        self.update_trades([{'symbol': symbol, 'trades': trades}], enable_sub=is_active)
     
     
     def parse_l3_snapshot(self, ob):
         return create_l3_orderbook(ob, ob['timestamp'], 'bids', 'asks', 'price', 'volume', 'id')
     
     
-    def parse_l3_trade_updates(self, trades, symbol, timestamp=None):
+    def parse_l3_trade_updates(self, trades, symbol, timestamp=None, sequence=None):
         l3 = self.l3_books[symbol]
         updates = []
         parsed_trades = []
@@ -190,9 +172,12 @@ class luno(ExchangeSocket):
             price = maker_item[0]
             new_item = [price, maker_item[1]-amount, maker_item[2]]
             updates.append({maker_side: [new_item]})
-            parsed_trades.append(
+            trade_0 = \
                 self.api.trade_entry(symbol=symbol, amount=amount, price=price, cost=cost,
-                                     takerOrMaker='taker', order=taker_id, timestamp=timestamp, info=t))
+                                     takerOrMaker='taker', order=taker_id, timestamp=timestamp,
+                                     orders=[maker_id, taker_id], info=t)
+            trade = dict(trade_0, id=self.api._create_trade_id(trade_0, sequence))
+            parsed_trades.append(trade)
         return updates, parsed_trades
     
     

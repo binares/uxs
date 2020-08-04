@@ -85,9 +85,12 @@ class StopLosser:
     
     def manage(self, symbol, changes=None, force_cancel=False):
         if self.symbols is not None and symbol not in self.symbols:
-            return
+            # previously this was due to technical limitations, but now keep it this way
+            # to not place unintended stop-loss orders
+            return 
         
         if symbol not in self.gui.symbol_rows:
+            self.xs.subscribe_to_own_market(symbol)
             self.gui.add_symbol(symbol)
         
         if not self.xs.positions.get(symbol, {}).get('amount'):
@@ -98,8 +101,9 @@ class StopLosser:
             return
         
         is_account_active = self.xs.is_subscribed_to({'_': 'account'}, True)
+        is_own_market_active = self.xs.is_subscribed_to({'_': 'own_market', 'symbol': symbol}, True)
         
-        if not is_account_active:
+        if not is_account_active or not is_own_market_active:
             return
         
         enabled = self.gui.enabled_vars[self.gui.symbol_rows[symbol]].get()
@@ -632,7 +636,10 @@ def main(argv=sys.argv, conn=None):
     if xs is None:
         _exchange = exchange+':TRADE' if ':' not in exchange else exchange
         xs = uxs.get_streamer(_exchange, config)
-    xs.subscribe_to_account(params)
+    
+    xs.subscribe_to_account() # for position and margin updates
+    for symbol in symbols:
+        xs.subscribe_to_own_market(symbol)
     
     if p.contains('no-xs','no_xs'):
         sl_config['start_xs'] = False

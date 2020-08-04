@@ -39,7 +39,7 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 oid = None
 
 def print_xs_info():
-    print(xs.apiKey)
+    # print(xs.apiKey)
     print('has ("all_tickers"): {}'.format(xs.has_got('all_tickers')))
     print('has ("all_tickers","last"): {}'.format(xs.has_got('all_tickers','last')))
     print('has ("all_tickers",["last"]): {}'.format(xs.has_got('all_tickers',['last'])))
@@ -470,10 +470,19 @@ def main():
     
     if any_account and not account_symbols:
         account_symbols.add('ETH/BTC')
-        
+    
     if account_symbols:
-        xs.subscribe_to_account({'symbol': xs.merge(account_symbols)})  
-        
+        if xs.has_got('own_market', 'ws'): 
+            if xs.has_merge_option('own_market'):
+                xs.subscribe_to_own_market(account_symbols)
+            else:
+                for symbol in account_symbols:
+                    xs.subscribe_to_own_market(symbol)
+            if xs.has_got('account'):
+                xs.subscribe_to_account()
+        else:
+            xs.subscribe_to_account()
+    
     if stop:
         coros += [_stop(stop), _restart(stop)]
         

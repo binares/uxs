@@ -342,21 +342,26 @@ class ccxtWrapper:
                     'change', 'percentage', 'average', 'baseVolume', 'quoteVolume']:
             if isinstance(e[var],str):
                 e[var] = float(e[var])
-                
-        if e['vwap'] is None and e['quoteVolume'] is not None and e['baseVolume'] is not None and e['baseVolume'] > 0:
+        
+        g = {x: e[x] is not None for x in ['baseVolume', 'quoteVolume', 'vwap']}
+        if not g['vwap'] and g['quoteVolume'] and g['baseVolume'] and e['baseVolume'] > 0:
             e['vwap'] = e['quoteVolume'] / e['baseVolume']
-            
-        if e['last'] is not None and e['open'] is not None:
-            if e['change'] is None:
-                e['change'] = e['last'] - e['open']
-            if e['average'] is None:
-                e['average'] = ccxt.Exchange.sum(e['last'], e['open']) / 2
-            if e['open'] > 0 and e['percentage'] is None:
-                e['percentage'] = e['change'] / e['open'] * 100
+        elif not g['quoteVolume'] and g['vwap'] and g['baseVolume']:
+            e['quoteVolume'] = e['vwap'] * e['baseVolume']
+        elif not g['baseVolume'] and g['quoteVolume'] and g['vwap'] and e['vwap'] > 0:
+            e['baseVolume'] = e['quoteVolume'] / e['vwap']
         
         if e['close'] is None and e['last'] is not None:
             e['close'] = e['last']
-            
+        
+        if e['close'] is not None and e['open'] is not None:
+            if e['change'] is None:
+                e['change'] = e['close'] - e['open']
+            if e['average'] is None:
+                e['average'] = ccxt.Exchange.sum(e['close'], e['open']) / 2
+            if e['open'] > 0 and e['percentage'] is None:
+                e['percentage'] = e['change'] / e['open'] * 100
+        
         return e
     
     
@@ -374,7 +379,8 @@ class ccxtWrapper:
     
     @staticmethod
     def trade_entry(symbol=None, timestamp=None, datetime=None, id=None, order=None, type=None,
-                    takerOrMaker=None, side=None, price=None, amount=None, cost=None, fee=None, **kw):
+                    takerOrMaker=None, side=None, price=None, amount=None, cost=None, fee=None,
+                    orders=None, **kw):
         """{'timestamp': <int>, 'datetime': <str>, 'symbol': <str>, 'id': <str>,
              'order': <str>?, 'type': <str>, 'takerOrMaker': <str>, 'side': <str>,
              'price': <float>, 'amount': <float>, 'cost': <float>, 'fee': <float>}"""
@@ -397,6 +403,7 @@ class ccxtWrapper:
             'amount': amount,
             'cost': cost, 
             'fee': fee,
+            'orders': orders,
         },**kw)
         
         for var in ['price', 'amount', 'cost', 'fee']:

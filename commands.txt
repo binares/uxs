@@ -29,7 +29,9 @@ python -m uxs.test_xc kraken order test d
 python -m uxs.test_xc kraken order+-XRP/EUR,limit,sell,32.8,0.26
 python -m uxs.test_xc kraken "order-INSERT_ORDER_ID||XRP/EUR" test d
 python -m uxs.test_xc kucoin ticker=XRP/BTC ob order -unsub 6 -resub 2 s
+python -m uxs.test_xc kucoin trades=BTC/USDT
 python -m uxs.test_xc kucoin order+- d test
+python -m uxs.test_xc kucoin order+BTC/USDT,limit,buy,0.001,12000 d test
 python -m uxs.test_xc poloniex tickers u r s
 python -m uxs.test_xc poloniex ob order u r s
 python -m uxs.test_xc bitmex ob=BTC/USD d test
@@ -37,7 +39,7 @@ python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=10 d test
 python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=25 d test
 python -m uxs.test_xc bitmex tickers d
 python -m uxs.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d test
-python -m uxs.test_xc bitmex order+BCHH20,limit,buy,1,0.04142 test
+python -m uxs.test_xc bitmex order+BTC/USD,limit,buy,10,12000 test
 python -m uxs.test_xc binancefu order position d
 python -m uxs.test_xc binancefu ob=BTC/USDT d
 python -m uxs.test_xc binancefu ticker=BTC/USDT,ETH/USDT m d
@@ -87,4 +89,4 @@ python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{krakenfu,ETH/USD} "amo
 python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range -- kucoin BTC/USDT ---- test
 python -m uxs.ui.desk krakenfu XRP/USD{binancefu,XRP/USDT} "amounts=XRP/USD=2000"
 
-python -m uxs.ui.stoploss bitmex BTC/USD ETH/USD
+python -m uxs.ui.stoploss bitmex BTC/USD ETH/USD test

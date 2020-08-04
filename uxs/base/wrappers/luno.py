@@ -5,6 +5,7 @@ class luno:
     def describe(self):
         return self.deep_extend(super().describe(), {'urls': {'fees_http': 'https://www.luno.com/en/countries'}})
     
+    
     def parse_trading_fees_http_response(self, http_response):
         tables = pd.read_html(http_response)
         table = next(t for t in tables if 'Market' in t.columns and 'Tier 1' in t.columns)
@@ -26,3 +27,14 @@ class luno:
                 'info': None,
             }
         return fees
+    
+    
+    def parse_trade(self, trade):
+        parsed = super().parse_trade(trade)
+        sequence = self.safe_string(parsed['info'], 'sequence')
+        return dict(parsed, id=self._create_trade_id(parsed, sequence))
+    
+    
+    def _create_trade_id(self, trade, sequence):
+        return '{}+{}+{}+{}+{}'.format(sequence, trade['symbol'], trade['side'], trade['amount'], trade['price'])
+

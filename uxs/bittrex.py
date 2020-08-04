@@ -186,7 +186,7 @@ class bittrex(ExchangeSocket):
         if self.tp.has_waiter(id):
             self.tp.forward_to_waiters(id, d, copy=1)
         else:
-            #TODO: Send only when nonce is larger than previous?
+            # Send only when nonce is larger than previous?
             self.orderbook_maintainer.send_orderbook(d)
     
     
@@ -389,7 +389,7 @@ class bittrex(ExchangeSocket):
         channel = rq.channel
         data = []
         
-        if channel == 'account':
+        if channel in ('account', 'own_market'):
             method = 'GetAuthContext'
         elif channel in ('orderbook','fetch_order_book'): #'market'?
             #retrieve full ob: 'QueryExchangeState'

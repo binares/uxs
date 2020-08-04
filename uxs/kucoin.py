@@ -9,7 +9,6 @@ td = datetime.timedelta
 from uxs.base.socket import ExchangeSocket, ExchangeSocketError
 
 from fons.crypto import nonce as _nonce, sign
-from fons.time import ctime_ms, pydt_from_ms
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
@@ -46,9 +45,8 @@ class kucoin(ExchangeSocket):
                         'baseVolume' :False, 'quoteVolume': False},
         'ticker': True, #same as all_tickers
         'orderbook': True,
-        'trades': {'match': True},
-        'account': {'balance': True, 'order': False, 'fill': False},
-        'match': True,
+        'trades': {'orders': True},
+        'account': {'balance': True},
         'fetch_tickers': True,
         'fetch_ticker': True,
         'fetch_order_book': True,
@@ -70,10 +68,8 @@ class kucoin(ExchangeSocket):
         'all_tickers': '/market/ticker:all',
         'orderbook': '/market/level2:{symbol}',
         'trades': '/market/match:{symbol}',
-        'match': '/market/match:{symbol}',
     }
     message = {'id': {'key': 'id'}}
-    match_is_subset_of_trades = True
     ob = {
         'fetch_limits': [20, 100],
     }
@@ -86,6 +82,9 @@ class kucoin(ExchangeSocket):
         'quote_ids': ['ETH', 'BTC', 'USDT', 'NEO', 'KCS', 'PAX',
                       'TUSD', 'USDC', 'NUSD', 'TRX', 'DAI'],
         'sep': '-',
+    }
+    trade = {
+        'sort_by': lambda x: (int(x['info']['sequence']), x['price'], x['amount']),
     }
     
     def handle(self, response):
@@ -103,7 +102,7 @@ class kucoin(ExchangeSocket):
         elif r['topic'].startswith('/account/balance'):
             self.on_balance(r)
         elif r['topic'].startswith('/market/match:'):
-            self.on_match(r)
+            self.on_trade(r)
         else:
             logger2.error('{} - unknown response: {}'.format(self.name, r))
             
@@ -118,7 +117,7 @@ class kucoin(ExchangeSocket):
             symbol = self.convert_symbol(r['subject'], 0)
         d = r['data']
         ts = d['time']
-        ts_str = pydt_from_ms(ts).isoformat()[:23] + 'Z'
+        ts_str = self.api.iso8601(ts)
         last = float(d['price'])
         bid = float(d['bestBid'])
         bidVolume = float(d['bestBidSize'])
@@ -194,7 +193,7 @@ class kucoin(ExchangeSocket):
         self.update_balances(balances_formatted)
         
         
-    def on_match(self, r):
+    def on_trade(self, r):
         """{
           "id":"5c24c5da03aa673885cd67aa",
           "type":"message",
@@ -213,37 +212,16 @@ class kucoin(ExchangeSocket):
             "tradeId":"5c24c5da03aa673885cd67aa"
           }
         }"""
-        #print('match: {}'.format(r['data']))
         d = r['data']
         symbol = self.convert_symbol(d['symbol'],0)
-        moid = d['makerOrderId']
-        toid = d['takerOrderId']
-        order = None
-        for oid in (moid,toid):
-            try: order = self.orders[oid]
-            except KeyError: pass
-            else: break
-        
-        is_subbed_to_trades = self.is_subscribed_to({'_': 'trades', 'symbol': symbol})
-        
-        if order is None and not is_subbed_to_trades:
-            return
-        
-        #print('myMatch: {}'.format(r['data']))
-        takerOrMaker = 'taker' if order['id'] == toid else 'maker'
+        orders = [d['makerOrderId'], d['takerOrderId']]
         ts = int(d['time'][:-6])
         amount = float(d['size'])
         price = float(d['price'])
         side = d['side']
-        
-        if order is not None:
-            self.add_fill(id=d['tradeId'], symbol=symbol, side=side, price=price, amount=amount,
-                          takerOrMaker=takerOrMaker, timestamp=ts, order=order['id'], params={'info': d})
-        
-        if is_subbed_to_trades:
-            e = self.api.trade_entry(symbol=symbol, timestamp=ts, id=d['tradeId'],
-                                     price=price, amount=amount, side=side, info=d)
-            self.update_trades([{'symbol': symbol, 'trades': [e]}])
+        t = self.api.trade_entry(symbol=symbol, timestamp=ts, id=d['tradeId'],
+                                 price=price, amount=amount, side=side, orders=orders, info=d)
+        self.update_trades([{'symbol': symbol, 'trades': [t]}])
         
         
     async def create_connection_url(self):
@@ -267,7 +245,7 @@ class kucoin(ExchangeSocket):
         url = self.url_components['ws'] + '/' + self.url_components[which_end]
         headers = {}
         if auth:
-            now = ctime_ms()
+            now = self.api.milliseconds()
             str_to_sign = str(now) + 'POST' + '/' + self.url_components['private-end']
             signature = sign(self.secret, str_to_sign, 'sha256', hexdigest=False, base64=True)
             headers = {
@@ -294,10 +272,10 @@ class kucoin(ExchangeSocket):
         p = rq.params
         channel = rq.channel
         topic = self.channel_ids[channel]
-        auth = channel in ('balance', 'account', 'match')
+        auth = (channel=='account')
         if channel == 'account': pass
         elif channel == 'tickers_all': pass
-        elif channel in ('ticker', 'orderbook', 'market', 'match'):
+        elif channel in ('ticker', 'orderbook', 'trades'):
             topic = topic.format(
                 symbol = self.ip.comma_separate(p['symbol'], self.convert_symbol))
         
@@ -317,23 +295,9 @@ class kucoin(ExchangeSocket):
         return (out, message_id)
     
     
-    """def subscribe_to_match(self,symbol,config={}):
-        self.verify_has('market','match')
-        return self.add_subscription(self.extend({
-            '_': 'match',
-            'symbol': symbol},config))
-        
-        
-    def unsubscribe_to_match(self,symbol):
-        self.verify_has('market','match')
-        return self.remove_subscription({
-            '_': 'match',
-            'symbol': symbol})"""
-    
-    
     def ping(self):
         return {
-            "id": str(ctime_ms()),
+            "id": str(self.api.milliseconds()),
             "type": "ping",
         }
 

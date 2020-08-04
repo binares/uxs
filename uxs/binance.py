@@ -126,9 +126,9 @@ class binance(ExchangeSocket):
             if isinstance(r[0], dict) and r[0].get('e') == '24hrTicker':
                 self.on_all_tickers(r)
             else:
-                self.notify_unknown_response(r)
+                self.notify_unknown(r)
         else:
-            self.notify_unknown_response(r)
+            self.notify_unknown(r)
     
     
     def on_all_tickers(self, r):

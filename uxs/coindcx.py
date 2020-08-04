@@ -91,7 +91,7 @@ class coindcx(ExchangeSocket):
         elif event == 'bo-trade-update':
             self.on_fill(data)
         else:
-            self.notify_unknown_response(r)
+            self.notify_unknown(r)
     
     
     def on_orderbook_update(self, r):
@@ -363,6 +363,7 @@ class coindcx(ExchangeSocket):
         
         event = 'join' if sub else 'leave'
         if channel == 'account':
+            self.api.check_required_credentials() # otherwise socketio will just keep reconnecting
             channelName = 'coindcx'
         else:
             channelName = self.api.markets[p['symbol']]['info']['pair']

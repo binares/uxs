@@ -81,6 +81,7 @@ class Desk:
         self.events = {'ok': asyncio.Event(loop=self.xs.loop)}
         self.has_tickers_all = {}
         self.has_ob_merge = {}
+        self.has_own_market = {}
         self._symbols = defaultdict(list)
         
         for symbol, amount in self.amounts.items():
@@ -189,7 +190,10 @@ class Desk:
             first_p = {'_': 'all_tickers'}
         else:
             first_p = {'_': 'orderbook', 'symbol': self.cur_symbol}
-        a_p = {'_': 'account'}
+        if self.has_own_market[self.exchange]:
+            a_p = {'_': 'own_market', 'symbol': self.cur_symbol}
+        else:
+            a_p =  {'_': 'account'}
         subs = [first_p, a_p]
         _printed = {}
         i = c = 0
@@ -199,9 +203,9 @@ class Desk:
                 await self.xs.wait_till_subscription_active(s, timeout=2)
             except asyncio.TimeoutError:
                 if not _printed.get(i):
-                    logger2.info('{} wait taking longer than usual.'.format(s))
+                    logger2.info('{} {} wait taking longer than usual.'.format(self.exchange, s))
                     _printed[i] = True
-                if s['_'] == 'account' and c > 5:
+                if s['_'] in ('account','own_market') and c > 5:
                     i += 1
                     print('Canceling {} wait'.format(s))
             else:
@@ -235,6 +239,7 @@ class Desk:
             self.has_tickers_all[exchange] = \
                 False #xs.has_got('all_tickers', ['bid','ask']) and not xs.has_got('all_tickers', 'emulated')
             self.has_ob_merge[exchange] = xs.has_merge_option('orderbook')
+            self.has_own_market[exchange] = xs.has_got('own_market','ws') and not xs.has_got('account','order','ws')
         for xs in self.streamers.values():
             xs.ob['sends_bidAsk'] = True
     
@@ -253,9 +258,13 @@ class Desk:
             for symbol in symbols:
                 xs.subscribe_to_orderbook(symbol, {'limit': 5})
         if to_account:
-            params = {} if 'symbol' not in xs.get_value('account', 'required')\
-                      else {'symbol': symbols}
-            xs.subscribe_to_account(params)
+            xs.subscribe_to_account() # required in the least for balance updates
+            if self.has_own_market[exchange]:
+                if xs.has_merge_option('own_market'):
+                    xs.subscribe_to_own_market(symbols)
+                else:
+                    for symbol in symbols:
+                        xs.subscribe_to_own_market(symbol)
     
     
     def check_for_arbitrage(self, changes=None):
@@ -1018,6 +1027,7 @@ class Table:
         self.trade_exchanges = []
         self.has_tickers_all = {}
         self.has_ob_merge = {}
+        self.has_own_market = {}
         self._symbols = defaultdict(list)
         
         for desk in desks:
@@ -1039,6 +1049,7 @@ class Table:
         
         self.has_tickers_all.update(desk.has_tickers_all)
         self.has_ob_merge.update(desk.has_ob_merge)
+        self.has_own_market.update(desk.has_own_market)
         
         for exchange, symbols in desk._symbols.items():
             self._symbols[exchange] = list(unique(self._symbols[exchange] + symbols))
