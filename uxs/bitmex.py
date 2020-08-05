@@ -46,20 +46,47 @@ class bitmex(ExchangeSocket):
         }
     }
     has = {
-        'balance': {'_': True},
         'ticker': False,
-        'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
-                        'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
-                        'change': True, 'percentage': True, 'average': False, 'vwap': True,
-                        'baseVolume': True, 'quoteVolume': True, 'active': True},
+        'all_tickers': {
+            'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+            'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
+            'change': True, 'percentage': True, 'average': False, 'vwap': True,
+            'baseVolume': True, 'quoteVolume': True, 'active': True},
         'orderbook': True,
+        'trades': False, # TODO
         'account': {'balance': True, 'position': True},
         'own_market': {'order': True, 'fill': True},
         'fetch_tickers': True,
-        'fetch_ticker': True,
-        'fetch_order_book': True,
-        'fetch_balance': True,
+        'fetch_ticker': {
+            'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
+            'percentage': True, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': True},
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': False, 'nonce': False, 'timestamp': False},
+        'fetch_trades': {
+            'amount': True, 'cost': False, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        'fetch_my_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': True},
+        'fetch_order': {
+            'amount': True, 'average': True, 'clientOrderId': True, 'cost': True, 'datetime': True, 'fee': False,
+            'filled': True, 'id': True, 'lastTradeTimestamp': True, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
+        'fetch_orders': {'symbolRequired': False},
+        'fetch_open_orders': {'symbolRequired': False},
+        'fetch_closed_orders': {'symbolRequired': False},
+        'create_order': True,
+        'edit_order': True,
     }
+    has['fetch_tickers'] = has['fetch_ticker'].copy()
+    has['fetch_orders'].update(has['fetch_order'])
+    has['fetch_open_orders'].update(has['fetch_order'])
+    has['fetch_closed_orders'].update(has['fetch_order'])
+    has['create_order'] = has['fetch_order'].copy()
+    has['edit_order'] = has['fetch_order'].copy()
     connection_defaults = {
         'max_subscriptions': 13, #the usual is 20, but account stream has many substreams
         #'subscription_push_rate_limit': 0.12,

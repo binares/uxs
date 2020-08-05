@@ -79,7 +79,7 @@ class coinsbit(Exchange):
                 'fetchTrades': True,
             },
             'rateLimit': 1000,
-            'timeout': 20000, # 10000 is not enough for fetchTickers
+            'timeout': 20000,  # 10000 is not enough for fetchTickers
             'fees': {
                 'trading': {
                     'maker': 0.002,
@@ -247,6 +247,7 @@ class coinsbit(Exchange):
             symbol = market['symbol']
             currency = market['quote']
         id = self.safe_string(trade, 'tid')
+        order = self.safe_string(trade, 'id')
         timestamp = None
         if 'date' in trade:
             timestamp = self.safe_timestamp(trade, 'date')
@@ -260,14 +261,16 @@ class coinsbit(Exchange):
             side = self.safe_string(trade, 'side')
         elif 'type' in trade:
             side = self.safe_string(trade, 'type')
-        price = self.safe_float(trade, 'price')
+        price = None
+        if order is None:
+            price = self.safe_float(trade, 'price')  # in case of fetchMyTrades self is the price of the order, not trade
         amount = self.safe_float(trade, 'amount')
         cost = None
         if 'total' in trade:
             cost = self.safe_float(trade, 'total')
         elif 'dealMoney' in trade:
             cost = self.safe_float(trade, 'dealMoney')
-        if price == 0:
+        if price is None or price == 0.0:
             price = cost / amount
         fee = {
             'currency': currency,
@@ -279,7 +282,7 @@ class coinsbit(Exchange):
             'timestamp': timestamp,
             'datetime': datetime,
             'symbol': symbol,
-            'order': None,
+            'order': order,
             'type': None,
             'side': side,
             'takerOrMaker': None,
@@ -371,21 +374,23 @@ class coinsbit(Exchange):
         type = self.safe_string(order, 'type')
         side = self.safe_string(order, 'side')
         amount = self.safe_float(order, 'amount')
-        remaining = self.safe_float(order, 'left')
+        filled = self.safe_float(order, 'dealStock')
+        remaining = self.safe_float(order, 'left')  # missing in fetchClosedOrders
         status = None
-        filled = None
-        if remaining is None or remaining == 0.0:
+        if remaining is None: 
             status = 'closed'
-            filled = amount
-        else:
-            status = 'open'
-            filled = amount - remaining
+            if filled is not None and amount is not None:
+                remaining = amount - filled
+        if status is None:
+            status = 'closed' if (remaining == 0.0 or remaining is None) else 'open'
         price = self.safe_float(order, 'price')
         cost = self.safe_float(order, 'dealMoney')
-        if price == 0.0:
-            if (cost is not None) and (filled is not None):
-                if (cost > 0) and (filled > 0):
-                    price = cost / filled
+        average = None
+        if (cost is not None) and (filled is not None):
+            if (cost > 0) and (filled > 0):
+                average = cost / filled
+                if price == 0.0:
+                    price = average
         fee = {
             'currency': currency,
             'cost': self.safe_float(order, 'dealFee'),
@@ -395,6 +400,7 @@ class coinsbit(Exchange):
             'datetime': datetime,
             'timestamp': timestamp,
             'lastTradeTimestamp': lastTradeTimestamp,
+            'clientOrderId': None,
             'status': status,
             'symbol': symbol,
             'type': type,
@@ -404,6 +410,7 @@ class coinsbit(Exchange):
             'filled': filled,
             'remaining': remaining,
             'cost': cost,
+            'average': average,
             'trades': None,
             'fee': fee,
             'info': order,
@@ -433,7 +440,7 @@ class coinsbit(Exchange):
         }
         response = self.privatePostOrderCancel(self.extend(request, params))
         result = self.safe_value(response, 'result')
-        return self.parse_order(result, market)
+        return self.extend(self.parse_order(result, market), {'status': 'canceled'})
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         url = self.urls['api'][api] + self.version + '/'

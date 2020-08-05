@@ -36,15 +36,34 @@ class luno(ExchangeSocket):
     has = {   
         'l3': {'trades': dict.fromkeys(['id', 'symbol', 'amount', 'price', 'cost',
                                         'takerOrMaker', 'order', 'timestamp', 'orders'], True)},
+        'fetch_tickers': True,
+        'fetch_ticker': {
+            'ask': True, 'askVolume': False, 'average': False, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': False, 'close': True, 'datetime': True, 'high': False, 'last': True, 'low': False, 'open': False,
+            'percentage': False, 'previousClose': False, 'quoteVolume': False, 'symbol': True, 'timestamp': True,
+            'vwap': False},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': True, 'nonce': False, 'timestamp': True},
+        'fetch_trades': {
+            'amount': True, 'cost': False, 'datetime': True, 'fee': True, 'id': False, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
         'fetch_balance': {'free': True, 'used': True, 'total': True},
-        'fetch_my_trades': {'symbolRequired': True},
-        'fetch_tickers': {
-                'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
-                'high': False, 'low': False, 'open': False, 'close': True, 'previousClose': False,
-                'change': False, 'percentage': False, 'average': False, 'vwap': False,
-                'baseVolume': True, 'quoteVolume': False, 'active': False},  
+        'fetch_my_trades': {
+            'symbolRequired': True,
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': False, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': False},
+        'fetch_order': {
+            'amount': True, 'average': False, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': False},
+        'fetch_orders': {'symbolRequired': False},
+        'fetch_open_orders': {'symbolRequired': False},
+        'fetch_closed_orders': {'symbolRequired': False},
+        'create_order': {'id': True},
     }
-    has['fetch_ticker'] = has['fetch_tickers'].copy()
+    has['fetch_tickers'] = has['fetch_ticker'].copy()
+    has['fetch_orders'].update(has['fetch_order'])
+    has['fetch_open_orders'].update(has['fetch_order'])
+    has['fetch_closed_orders'].update(has['fetch_order'])
     ob = {
         'force_create': None,
         'uses_nonce': False,

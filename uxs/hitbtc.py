@@ -39,19 +39,39 @@ class hitbtc(ExchangeSocket):
             'baseVolume': True, 'quoteVolume': True},
         'orderbook': True,
         #'ohlcv': '?',
-        #'trades': True, # yet to be implemented
+        'trades': False, # TODO
         'account': {'balance': False, 'order': True, 'fill': True},
         'fetch_tickers': {
-            'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
-            'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False, 
-            'change': True, 'percentage': True, 'average': True, 'vwap': True,
-            'baseVolume': True, 'quoteVolume': True},
+            'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
+            'percentage': True, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': True},
+        'fetch_ticker': True,
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': False, 'nonce': False, 'timestamp': False},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
         'fetch_balance': {'ws': True, 'free': True, 'used': True, 'total': True},
+        'fetch_my_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
         'create_order': {'ws': True},
         'cancel_order': {'ws': True},
-        #'edit_order': {'ws': True},
+        'edit_order': {}, # 'ws': True  # TODO
+        'fetch_order': {
+            'amount': True, 'average': False, 'clientOrderId': True, 'cost': True, 'datetime': True,
+            'fee': False, 'filled': True, 'id': True, 'lastTradeTimestamp': True, 'price': True,
+            'remaining': True, 'side': True, 'status': True, 'symbol': True, 'timestamp': True,
+            'trades': False, 'type': True},
+        'fetch_open_orders': True,
+        'fetch_closed_orders': True,
     }
     has['fetch_ticker'] = has['fetch_tickers'].copy()
+    has['fetch_open_orders'] = has['fetch_order'].copy()
+    has['fetch_closed_orders'] = has['fetch_order'].copy()
+    has['create_order'].update(has['fetch_order']) # for ccxt create
+    has['edit_order'].update(has['fetch_order']) # for ccxt edit
     connection_defaults = {
         'subscription_push_rate_limit': 0.12,
         'max_subscriptions': 95,

@@ -36,28 +36,44 @@ class coinsbit(ExchangeSocket):
         'ping_as_message': True,
     }
     has = {
-        'ticker': {'last': True, 'bid': False, 'ask': False, 'bidVolume': False, 'askVolume': False,
-                   'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
-                   'change': False, 'percentage': False, 'average': False, 'vwap': False,
-                   'baseVolume': True, 'quoteVolume': True, 'active': False},     
+        'ticker': {
+            'last': True, 'bid': False, 'ask': False, 'bidVolume': False, 'askVolume': False,
+            'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
+            'change': False, 'percentage': False, 'average': False, 'vwap': False,
+            'baseVolume': True, 'quoteVolume': True, 'active': False},     
         'all_tickers': False,
         'orderbook': True,
-        'ohlcv': {'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
-        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
-                   'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
-                   'price': True, 'amount': True, 'cost': False, 'fee': False},
+        'ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'trades': {
+            'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
+            'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
+            'price': True, 'amount': True, 'cost': False, 'fee': False},
         'account': {'balance': False, 'order': False, 'fill': False},
-        'fetch_balance': {'free': True, 'used': True, 'total': True},
-        'fetch_open_orders': {'symbolRequired': True},
-        'fetch_my_trades': {'symbolRequired': True},
-        'fetch_ticker': {'ws': True},
         'fetch_tickers': {
-                'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
-                'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
-                'change': False, 'percentage': True, 'average': True, 'vwap': False,
-                'baseVolume': True, 'quoteVolume': True, 'active': False},  
+            'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
+            'percentage': True, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': False},
+        'fetch_ticker': {'ws': True},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': False, 'nonce': False, 'timestamp': False},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        'fetch_my_trades': {
+            'symbolRequired': True,
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True, # `id` is emulated
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'create_order': {
+            'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
+        'fetch_open_orders': {'symbolRequired': True},
+        'fetch_closed_orders': {'symbolRequired': True},
     }
-    has['fetch_ticker'].update(has['ticker'])
+    has['fetch_ticker'].update(dict(has['fetch_tickers'], datetime=False, timestamp=False)) # for ccxt fetch
+    has['fetch_open_orders'].update(has['create_order'])
+    has['fetch_closed_orders'].update(dict(has['create_order'], lastTradeTimestamp=True)) # remaining=False
     channel_ids = {
         'ticker': 'state',
         'orderbook': 'depth',

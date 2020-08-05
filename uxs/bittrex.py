@@ -58,12 +58,27 @@ class bittrex(ExchangeSocket):
         'account': {'balance': True, 'order': True, 'fill': False},
         'fetch_tickers': {'ws': True},
         'fetch_ticker': True,
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
         'fetch_order_book': {'ws': True},
-        'fetch_balance': True,
-        #'feed': {'balance':True}
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        'fetch_my_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': True},
+        'fetch_order': {
+            'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
+            'filled': True, 'id': True, 'lastTradeTimestamp': True, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
+        'fetch_open_orders': {'symbolRequired': False},
+        'fetch_closed_orders': {'symbolRequired': False},
+        'create_order': {'id': True, 'side': True, 'status': True, 'symbol': True, 'type': True},
     }
     has['fetch_tickers'].update(has['all_tickers'])
     has['fetch_ticker'] = has['all_tickers'].copy()
+    has['fetch_open_orders'].update(has['fetch_order'])
+    has['fetch_closed_orders'].update(has['fetch_order'])
     connection_defaults = {
         'signalr': True,
         'hub_name': 'c2',

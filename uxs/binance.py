@@ -53,27 +53,49 @@ class binance(ExchangeSocket):
     }
     has = {
         'all_tickers': True,
-        'ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
-                   'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': True,
-                   'change': True, 'percentage': True, 'average': True, 'vwap': True,
-                   'baseVolume': True, 'quoteVolume': True, 'active': False},
+        'ticker': {
+            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': True,
+            'change': True, 'percentage': True, 'average': True, 'vwap': True,
+            'baseVolume': True, 'quoteVolume': True, 'active': False},
         'orderbook': True,
-        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
-                   'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
-                   'price': True, 'amount': True, 'cost': False, 'fee': False},
-        'ohlcv': {'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'trades': {
+            'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
+            'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
+            'price': True, 'amount': True, 'cost': False, 'fee': False},
+        'ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
         'account': {'balance': True, 'order': True, 'fill': False},
         'fetch_tickers': True,
         'fetch_ticker': {
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False, 
-            'high': True, 'low': True, 'open': True, 'close': True, 
-            'previousClose': False, 'change': True, 'percentage': True, 
-            'average': True, 'vwap': True, 'baseVolume': True, 'quoteVolume': True},
-        'fetch_order_book': True,
-        'fetch_balance': True,
+            'ask': True, 'askVolume': True, 'average': False, 'baseVolume': True, 'bid': True, 'bidVolume': True,
+            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
+            'percentage': True, 'previousClose': True, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': True},
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'fetch_order_book': {'bids': True, 'asks': True, 'nonce': True, 'datetime': False, 'timestamp': False},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        'fetch_my_trades': {
+            'symbolRequired': True,
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': False},
+        'fetch_order': {
+            'amount': True, 'average': True, 'clientOrderId': True, 'cost': True, 'datetime': True, 'fee': False,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
+        'fetch_orders': {'symbolRequired': True},
+        'fetch_open_orders': {'symbolRequired': True},
+        'fetch_closed_orders': {'symbolRequired': True},
+        'create_order': True,
     }
     has['all_tickers'] = has['ticker'].copy()
     has['fetch_tickers'] = has['fetch_ticker'].copy()
+    has['fetch_orders'].update(has['fetch_order'])
+    has['fetch_open_orders'].update(has['fetch_order'])
+    has['fetch_closed_orders'].update(has['fetch_order'])
+    has['create_order'] = has['fetch_order'].copy()
     connection_defaults = {
         #'ping': lambda: {},
         #'ping': lambda: {'ping': nonce_ms()},

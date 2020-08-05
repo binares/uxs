@@ -69,22 +69,46 @@ class kraken(ExchangeSocket):
         'ping_interval': 30,
     }
     has = {
-        'ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
-                   'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
-                   'change': False, 'percentage': False, 'average': False, 'vwap': True,
-                   'baseVolume': True, 'quoteVolume': True, 'active': False},     
         'all_tickers': False,
+        'ticker': {
+            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
+            'change': False, 'percentage': False, 'average': False, 'vwap': True,
+            'baseVolume': True, 'quoteVolume': True, 'active': False},
         'orderbook': True,
-        'ohlcv': {'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
-        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
-                   'order': False, 'type': True, 'takerOrMaker': False, 'side': True,
-                   'price': True, 'amount': True, 'cost': True, 'fee': False},
+        'ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': True},
         'account': {'balance': False, 'order': True, 'fill': True},
-        # Websocket versions are currently disabled
-        'create_order': {'ws': False},
-        'cancel_order': {'ws': False},
+        'fetch_tickers': True,
+        'fetch_ticker': {
+            'ask': True, 'askVolume': False, 'average': False, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': False, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
+            'percentage': False, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': True},
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': False, 'nonce': False, 'timestamp': False},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': True},
         'fetch_balance': {'free': False, 'used': False, 'total': True},
+        'fetch_order': {
+            'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': True, 'type': True},
+        'fetch_open_orders': {'symbolRequired': False},
+        'fetch_closed_orders': {'symbolRequired': False},
+        # Websocket versions are currently disabled
+        'create_order': { # 'ws': False,
+            'amount': False, 'average': False, 'clientOrderId': False, 'cost': False, 'datetime': False, 'fee': False,
+            'filled': False, 'id': True, 'lastTradeTimestamp': False, 'price': False, 'remaining': False, 'side': True,
+            'status': False, 'symbol': True, 'timestamp': False, 'trades': False, 'type': True},
+        'cancel_order': {'ws': False},
     }
+    has['fetch_tickers'] = has['fetch_ticker'].copy()
+    has['fetch_open_orders'].update({**has['fetch_order'], 'trades': False})
+    has['fetch_closed_orders'].update({**has['fetch_order'], 'trades': False})
     channel_ids = {
         'ticker': 'ticker',
         'orderbook': 'book',

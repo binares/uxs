@@ -58,20 +58,48 @@ class poloniex(ExchangeSocket):
         'merge_option': False,
     }
     has = {
+        'all_tickers': {
+            'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+            'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
+            'change': True, 'percentage': True, 'average': False, 'vwap': True,
+            'baseVolume': True, 'quoteVolume': True, 'active': True},
         'ticker': False,
-        'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
-                        'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
-                        'change': True, 'percentage': True, 'average': False, 'vwap': True,
-                        'baseVolume': True, 'quoteVolume': True, 'active': True},
         'orderbook': True,
         'account': {'balance': True, 'order': True, 'fill': True},
         'fetch_tickers': True,
-        'fetch_ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
-                        'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
-                        'change': True, 'percentage': True, 'average': True, 'vwap': False,
-                        'baseVolume': True, 'quoteVolume': True, 'active': False},
-        'fetch_order_book': True,
-        'fetch_balance': True,
+        'fetch_ticker': {
+            'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
+            'percentage': True, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': False},
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': False, 'nonce': True, 'timestamp': False},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': True, 'price': True,
+            'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': True},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        'fetch_my_trades': {
+            'symbolRequired': False,
+            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': True},
+        # fetchOrder, fetchOrders and fetchClosedOrders don't actually return closed orders, but are
+        # internally calculated by ccxt (don't include them because orders could be closed with wrong final
+        # `filled` value)
+        'fetch_order': {'ccxt': False},
+        'fetch_orders': {'ccxt': False},
+        'fetch_open_orders': {
+            'symbolRequired': False,
+            'amount': True, 'average': False, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': False,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
+        'fetch_closed_orders': {'ccxt': False},
+        'create_order': {
+            'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': True, 'type': True},
+        # parsing error in ccxt (KeyError: 'date'); and trades resulting from edit are left unparsed;
+        # also new order has new id, which may not be handled well by uxs
+        'edit_order': {'ccxt': False},
     }
     has['fetch_tickers'] = has['fetch_ticker'].copy()
     connection_defaults = {

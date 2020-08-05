@@ -72,19 +72,40 @@ class krakenfu(ExchangeSocket):
     }
     has = {
         'all_tickers': False,
-        'ticker': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
-                   'high': False, 'low': False, 'open': False, 'close': True, 'previousClose': False,
-                   'change': True, 'percentage': False, 'average': False, 'vwap': False,
-                   'baseVolume': True, 'quoteVolume': True, 'active': False},
+        'ticker': {
+            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'high': False, 'low': False, 'open': False, 'close': True, 'previousClose': False,
+            'change': True, 'percentage': False, 'average': False, 'vwap': False,
+            'baseVolume': True, 'quoteVolume': True, 'active': False},
         'orderbook': True,
-        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': False,
-                   'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
-                   'price': True, 'amount': True, 'cost': False, 'fee': False},
+        'trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
         'ohlcv': False,
         'account': {'balance': True, 'order': True, 'fill': True, 'position': True},
         'ticker_lite': True,
         'instruments': True,
+        'fetch_tickers': {
+            'ask': True, 'askVolume': True, 'average': True, 'baseVolume': False, 'bid': True, 'bidVolume': True,
+            'change': True, 'close': True, 'datetime': True, 'high': False, 'info': True, 'last': True, 'low': False, 'open': True, 'percentage': True, 'previousClose': False, 'quoteVolume': True,
+            'symbol': True, 'timestamp': True, 'vwap': False},
+        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': True, 'nonce': False, 'timestamp': True},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'fetch_balance': {'free': False, 'used': False, 'total': True},
+        'fetch_my_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': True,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': False},
+        'create_order': {
+            'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': False,
+            'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
+            'status': True, 'symbol': True, 'timestamp': True, 'trades': True, 'type': True},
+        'edit_order': True,
+        'fetch_open_orders': {'symbolRequired': False},
     }
+    has['edit_order'] = has['create_order'].copy()
+    has['fetch_open_orders'].update(has['create_order']) 
     message = {
         'error': {
             'key': _extract_error,
@@ -323,9 +344,10 @@ class krakenfu(ExchangeSocket):
         {  
             "feed":"trade",
             "product_id":"FI_XBTUSD_180615",
-            "seq":103,  
+            "uid":"fc4c709b-edb5-402a-b92f-8cc407a004bf",
+            "seq":103,
             "side":"buy",
-            "type":"liquidation",
+            "type":"liquidation", // "fill"
             "seq":103,  
             "time":1515541598000,
             "qty":5000.0,
@@ -352,17 +374,33 @@ class krakenfu(ExchangeSocket):
             'timestamp': 'time',
             'amount': 'qty',
             'order': 'order_id',
-            'id': 'fill_id',
+            'id': ['fill_id', 'uid'],
             'takerOrMaker': 'fill_type',
         }
         apply = {
             'symbol': lambda x: self.convert_symbol(x.lower(), 0),
-            'takerOrMaker': lambda x: 'maker' if x.lower().startswith('maker') else 'taker',
+            'takerOrMaker': lambda x: ('maker' if x.lower().startswith('maker') else 'taker')
+                                      if x else None,
         }
-        return self.api.trade_entry(
+        trade = self.api.trade_entry(
             **self.api.lazy_parse(t, keys, map, apply),
             info=t,
         )
+        market = self.markets.get(trade['symbol'])
+        trade['cost'] = self._calc_cost(trade['amount'], trade['price'], market)
+
+        return trade
+    
+    
+    def _calc_cost(self, amount, price, market):
+        cost = None
+        if amount is not None and price and market is not None:
+            if market['linear']:
+                cost = amount * price # in quote
+            else:
+                cost = amount / price # in base
+            cost *= market['lotSize']
+        return cost
     
     
     def on_balance(self, r):
@@ -500,6 +538,7 @@ class krakenfu(ExchangeSocket):
         remaining = o['qty'] if not o.get('is_cancel') else 0 # qty does indeed show remaining
         amount = o['qty'] + o['filled']
         side = 'buy' if not o['direction'] else 'sell'
+        # cost can't be calculated as average is not known
         return {
             'symbol': symbol,
             'id': o['order_id'],

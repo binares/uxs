@@ -39,22 +39,33 @@ class kucoin(ExchangeSocket):
         },
     }
     has = {
-        'all_tickers': {'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
-                        'high': False, 'low': False, 'open': False,' close': True, 'previousClose': False,
-                        'change': False, 'percentage': False, 'average': False, 'vwap': False,
-                        'baseVolume' :False, 'quoteVolume': False},
-        'ticker': True, #same as all_tickers
+        'all_tickers': {
+            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'high': False, 'low': False, 'open': False,' close': True, 'previousClose': False,
+            'change': False, 'percentage': False, 'average': False, 'vwap': False,
+            'baseVolume' :False, 'quoteVolume': False},
+        'ticker': True,
         'orderbook': True,
         'trades': {'orders': True},
         'account': {'balance': True},
         'fetch_tickers': True,
-        'fetch_ticker': True,
-        'fetch_order_book': True,
-        'fetch_balance': True,
+        'fetch_ticker': {
+            'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,
+            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': False,
+            'percentage': True, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
+            'vwap': False},
+        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'fetch_order_book': {'bids': True, 'asks': True, 'nonce': True, 'datetime': True, 'timestamp': True},
+        'fetch_trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': False, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'fetch_balance': {'free': True, 'used': True, 'total': True},
+        # TODO: private methods below + fetch_order + create_order
         'fetch_open_orders': {'symbolRequired': False},
         'fetch_my_trades': {'symbolRequired': False},
     }
     has['ticker'] = has['all_tickers'].copy()
+    has['fetch_tickers'] = dict(has['fetch_ticker'], datetime=False, timestamp=False)
     connection_defaults = {
         'max_subscriptions': 95,
         'subscription_push_rate_limit': 0.04,
