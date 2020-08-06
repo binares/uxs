@@ -11,6 +11,7 @@ from .binancefu import binancefu
 from .bitmex import bitmex
 from .bittrex import bittrex
 from .btsefu import btsefu
+from .bw import bw
 from .coinsbit import coinsbit
 from .dragonex import dragonex
 from .hitbtc import hitbtc
@@ -22,6 +23,7 @@ __all__ = [
     'bitmex',
     'bittrex',
     'btsefu',
+    'bw',
     'coinsbit',
     'dragonex',
     'hitbtc',

@@ -24,6 +24,7 @@ from uxs.binance import binance
 from uxs.binancefu import binancefu
 from uxs.bitmex import bitmex
 from uxs.bittrex import bittrex
+from uxs.bw import bw
 from uxs.coindcx import coindcx
 from uxs.coinsbit import coinsbit
 from uxs.gateiofu import gateiofu
