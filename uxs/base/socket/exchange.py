@@ -624,6 +624,7 @@ class ExchangeSocket(WSClient):
                 self.has['account'][x].update({'_': False, 'ws': False, 'emulated': None})
         
         self.has.update({x: _copy.deepcopy(deep_get([self.has], ['account', x])) for x in under_account})
+        deep_update(self.has, {x: _copy.deepcopy(deep_get([self.has], ['own_market', x])) for x in ['order','fill']})
         
         for acc in ('account', 'own_market'):
             emulated = unique((self.has[acc][x]['emulated'] for x in under_account
@@ -2317,9 +2318,10 @@ class ExchangeSocket(WSClient):
             try: r = await self.api.cancel_order(id, symbol, params)
             except ccxt.OrderNotFound as e:
                 error = e
+            _symbol = symbol if symbol is not None else deep_get([self.orders], [id, 'symbol'])
             # Canceling due to not being found is somewhat dangerous,
             # as the latest filled updates may not be received yet
-            cancel_automatically = self.is_order_auto_canceling_enabled()
+            cancel_automatically = self.is_order_auto_canceling_enabled(_symbol)
             if cancel_automatically:
                 await self.safely_mark_order_closed(id)
             if error is not None:
@@ -2351,7 +2353,8 @@ class ExchangeSocket(WSClient):
         else:
             try: r = await self.api.edit_order(id, symbol, *args)
             except ccxt.OrderNotFound as e:
-                cancel_automatically = self.is_order_auto_canceling_enabled()
+                _symbol = symbol if symbol is not None else deep_get([self.orders], [id, 'symbol'])
+                cancel_automatically = self.is_order_auto_canceling_enabled(_symbol)
                 if cancel_automatically:
                     await self.safely_mark_order_closed(id)
                 raise e
@@ -2451,15 +2454,18 @@ class ExchangeSocket(WSClient):
                     self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
     
     
-    def is_order_auto_canceling_enabled(self):
+    def is_order_auto_canceling_enabled(self, symbol=None):
         coa = self.order['cancel_automatically']
         if isinstance(coa,str):
             if coa == 'if-not-active':
                 return not self.is_active()
-            elif coa.startswith('if-not-subbed-to-'):
-                sub_name = coa[len('if-not-subbed-to-'):]
-                alt_cond = False if sub_name!='account' else not self.has_got('order','ws')
-                return not self.sh.is_subscribed_to({'_': sub_name}, True) or alt_cond
+            elif coa == 'if-not-subbed-to-account':
+                if self.has_got('account', 'order', 'ws'):
+                    return not self.is_subscribed_to(('account',), True)
+                elif self.has_got('own_market', 'order', 'ws'):
+                    return not self.is_subscribed_to(('own_market', symbol), True)
+                else:
+                    return True
             else:
                 return True
         else:

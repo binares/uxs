@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 HERE = pathlib.Path(__file__).parent
 README = (HERE / "README.md").read_text()
 
-packages = find_packages(exclude=['examples','test'])
+packages = find_packages(exclude=['examples','gen','test'])
 
 if 'uxs._data' not in packages:
     packages.append('uxs._data')
@@ -30,7 +30,6 @@ setup(
        'python_dateutil>=2.1',
        'pandas>=0.21',
        'PyYAML>=3.10',
-       'stockstats>=0.2',
        'fons @ git+https://github.com/binares/fons.git',
        'wsclient @ git+https://github.com/binares/wsclient.git',
    ],

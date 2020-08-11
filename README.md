@@ -7,24 +7,31 @@ This free to use python library is ccxt based. I use it for personal trading and
 
 Supported exchanges:
 
-|         	| ticker | all_tickers | orderbook (L2) | ohlcv | trades | balance | order | fill | position |
-| ---------	|----|----|----|----|----|----|----|----|----|
-| binance 	| + | + | +| + | + | + | + | | |
-| binancefu | + | + | + | + | + | + | + | | + |
-| bitmex 	| | + | + | | | + | + | + | + |
-| bittrex 	| | + | + | | | + | + | | |
-| gateiofu 	| | | + | | | | | | |
-| hitbtc 	| + | | + | | | | + | + | |
-| kucoin 	| + | + | + | | + | + | *\*T* | *\*T* | |
-| kraken 	| + | | + | + | + | | + | + | |
-| krakenfu 	| + | | + | | + | + | + | + | + |
-| poloniex 	| | + | + | | | + | + | + | |
+|           | ticker | all_tickers | orderbook | l3 | ohlcv | trades | balance | order | fill | position |
+|-----------|--------|-------------|-----------|----|-------|--------|---------|-------|------|----------|
+| binance   |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
+| binancefu |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
+| bitmex    |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
+| bittrex   |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  p   |          |
+| bw        |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
+| coindcx   |   p    |      p      |     +     |    |   p   |   +    |    +    |       |  +   |          |
+| coinsbit  |   +    |      p      |     +     |    |   +   |   +    |    p    |   p   |  p   |          |
+| gateiofu  |        |             |     +     |    |   p   |        |         |       |      |          |
+| hitbtc    |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
+| kraken    |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |
+| krakenfu  |   +    |      p      |     +     |    |   p   |   +    |    +    |   +   |  +   |    +     |
+| kucoin    |   +    |      +      |     +     |    |   p   |   +    |    +    |   o   |  o   |          |
+| luno      |   p    |      p      |     w     | +  |   p   |   w    |    p    |   o   |  o   |          |
+| poloniex  |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
 
-Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. And for L2 you must use *orderbook*: `xs.subscribe_to_orderbook(symbol)`. Support for L3 hasn't been added yet, and some *ohlcv* and *trades* are yet to be implemented.
+Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. However some exchanges like bitmex require you to subscribe to each market directly for order and fill updates: `xs.subscribe_to_own_market(symbol)` (but still also subscribe to account, as it contains balance and position). 
 
-*\*T* - the orders and fills are updated by matching user created orders to the *trades* feed
+*+* - direct streaming
+*p* - emulated via polling (fetch_balance, fetch_tickers etc)
+*w* - emulated via streaming (l3 -> orderbook, l3 -> trades)
+*o* - must be subscribed to `own_market`
 
-Test environments are currently offered for: BinanceFu, BitMEX and Kucoin (Kraken also offers some sort of non-sandboxed test env). For using them add `{'test': True}` to the config, and make sure you have created a sandbox account.
+Test environments are currently offered for: BinanceFu, BitMEX, KrakenFu and Kucoin (Kraken also offers some sort of non-sandboxed test env). For using them add `{'test': True}` to the config, and make sure you have created a sandbox account.
 
 Simple usage:
 
@@ -59,6 +66,8 @@ xs.subscribe_to_ticker(symbol)
 xs.subscribe_to_all_tickers()
 
 xs.subscribe_to_orderbook(symbol)
+
+xs.subscribe_to_l3(symbol)
 
 xs.subscribe_to_ohlcv(symbol, timeframe)
 
@@ -103,6 +112,8 @@ These are attributes of ExchangeSocket instance (xs). The objects in these dicts
 xs.tickers[symbol]
 
 xs.orderbooks[symbol]
+
+xs.l3_books[symbol]
 
 xs.ohlcv[symbol][timeframe]
 
