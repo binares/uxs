@@ -11,7 +11,7 @@ if 'uxs._data' not in packages:
 
 setup(
    name='uxs',
-   version='0.1.0',
+   version='0.2.0',
    description='A universal crypto exchange websocket',
    long_description=README,
    long_description_content_type='text/markdown',
@@ -30,8 +30,8 @@ setup(
        'python_dateutil>=2.1',
        'pandas>=0.21',
        'PyYAML>=3.10',
-       'fons @ git+https://github.com/binares/fons.git',
-       'wsclient @ git+https://github.com/binares/wsclient.git',
+       'fons>=0.2.0',
+       'wsclient>=0.2.0',
    ],
 )
 

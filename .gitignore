@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 # Eclipse
+/.settings/
 /.project
 /.pydevproject
 
