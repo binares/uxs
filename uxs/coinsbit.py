@@ -37,7 +37,7 @@ class coinsbit(ExchangeSocket):
     }
     has = {
         'ticker': {
-            'last': True, 'bid': False, 'ask': False, 'bidVolume': False, 'askVolume': False,
+            'bid': False, 'bidVolume': False, 'ask': False, 'askVolume': False, 'last': True,
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
             'change': False, 'percentage': False, 'average': False, 'vwap': False,
             'baseVolume': True, 'quoteVolume': True, 'active': False},     
@@ -45,9 +45,8 @@ class coinsbit(ExchangeSocket):
         'orderbook': True,
         'ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
         'trades': {
-            'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
-            'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
-            'price': True, 'amount': True, 'cost': False, 'fee': False},
+            'amount': True, 'cost': False, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
         'account': {'balance': False, 'order': False, 'fill': False},
         'fetch_tickers': {
             'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,

@@ -73,7 +73,7 @@ class krakenfu(ExchangeSocket):
     has = {
         'all_tickers': False,
         'ticker': {
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'bid': True, 'bidVolume': True, 'ask': True, 'askVolume': True, 'last': True,
             'high': False, 'low': False, 'open': False, 'close': True, 'previousClose': False,
             'change': True, 'percentage': False, 'average': False, 'vwap': False,
             'baseVolume': True, 'quoteVolume': True, 'active': False},

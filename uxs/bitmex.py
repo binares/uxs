@@ -48,7 +48,7 @@ class bitmex(ExchangeSocket):
     has = {
         'ticker': False,
         'all_tickers': {
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+            'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True,
             'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
             'change': True, 'percentage': True, 'average': False, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True, 'active': True},

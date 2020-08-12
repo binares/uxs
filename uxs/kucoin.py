@@ -40,7 +40,7 @@ class kucoin(ExchangeSocket):
     }
     has = {
         'all_tickers': {
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'bid': True, 'bidVolume': True, 'ask': True, 'askVolume': True, 'last': True,
             'high': False, 'low': False, 'open': False,' close': True, 'previousClose': False,
             'change': False, 'percentage': False, 'average': False, 'vwap': False,
             'baseVolume' :False, 'quoteVolume': False},

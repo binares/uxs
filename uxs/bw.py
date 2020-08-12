@@ -22,7 +22,7 @@ class bw(ExchangeSocket):
     }
     has = {
         'all_tickers': { # update frequency = 13s
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False,
+            'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True,
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True, 'active': False},

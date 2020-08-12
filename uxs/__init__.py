@@ -36,6 +36,11 @@ from uxs.luno import luno
 from uxs.poloniex import poloniex
 
 
+def list_streaming_exchanges():
+    return sorted(k for k,v in globals().items()
+                  if isinstance(v, type) and issubclass(v, ExchangeSocket) and v is not ExchangeSocket)
+
+
 def get_streamer_cls(exchange):
     streamer_cls = globals().get(exchange.lower(), None)
     

@@ -33,7 +33,7 @@ class hitbtc(ExchangeSocket):
     has = {
         'all_tickers': False,
         'ticker': {
-            'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
+            'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True, 
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False, 
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True},

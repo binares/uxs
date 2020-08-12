@@ -12,7 +12,7 @@ if 'uxs._data' not in packages:
 setup(
    name='uxs',
    version='0.2.0',
-   description='A universal crypto exchange websocket',
+   description='A unified crypto exchange websocket',
    long_description=README,
    long_description_content_type='text/markdown',
    url='https://github.com/binares/uxs',

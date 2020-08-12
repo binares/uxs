@@ -49,7 +49,7 @@ class bittrex(ExchangeSocket):
     }
     has = {
         'all_tickers': {
-            'last': True, 'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False,  
+            'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True,
             'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False, 
             'change': False, 'percentage': False, 'average': False, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True},

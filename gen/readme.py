@@ -1,8 +1,7 @@
 import os, sys
 import uxs
 
-exchange_list = sorted(k for k,v in vars(uxs).items()
-                       if isinstance(v, type) and issubclass(v, uxs.ExchangeSocket) and v is not uxs.ExchangeSocket)
+exchange_list = uxs.list_streaming_exchanges()
 fields = ['ticker', 'all_tickers', 'orderbook', 'l3', 'ohlcv', 'trades', 'balance', 'order', 'fill', 'position']
 
 path = os.path.realpath(os.path.join(os.path.dirname(__file__), '..', 'README.md'))

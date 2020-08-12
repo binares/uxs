@@ -27,20 +27,19 @@ class coindcx(ExchangeSocket):
         'all_tickers': False,
         'ticker': False,
         'orderbook': True,
-        'trades': {'timestamp': True, 'datetime': True, 'symbol': True, 'id': False,
-                   'order': False, 'type': False, 'takerOrMaker': True, 'side': True,
-                   'price': True, 'amount': True, 'cost': True, 'fee': False},
+        'trades': {
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': False, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': False},
         'ohlcv': False,
         'account': {'balance': True, 'order': False, 'fill': True},
         'fetch_tickers': {
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': False, 'askVolume': False, 
-            'high': True, 'low': True, 'open': True, 'close': True, 
-            'previousClose': False, 'change': True, 'percentage': True, 
-            'average': True, 'vwap': False, 'baseVolume': True, 'quoteVolume': False},
+            'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True,
+            'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': False,
+            'change': True, 'percentage': True, 'average': True, 'vwap': False,
+            'baseVolume': True, 'quoteVolume': False},
         'fetch_trades': {
-            'timestamp': True, 'datetime': True, 'symbol': True, 'id': False,
-            'order': False, 'type': False, 'takerOrMaker': True, 'side': True,
-            'price': True, 'amount': True, 'cost': True, 'fee': False},
+            'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': False, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': False},
         'fetch_open_orders': {'symbolRequired': True},
     }
     has['fetch_ticker'] = has['fetch_tickers'].copy()

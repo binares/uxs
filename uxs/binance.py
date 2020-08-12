@@ -54,15 +54,14 @@ class binance(ExchangeSocket):
     has = {
         'all_tickers': True,
         'ticker': {
-            'last': True, 'bid': True, 'ask': True, 'bidVolume': True, 'askVolume': True,
+            'bid': True, 'bidVolume': True, 'ask': True, 'askVolume': True, 'last': True,
             'high': True, 'low': True, 'open': True, 'close': True, 'previousClose': True,
             'change': True, 'percentage': True, 'average': True, 'vwap': True,
             'baseVolume': True, 'quoteVolume': True, 'active': False},
         'orderbook': True,
         'trades': {
-            'timestamp': True, 'datetime': True, 'symbol': True, 'id': True,
-            'order': False, 'type': False, 'takerOrMaker': False, 'side': True,
-            'price': True, 'amount': True, 'cost': False, 'fee': False},
+            'amount': True, 'cost': False, 'datetime': True, 'fee': False, 'id': True, 'order': False,
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
         'ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
         'account': {'balance': True, 'order': True, 'fill': False},
         'fetch_tickers': True,
