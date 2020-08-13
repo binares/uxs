@@ -103,10 +103,10 @@ class poloniex(ExchangeSocket):
     }
     has['fetch_tickers'] = has['fetch_ticker'].copy()
     connection_defaults = {
-        'max_subscriptions': 95, #?
-        'subscription_push_rate_limit': 0.12,
         'rate_limit': (1, 0.12),
     }
+    max_subscriptions_per_connection = 95
+    subscription_push_rate_limit = 0.12
     ob = {
         'force_create': None,
         'receives_snapshot': True,

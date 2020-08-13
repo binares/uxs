@@ -32,10 +32,6 @@ class kraken(ExchangeSocket):
         'each_time': True,
         #'set_authenticated': True,
     }
-    channel_defaults = {
-        'max_subscriptions': 100,
-        'subscription_push_rate_limit': 0.04,
-    }
     channels = {
         'ticker': {
             'merge_option': True,
@@ -64,9 +60,6 @@ class kraken(ExchangeSocket):
             'url': '<$private>',
         },
         
-    }
-    connection_defaults = {
-        'ping_interval': 30,
     }
     has = {
         'all_tickers': False,
@@ -119,6 +112,11 @@ class kraken(ExchangeSocket):
         'create_order': 'addOrder',
         'cancel_order': 'cancelOrder',
     }
+    connection_defaults = {
+        'ping_interval': 30,
+    }
+    max_subscriptions_per_connection = 100
+    subscription_push_rate_limit = 0.04
     exceptions = {
         'Public channels not available in this endpoint': ccxt.BadRequest,
         

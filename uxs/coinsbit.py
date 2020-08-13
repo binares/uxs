@@ -13,8 +13,6 @@ class coinsbit(ExchangeSocket):
         'ws': 'wss://coinsbit.io/trade_ws', # crashes every 40 s
     }
     channel_defaults = {
-        'max_subscriptions': 100,
-        'subscription_push_rate_limit': 0.04,
         'unsub_option': False, # todo
     }
     channels = {
@@ -29,11 +27,6 @@ class coinsbit(ExchangeSocket):
             'merge_option': True,
             'delete_data_on_unsub': False,
         },
-    }
-    connection_defaults = {
-        'ping': 'm$ping',
-        'ping_interval': 30,
-        'ping_as_message': True,
     }
     has = {
         'ticker': {
@@ -80,6 +73,13 @@ class coinsbit(ExchangeSocket):
         'trades': 'deals',
         'price':'price',
     }
+    connection_defaults = {
+        'ping': 'm$ping',
+        'ping_interval': 30,
+        'ping_as_message': True,
+    }
+    max_subscriptions_per_connection = 1 # symbol per connection
+    subscription_push_rate_limit = 0.04
     exceptions = {
     }
     message = {

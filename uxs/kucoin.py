@@ -67,12 +67,13 @@ class kucoin(ExchangeSocket):
     has['ticker'] = has['all_tickers'].copy()
     has['fetch_tickers'] = dict(has['fetch_ticker'], datetime=False, timestamp=False)
     connection_defaults = {
-        'max_subscriptions': 95,
-        'subscription_push_rate_limit': 0.04,
+        'rate_limit': (1, 0.04),
         'ping': 'm$ping',
         'ping_interval': 30,
         'ping_as_message': True,
     }
+    max_subscriptions_per_connection = 95
+    subscription_push_rate_limit = 0.04
     channel_ids = {
         'account': '/account/balance',
         'ticker': '/market/ticker:{symbol}',

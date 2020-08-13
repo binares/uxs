@@ -83,11 +83,11 @@ class bittrex(ExchangeSocket):
         'signalr': True,
         'hub_name': 'c2',
         'hub_methods': ['uE','uS','uL','uB','uO'],
-        'max_subscriptions': 95,
-        'subscription_push_rate_limit': 0.12,
         'rate_limit': (1, 0.12),
         #'recv_timeout': 10,
     }
+    max_subscriptions_per_connection = 95
+    subscription_push_rate_limit = 0.12
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
         'update_payout_on_fill': False,

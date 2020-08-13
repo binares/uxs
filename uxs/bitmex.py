@@ -88,8 +88,6 @@ class bitmex(ExchangeSocket):
     has['create_order'] = has['fetch_order'].copy()
     has['edit_order'] = has['fetch_order'].copy()
     connection_defaults = {
-        'max_subscriptions': 13, #the usual is 20, but account stream has many substreams
-        #'subscription_push_rate_limit': 0.12,
         'rate_limit': (1, 2),
         #'ping': 'm$ping',
         'ping_interval': 0.5,
@@ -98,6 +96,8 @@ class bitmex(ExchangeSocket):
         'ping_timeout': 5,
         #'recv_timeout': 10,
     }
+    max_subscriptions_per_connection = 10 # the usual is 20, but `own_market` and `account` have 2 substreams
+    # subscription_push_rate_limit: 0.12
     ob = {
         'force_create': None,
         'cache_size': 1000,

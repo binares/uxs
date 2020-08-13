@@ -73,10 +73,10 @@ class hitbtc(ExchangeSocket):
     has['create_order'].update(has['fetch_order']) # for ccxt create
     has['edit_order'].update(has['fetch_order']) # for ccxt edit
     connection_defaults = {
-        'subscription_push_rate_limit': 0.12,
-        'max_subscriptions': 95,
         'rate_limit': (1, 0.12),
     }
+    max_subscriptions_per_connection = 95
+    subscription_push_rate_limit = 0.12
     message = {'id': {'key': 'id'}}
     ob = {
         'force_create': None,
