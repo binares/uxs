@@ -47,9 +47,9 @@ class gateiofu(ExchangeSocket):
         event = r.get('event')
         error = r.get('error')
         if error is not None:
-            logger.debug(r)
+            self.log_error(r)
         elif event in ('subscribe','unsubscribe'):
-            logger.debug(r)
+            self.log(r)
         elif channel == 'futures.order_book':
             self.on_orderbook(r)
     

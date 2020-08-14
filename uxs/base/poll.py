@@ -161,7 +161,7 @@ async def load_markets(api, limit=None):
         logger.exception(e)
     finally:
         if markets:
-            logger.debug('{} - setting markets'.format(exchange))
+            tlogger.debug('{} - setting markets'.format(exchange))
             try: api.set_markets(markets,currencies)
             except Exception as e2:
                 logger.exception(e2)
@@ -199,7 +199,7 @@ def sn_load_markets(api, limit=None):
         logger.exception(e)
     finally:
         if markets:
-            logger.debug('{} - setting markets'.format(exchange))
+            tlogger.debug('{} - setting markets'.format(exchange))
             try: api.set_markets(markets,currencies)
             except Exception as e2:
                 logger.exception(e2)
@@ -393,8 +393,8 @@ def sn_fetch(exchange, type, limit=None, *,
 
 
 async def update(exchange, type, args=None, kwargs=None, *,
-                 file=True, globals=True, loop=None, limit=None,
-                 cache=True, blocked='sleep', attempts=2, raise_e=False):
+                 file=True, globals=True, loop=None, limit=None, cache=True,
+                 blocked='sleep', attempts=2, raise_e=False, verbose=False):
     """
     Tries to retrieve the latest data, by either
       A) [IF (exchange, type) is being blocked by parallel update(),
@@ -420,7 +420,8 @@ async def update(exchange, type, args=None, kwargs=None, *,
         if type in ('balances','balances-account'):
             raise e
         config = {'exchange': exchange, 'async': True, 'info': False, 'trade': False}
-        logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
+        if verbose:
+            logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
         api = get_exchange(config)
     
     if blocked != 'ignore': 
@@ -481,7 +482,7 @@ async def update(exchange, type, args=None, kwargs=None, *,
         else: break
         i += 1
     
-    if exc is not None and i == attempts-1 and raise_e:
+    if exc is not None and i >= attempts-1 and raise_e:
         raise exc
     
     if cache:
@@ -495,8 +496,8 @@ async def update(exchange, type, args=None, kwargs=None, *,
 
 
 def sn_update(exchange, type, args=None, kwargs=None, *,
-              file=True, globals=True, loop=None, limit=None,
-              cache=True, blocked='sleep', attempts=2, raise_e=False):
+              file=True, globals=True, loop=None, limit=None, cache=True,
+              blocked='sleep', attempts=2, raise_e=False, verbose=False):
     """
     Tries to retrieve the latest data, by either
       A) [IF (exchange, type) is being blocked by parallel update(),
@@ -522,7 +523,8 @@ def sn_update(exchange, type, args=None, kwargs=None, *,
         if type in ('balances','balances-account'):
             raise e
         config = {'exchange': exchange, 'async': False, 'info': False, 'trade': False}
-        logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
+        if verbose:
+            logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
         api = get_exchange(config)
     
     if blocked != 'ignore': 
@@ -583,7 +585,7 @@ def sn_update(exchange, type, args=None, kwargs=None, *,
         else: break
         i += 1
     
-    if exc is not None and i == attempts-1 and raise_e:
+    if exc is not None and i >= attempts-1 and raise_e:
         raise exc
     
     if cache:
@@ -881,7 +883,7 @@ def clear_cache(exchanges=None, types=None):
     delete_empty_dirs(_dir)
 
 
-def load_profile(profile, exchange, type='markets'):
+def load_profile(profile, exchange, type='markets', *, verbose=False):
     now = dt.utcnow()
     profiles_dir = get_setting('profiles_dir')
     
@@ -934,8 +936,9 @@ def load_profile(profile, exchange, type='markets'):
             
     unexpired = [x for x in matching if x in dates and (dates[x]['start'] is None or dates[x]['start'] < now)
                  and (dates[x]['end'] is None or now < dates[x]['end'])]
-    logger.debug('Acquired the following profile {} unexpired files: {}'.format(
-                                        (profile,exchange,type),unexpired))
+    if verbose:
+        logger.debug('Acquired the following profile {} unexpired files: {}'.format(
+                                            (profile,exchange,type),unexpired))
     
     unexpired_items = []
     for fn in unexpired:

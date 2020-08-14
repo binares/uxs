@@ -120,8 +120,7 @@ class OrderbookMaintainer:
             elif fetch_limit is None and limit is not None:
                 fetch_limit = limit
             args = (fetch_limit,) if fetch_limit is not None else ()
-            tlogger.debug('{} - creating {} {}.'.format(self.xs.name, self.name, symbol))
-            #self.data[symbol] = await getattr(self.api, self.fetch_method)(symbol)
+            self.xs.log('creating {} {}.'.format(self.name, symbol))
             fetched = await getattr(self.xs, self.fetch_method)(symbol, *args)
             if limit is not None:
                 fetched['bids'] = fetched['bids'][:limit]
@@ -134,12 +133,13 @@ class OrderbookMaintainer:
                                 if x['time_added'] < since), (None,None))
                 fetched['nonce'] = self.resolve_nonce(item['nonce'])[1] if item else -2
                 rev_back = ' (rev-back: -{})'.format(i if item else 'inf')
-            tlogger.debug('{} - fetched {} {} nonce {}{}'.format(
-                           self.xs.name, self.name, symbol, fetched.get('nonce'), rev_back))
+            self.xs.log('fetched {} {} nonce {}{}'.format(
+                        self.name, symbol, fetched.get('nonce'), rev_back))
             ob = dict({'symbol': symbol}, **fetched)
         except Exception as e:
-            logger2.error(e)
-            logger.exception(e)
+            self.xs._log('error occurred while fetching and creating {} {} - {}'
+                         .format(self.name, symbol, repr(e)))
+            self.xs._log(e)
         else:
             self._assign(ob)
     
@@ -320,7 +320,7 @@ class OrderbookMaintainer:
         
         def _reset(method, reason):
             if self._is_time(symbol, method):
-                logger.debug('{} - {}ing {} {} due to {}.'.format(self.xs.name, method, self.name, symbol, reason))
+                self.xs.log('{}ing {} {} due to {}.'.format(method, self.name, symbol, reason))
                 self._renew(symbol, method)
         
         is_synced = self.is_synced[symbol]
@@ -434,16 +434,16 @@ class OrderbookMaintainer:
         t = self.cache[symbol]['last_warned']
         if t is None or time.time() > t + self.cfg['reload_interval']:
             self.cache[symbol]['last_warned'] = time.time()
-            logger.debug('{} - {} {} nonce is unsynced with cache'.format(self.xs.name, self.name, symbol))
+            self.xs.log('{} {} nonce is unsynced with cache'.format(self.name, symbol))
     
     
     def _warn_uninferrable(self, symbol, item, to_push):
         ob = self.data.get(symbol)
         bids = ob['bids'][:10] if ob is not None else None
         asks = ob['asks'][:10] if ob is not None else None
-        tlogger.debug('{} - {} {} encountered uninferrable item: {}\n\n'
+        self.xs.log2('{} {} encountered uninferrable item: {}\n\n'
                       'asks[:10] {}\n\nbids[:10] {}\n\nto_push: {}\n'
-                      .format(self.xs.name, self.name, symbol, item, asks, bids, to_push))
+                      .format(self.name, symbol, item, asks, bids, to_push))
     
     
     async def _init_orderbooks(self, cnx):
@@ -460,7 +460,7 @@ class OrderbookMaintainer:
             symbol = s.params.get('symbol')
             if s.channel != self.channel or s.cnx != cnx: continue
             elif not s.state and self._is_time(symbol, 'reload'):
-                logger.debug('{} - force creating {} {}'.format(self.xs.name, self.name, symbol))
+                self.xs.log('force creating {} {}'.format(self.name, symbol))
                 call_via_loop_afut(self._fetch_and_create, (symbol,), loop=self.xs.loop)
     
     

@@ -24,11 +24,11 @@ Supported exchanges:
 | luno      |   p    |      p      |     w     | +  |   p   |   w    |    p    |   o   |  o   |          |
 | poloniex  |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
 
-Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. However some exchanges like bitmex require you to subscribe to each market directly for order and fill updates: `xs.subscribe_to_own_market(symbol)` (but still also subscribe to account, as it contains balance and position). 
+Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. However some exchanges like bitmex require you to subscribe to each market directly for order and fill updates: `xs.subscribe_to_own_market(symbol)` (but you'll still want to also subscribe to account, as it contains balance and position updates). 
 
-*+* - direct streaming
-*p* - emulated via polling (fetch_balance, fetch_tickers etc)
-*w* - emulated via streaming (l3 -> orderbook, l3 -> trades)
+*+* - direct streaming\
+*p* - emulated via polling (fetch_balance, fetch_tickers etc)\
+*w* - emulated via streaming (l3 -> orderbook, l3 -> trades)\
 *o* - must be subscribed to `own_market`
 
 Test environments are currently offered for: BinanceFu, BitMEX, KrakenFu and Kucoin (Kraken also offers some sort of non-sandboxed test env). For using them add `{'test': True}` to the config, and make sure you have created a sandbox account.
@@ -41,7 +41,7 @@ import asyncio
 
 xs = uxs.binance({'apiKey': '', 'secret': ''})
 xs.subscribe_to_orderbook('BTC/USDT')
-# Subscribes to balance, trade, fill and position updates
+# Subscribes to balance, order, fill and position updates
 xs.subscribe_to_account()
 xs.start()
 
@@ -50,7 +50,7 @@ asyncio.get_event_loop().run_forever()
 
 ## ExchangeSocket
 
-All exchange classes inherit from `uxs.ExchangeSocket`. Note that `uxs.ExchangeSocket` itself *isn't* a subclass of `ccxt.Exchange`, i.e. `uxs.binance` **!**=~ `ccxt.async_support.binance`. Its corresponding (asynchronous) ccxt Exchange instance is accessible under `.api`: `uxs.binance.api` =~ `ccxt.async_support.binance`. The `.api` object's class is a wrapped one through, with some extra attributes I've added for caching data, rounding up/down, calculating payout and altering the markets data (e.g. for personalized fees).
+All exchange classes inherit from `uxs.ExchangeSocket`. Note that `uxs.ExchangeSocket` itself *isn't* a subclass of `ccxt.Exchange`, i.e. `uxs.binance` **!**=~ `ccxt.async_support.binance`. Its corresponding (asynchronous) ccxt Exchange instance is accessible under `.api`: `uxs.binance.api` =~ `ccxt.async_support.binance`. The `.api` object's class is a wrapped one through, with some extra attributes added for caching data, rounding up/down, calculating payout and altering the markets data (e.g. for personalized fees).
 
 `ExchangeSocket` does borrow *some* `ccxt.async_support.Exchange` methods: `create_order`, `edit_order`, `cancel_order` will normally evoke the same method of ccxt class, unless the exchange supports socket trading (hitbtc). And `fetch_ticker`, `fetch_tickers`, `fetch_order_book`, `fetch_ohlcv`, `fetch_trades`, `fetch_balance`, `fetch_open_orders`, which may in some cases be evoked through socket (bittrex).
 
@@ -74,6 +74,8 @@ xs.subscribe_to_ohlcv(symbol, timeframe)
 xs.subscribe_to_trades(symbol)
 
 xs.subscribe_to_account()
+
+xs.subscribe_to_own_market(symbol)
 
 # Unsubscribe
 
@@ -164,8 +166,14 @@ xs.create_order automatically rounds the price down for buy orders, and up for s
 
 ## Logging
 
-uxs uses the logging system of fons.log. To enable test loggers:
+Initialize with `verbose` value 1 (connection, subscription, send, fetch/polling events), 2 (1 + ping + some inner mechanisms) or 3 (1 + 2 + recv events) depending on how detailed log you want. Unexpected errors (not connectivity related) are logged in any case.
+
 ```
-import fons.log
-fons.log.quick_logging()
-``` 
+uxs.binance({'verbose': 1})
+```
+
+If you just want to see recv output without including 1 and 2, init with
+
+```
+uxs.binance({'connection_defaults': {'handle': print}})
+```

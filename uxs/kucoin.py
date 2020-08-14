@@ -1,12 +1,10 @@
-import asyncio
 import aiohttp
-import functools
 import json
-import datetime,time
+import datetime
 dt = datetime.datetime
 td = datetime.timedelta
 
-from uxs.base.socket import ExchangeSocket, ExchangeSocketError
+from uxs.base.socket import ExchangeSocket
 
 from fons.crypto import nonce as _nonce, sign
 import fons.log
@@ -102,10 +100,10 @@ class kucoin(ExchangeSocket):
     def handle(self, response):
         r = response.data
         if r['type'] == 'ack':
-            logger.debug(r)
+            self.log(r)
             self.handle_subscription_ack(r['id'])
-        elif r['type'] != 'message': 
-            logger.debug(r)
+        elif r['type'] != 'message':
+            self.log(r)
         elif r['topic'].startswith('/market/ticker:'):
             self.on_ticker(r)
         elif r['topic'].startswith('/market/level2:'):
@@ -116,7 +114,7 @@ class kucoin(ExchangeSocket):
         elif r['topic'].startswith('/market/match:'):
             self.on_trade(r)
         else:
-            logger2.error('{} - unknown response: {}'.format(self.name, r))
+            self.notify_unknown(r)
             
             
     def on_ticker(self, r):

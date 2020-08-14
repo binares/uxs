@@ -1,5 +1,3 @@
-import os
-from dateutil.parser import parse as parsedate
 from collections import defaultdict
 import functools
 import urllib
@@ -10,11 +8,11 @@ import datetime
 dt = datetime.datetime
 td = datetime.timedelta
 
-from uxs.base.socket import ExchangeSocket, ExchangeSocketError
+from uxs.base.socket import ExchangeSocket
 from uxs.fintls.utils import resolve_times
 
-from fons.time import timestamp_ms, pydt_from_ms, ctime_ms
-from fons.crypto import nonce_ms, sign
+from fons.time import ctime_ms
+from fons.crypto import sign
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 
@@ -162,15 +160,15 @@ class bitmex(ExchangeSocket):
                         if self.is_subscribed_to(s):
                             self.change_subscription_state(s, 1, True)
                     asyncio.ensure_future(change_state())
-                logger.debug("Subscribed to %s." % message['subscribe'])
+                self.log("subscribed to %s." % message['subscribe'])
             else:
-                self.error("Unable to subscribe to %s. Error: \"%s\" Please check and restart." %
-                           (message['request']['args'][0], message['error']))
+                self.log_error("Unable to subscribe to %s. Error: \"%s\" Please check and restart." %
+                               (message['request']['args'][0], message['error']))
         elif 'status' in message:
             if message['status'] == 400:
-                self.error(message['error'])
+                self.log_error(message['error'])
             if message['status'] == 401:
-                self.error("API Key incorrect, please check and restart.")
+                self.log_error("API Key incorrect, please check and restart.")
         elif action:
             if table == 'order':
                 self.on_order(message)
@@ -192,10 +190,6 @@ class bitmex(ExchangeSocket):
                 self.on_wallet(message)
             else:
                 self.notify_unknown(message)
-    
-    
-    def error(self, r):
-        logger2.error('{} - {}'.format(self.name, r))
     
     
     def on_ticker(self, message):
@@ -539,7 +533,7 @@ class bitmex(ExchangeSocket):
             #elif action == 'delete':
             #    self.update_order(id, 0, filled) #?
             else:
-                self.error("Unknown order action: '{}'; item: {}".format(action, d))
+                self.log_error("Unknown order action: '{}'; item: {}".format(action, d))
             
             
     def on_fill(self, message):
@@ -751,7 +745,7 @@ class bitmex(ExchangeSocket):
         for d in r['data']:
             # Are there any other currencies?
             if d['currency'] != 'XBt':
-                logger2.error('{} - received unexpected margin currency: {}'.format(self.name, d['currency']))
+                self.log_error('received unexpected margin currency: {}'.format(d['currency']))
                 continue
             
             mapped = {k: to_btc(d[map[k]]) for k in map if map[k] in d}

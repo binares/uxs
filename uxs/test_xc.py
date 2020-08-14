@@ -311,13 +311,10 @@ def main():
     apply.update(dict.fromkeys(['d','display','ticker','tickers',
                                 'all_tickers','ob','l3','trades','ohlcv',
                                 'account','pos','position','positions'], _split))
-    apply['log'] = apply['loggers'] = _to_int
+    apply['log'] = apply['loggers'] = apply['verbose'] = _to_int
     
     p = parse_argv(sys.argv[1:], apply)
     
-    nr_test_loggers = 2 if not p.contains('verbose') else 3
-    fons.log.quick_logging(nr_test_loggers)
-
     unsub = p.which(['u','unsub'], False)
     resub = p.which(['r','resub'], False)
     stop = p.which(['s','stop'], False)
@@ -332,6 +329,7 @@ def main():
     if crash:
         crash = max(unsub, resub) + p.get(crash) if p.get(crash) is not None else max(resub + 2, unsub + 2, 10)
     
+    verbose = p.get('verbose', 1)
     display = p.which(['d','display'], None)
     if display:
         if p.contains(display, set='mapped'):
@@ -347,6 +345,7 @@ def main():
         'channels': {
             'orderbook': {'delete_data_on_unsub': False}},
         'ob': {'assert_integrity': True},
+        'verbose': verbose,
     }
 
     if 'responses' in display or 'r' in display:
@@ -367,8 +366,8 @@ def main():
         config['auth'] = 'NULL'
         xs = uxs.get_streamer(xc, config)
     
-    print_xs_info()
-
+    # print_xs_info()
+    
     coros = [xs.start()]
     
     t_param = p.which(['ticker','tickers','all_tickers'], '')
@@ -382,6 +381,7 @@ def main():
     a_param = p.which(['account'], '')
     p_param = p.which(['pos','position','positions'], '')
     any_account = any([a_param, o_param, p_param])
+    no_account = p.contains('no_account')
     account_symbols = set()
     
     def _get_items(param, default_symbols=('ETH/BTC',)):
@@ -408,8 +408,8 @@ def main():
             ob_print = 4
         else:
             ob_print = 'changes'
-        unsync = p.get('unsync', False)
-        unassign = p.get('unassign', False)
+        unsync = p.get('unsync', 3) if p.contains('unsync') else False
+        unassign = p.get('unassign', 3) if p.contains('unassign') else False
         coros += [fetch_order_book(ob_symbols, ob_print, sub=True, unsub=unsub, resub=resub,
                                    merge=ob_merge, unsync=unsync, unassign=unassign, params=ob_params, is_l3=is_l3)]
         channel = 'l3' if is_l3 else 'orderbook'
@@ -462,7 +462,7 @@ def main():
         account_symbols.update(p_symbols)
         coros += [fetch_position(p_symbols)]
     
-    if any_account:
+    if any_account and not no_account:
         if unsub:
             asyncio.ensure_future(_unsub({'_': 'account'}, unsub))
         if resub:
@@ -471,7 +471,7 @@ def main():
     if any_account and not account_symbols:
         account_symbols.add('ETH/BTC')
     
-    if account_symbols:
+    if account_symbols and not no_account:
         if xs.has_got('own_market', 'ws'): 
             if xs.has_merge_option('own_market'):
                 xs.subscribe_to_own_market(account_symbols)

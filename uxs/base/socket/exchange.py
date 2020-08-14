@@ -417,7 +417,6 @@ class ExchangeSocket(WSClient):
         load_cached_markets = config.pop('load_cached_markets', None)
         profile = config.pop('profile', None)
         ccxt_test = config.pop('ccxt_test', is_test)
-        subscriptions = config.pop('subscriptions',None)
         
         super().__init__(config)
         
@@ -504,10 +503,6 @@ class ExchangeSocket(WSClient):
         self.l3_maintainer = L3Maintainer(self)
         self._last_fetches = defaultdict(float)
         self._last_markets_loaded_ts = 0
-        
-        if subscriptions is not None:
-            for params in subscriptions:
-                self.susbcribe_to(params)
     
     
     def _init_events(self):
@@ -738,8 +733,15 @@ class ExchangeSocket(WSClient):
         asyncio.ensure_future(self.poll_loop())
     
     
-    def notify_unknown(self, r, max_chars=500):
-        print('{} - unknown response: {}'.format(self.name, str(r)[:max_chars]))
+    def notify_unknown(self, r, max_chars=500, logger=logger2):
+        logger.warning('{} - unknown response: {}'.format(self.name, str(r)[:max_chars]))
+    
+    
+    def log_error(self, msg, e=None, log_e=True, logger=logger2, e_logger=logger):
+        sfx = ': {}'.format(repr(e)) if e is not None else ''
+        logger.error('{} - {}{}'.format(self.name, msg, sfx))
+        if log_e and e is not None:
+            e_logger.exception(e)
     
     
     def check_errors(self, r):
@@ -1394,8 +1396,7 @@ class ExchangeSocket(WSClient):
         
         if id in self.unprocessed_fills:
             for kwargs in self.unprocessed_fills[id]:
-                tlogger.debug('{} - processing fill {} from unprocessed_fills'\
-                              .format(self.name, kwargs))
+                self.log2('processing fill {} from unprocessed_fills'.format(kwargs))
                 self.add_fill(**kwargs)
             self.unprocessed_fills.pop(id)
     
@@ -1427,7 +1428,7 @@ class ExchangeSocket(WSClient):
                      enable_sub=False):
         try: o = self.orders[id]
         except KeyError:
-            logger2.error('{} - not recognized order: {}'.format(self.name, id))
+            self.log_error('not recognized order: {}'.format(id))
             return
         
         if 'price' in params and params['price']==0:
@@ -1544,8 +1545,8 @@ class ExchangeSocket(WSClient):
         # "filled", "remaining" and "payout" of the fill's order
         if loc is not None:
             if warn:
-                tlogger.debug('{} - fill {} already registered.'.format(
-                    self.name,(id,symbol,side,price,amount,order)))
+                self.log2('fill {} already registered.'
+                          .format((id, symbol, side, price, amount, order)))
             if enable_sub:
                 self._change_account_and_own_market_state(symbol, 'fill')
             return
@@ -1644,8 +1645,8 @@ class ExchangeSocket(WSClient):
                 self.update_order(order, **o_params, from_fills=True, set_event=set_order_event)
         
         elif not any(x['id']==id and x['symbol']==symbol for x in self.unprocessed_fills[order]):
-            tlogger.debug('{} - adding {} to unprocessed_fills'.format(
-                self.name,(id,symbol,type,side,price,amount,order)))
+            self.log2('adding {} to unprocessed_fills'
+                      .format((id, symbol, type, side, price, amount, order)))
             self.unprocessed_fills[order].append(
                 {'id': id, 'symbol': symbol, 'side': side, 'price': price, 'amount': amount,
                  'fee_rate': fee_rate, 'timestamp': timestamp, 'order': order, 'payout': payout,
@@ -1746,7 +1747,7 @@ class ExchangeSocket(WSClient):
         if (s.state and not prev_state and
                 attr is not None and self.has_got(attr)):
             corofunc = getattr(self, attr)
-            tlogger.debug('Fetching data for {}'.format(s))
+            self.log('fetching data for {}'.format(s))
             call_via_loop(corofunc, args=s.id_tuple[1:], loop=self.loop)
     
     
@@ -1902,12 +1903,12 @@ class ExchangeSocket(WSClient):
             args = subs[0].id_tuple[1:]
         if id is None:
             id = subs[0].id_tuple + (method,)
-        tlogger.debug('{} - polling {}{}'.format(self.name, method, args))
+        self.log('polling {}{}'.format(method, args))
         try:
             r = await getattr(self, method) (*args)
         except Exception as e:
-            tlogger.error('{} - error occurred while polling {}{} - {}'.format(self.name, method, args, repr(e)))
-            tlogger.exception(e)
+            self.log('error occurred while polling {}{} - {}'.format(method, args, repr(e)))
+            self.log(e)
             return
         finally:
             self._last_fetches[id] = time.time()
@@ -2224,14 +2225,17 @@ class ExchangeSocket(WSClient):
         if self.has_got('fetch_my_trades'):
             symbolRequired = self.has_got('fetch_my_trades', 'symbolRequired')
             _args = [symbol] if symbolRequired else []
+            self.log('querying order {} {} via fetch_my_trades'.format(id, symbol))
             trades = await self.fetch_my_trades(*_args)
             o = {'id': id, 'symbol': symbol, 'trades': [t for t in trades if t['order']==id]}
         elif self.has_got('fetch_order', 'filled'):
+            self.log('querying order {} {} via fetch_order'.format(id, symbol))
             o = await self.fetch_order(id, symbol)
         elif self.has_got('fetch_orders', 'filled'):
             symbolRequired = self.has_got('fetch_orders', 'symbolRequired')
             _args = [symbol] if symbolRequired else []
-            orders = self.fetch_orders(*_args)
+            self.log('querying order {} {} via fetch_orders'.format(id, symbol))
+            orders = await self.fetch_orders(*_args)
             o = next((x for x in orders if x['id']==id), None)
             if o is None:
                 raise ccxt.ExchangeError('Order {} {} not found'.format(id, symbol))
@@ -2272,14 +2276,12 @@ class ExchangeSocket(WSClient):
                 'timestamp': self.api.milliseconds(),
             }
             # In case the order is likely to get filled immediately, but has no "filled"
-            # or "remaining" included in the previous r, nor is subscribed to fills/order feed
+            # or "remaining" included in the create_order response, nor is subscribed to fills/order feed
             try:
                 if self.is_order_querying_enabled(order):
-                    r = await self.query_order(r['id'], symbol)
+                    r = self.api.extend(r, await self.query_order(r['id'], symbol))
             except Exception as e:
-                logger.error('{} - could not query order {} {} - {}'
-                             .format(self.name, r['id'], symbol, repr(e)))
-                logger.exception(e)
+                self.log_error('could not query order {} {}' .format(r['id'], symbol), e)
             
             if self.order['add_automatically']:
                 self.add_ccxt_order(r, order, 'create_order')
@@ -2408,8 +2410,7 @@ class ExchangeSocket(WSClient):
             try:
                 o['payout'] = self.api.calc_payout(**params)
             except Exception as e:
-                logger.error('{} - could not calculate payout for order: {}'.format(self.name, o))
-                logger.exception(e)
+                self.log_error('could not calculate payout for order: {}'.format(o), e)
         
         fills = o.pop('trades', [])
         if fills is None:
@@ -2427,25 +2428,20 @@ class ExchangeSocket(WSClient):
         if self.has_got('fetch_my_trades') and self.order['update_filled_on_fill']:
             try: await self.fetch_my_trades(symbol)
             except Exception as e:
-                logger.error('{} - error fetching my trades to mark order {} {} as closed: {}'
-                             .format(self.name, id, symbol, repr(e)))
-                logger.exception(e)
+                self.log_error('error fetching my trades to mark order {} {} as closed'.format(id, symbol), e)
             else:
                 self.update_order(id, remaining=0)
         elif self.has_got('fetch_order', 'closed'):
             try: o2 = self.fetch_order(id, o['symbol'])
             except Exception as e:
-                logger.error('{} - error fetching order {} {} to mark it as closed: {}'
-                             .format(self.name, id, symbol, repr(e)))
-                logger.exception(e)
+                self.log_error('error fetching order {} {} to mark it as closed'.format(id, symbol), e)
             else:
                 o3 = self.parse_ccxt_order(o2)['order']
                 self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
         elif self.has_got('fetch_closed_orders'):
             try: co = await self.fetch_closed_orders(o['symbol'])
             except Exception as e:
-                logger.error('{} - error fetching closed orders to mark {} {} as closed: {}'
-                             .format(self.name, id, symbol, repr(e)))
+                self.log_error('error fetching closed orders to mark {} {} as closed'.format(id, symbol), e)
                 logger.exception(e)
             else:
                 o2 = next((x for x in co if x['id']==id), None)
@@ -2782,7 +2778,7 @@ class ExchangeSocket(WSClient):
         if reload_interval is not None and \
                 time.time() - self._last_markets_loaded_ts > reload_interval:
             error_txt = '(due to error: {})'.format(repr(e)) if e is not None else ''
-            logger.error('{} - force reloading markets {}'.format(self.name, error_txt))
+            self.log_error('force reloading markets {}'.format(error_txt))
             self._last_markets_loaded_ts = time.time()
             if self.loop.is_running():
                 asyncio.ensure_future(

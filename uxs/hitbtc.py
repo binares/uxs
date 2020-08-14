@@ -125,13 +125,13 @@ class hitbtc(ExchangeSocket):
             elif isinstance(res,bool):
                 self.sh.handle_subscription_ack(r['id'])
             elif not isinstance(res,dict):
-                logger2.error('{} - unknown response {}'.format(self.name,r))
+                self.notify_unknown(r)
             elif 'clientOrderId' in res:
                 self.on_order(res)
         elif 'error' in r:
-            logger2.error(r)
+            self.log_error(r)
         else:
-            logger2.error('{} - unknown response: {}'.format(self.name,r))
+            self.notify_unknown(r)
     
     
     def check_errors(self, r):
@@ -187,7 +187,7 @@ class hitbtc(ExchangeSocket):
             #its bid book receives updates from *ask* of BCH/USDT and BSV/USDT
             pass
         else:
-            logger.debug('Reloading orderbook {} due to unsynced nonce ({}!={}+1)'.format(
+            self.log('reloading orderbook {} due to unsynced nonce ({}!={}+1)'.format(
                 ob['symbol'], ob['nonce'], nonce_0))
             #self.change_subscription_state({'_': 'orderbook','symbol':ob['symbol']}, 0)
             self.orderbook_maintainer._change_status(ob['symbol'], 0)
@@ -270,12 +270,12 @@ class hitbtc(ExchangeSocket):
             filled = max(filled, o['filled'])
             if status in ('canceled','filled','suspended','expired'):
                 self.update_order(id, 0, filled, params={'info': rr})
-                #logger.error('{} - received unregistered order {}'.format(self.name,id))
+                #self.log_error('received unregistered order {}'.format(id))
             elif status in ('partiallyFilled','new'):
                 self.update_order(id, remaining, filled, params={'info': rr})
             else:
                 #order 
-                logger2.info('{} - received unknown order status. r: {}'.format(self.name, rr))
+                self.log_error('received unknown order status. r: {}'.format(rr))
         
         if rtype == 'trade':
             tid = rr['tradeId']

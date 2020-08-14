@@ -5,7 +5,7 @@ import datetime
 dt = datetime.datetime
 td = datetime.timedelta
 
-from uxs.base.socket import ExchangeSocket, ExchangeSocketError
+from uxs.base.socket import ExchangeSocket
 
 from fons.aio import call_via_loop
 from fons.sched import AsyncTicker
@@ -165,7 +165,7 @@ class binance(ExchangeSocket):
                 reload_markets = True
                 
         if reload_markets and time.time() - getattr(self,'_markets_last_reloaded',0) > 60:
-            logger2.error('{} - reloading markets due to KeyError'.format(self.name))
+            self.log_error('reloading markets due to KeyError')
             asyncio.ensure_future(self.api.poll_load_markets(limit=60))
             self._markets_last_reloaded = time.time()
         
@@ -562,13 +562,13 @@ class binance(ExchangeSocket):
         async def prolong_key():
             return await getattr(self.api, method)(params)
         
-        logger.debug('{} - prolonging listen key'.format(self.name))
+        self.log('prolonging listen key')
         
         r = await call_via_loop(prolong_key,
                                 loop=self.loop,
                                 module='asyncio')
         
-        #logger.debug('{} - listen key prolonging response: {}'.format(self.name))
+        #self.log('listen key prolonging response: {}'.format(r))
         
         return r
     

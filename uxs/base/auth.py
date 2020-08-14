@@ -222,8 +222,7 @@ def get_auth2(exchange, id=None, *,
     entry = matches[0]
     
     # Log the id of the matched entry and what function and module requested it
-    # (for potential security purposes)
-    logger.debug("Retrieved auth id '{}' (called from '/{}:{}')".format(
+    tlogger0.debug("Retrieved auth id '{}' (called from '/{}:{}')".format(
         entry.get('id'), '/'.join(f.f_code.co_filename.split(os.sep)[-3:]), f.f_code.co_name))
     
     return entry

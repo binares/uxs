@@ -4,9 +4,9 @@ import datetime
 dt = datetime.datetime
 td = datetime.timedelta
 
-from uxs.base.socket import ExchangeSocket, ExchangeSocketError
+from uxs.base.socket import ExchangeSocket
 
-from fons.time import timestamp_ms, pydt_from_ms
+from fons.time import timestamp_ms
 from fons.crypto import nonce_ms, sign
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
@@ -127,9 +127,9 @@ class poloniex(ExchangeSocket):
         r = response.data
         #print(r)
         if isinstance(r, dict):
-            self.on_error(r)
+            self.log_error(r)
         elif isinstance(r[0], str):
-            logger.debug('{} - ack: {}'.format(self.name, r))
+            self.log('ack: {}'.format(r))
         elif r[0] == 1010:
             self.on_idle(r)
         elif r[0] == 1000:
@@ -139,9 +139,6 @@ class poloniex(ExchangeSocket):
         else:
             self.on_orderbook(r)
     
-    def on_error(self, r):
-        logger2.error('{} - error occurred: {}'.format(self.name, r))
-        
     def on_idle(self, r):
         pass
     
@@ -204,7 +201,7 @@ class poloniex(ExchangeSocket):
             elif item[0] == 't':
                 pass
             else:
-                logger2.error('{} - unknown orderbook item: {}'.format(self.name, item))
+                self._log('unknown orderbook item: {}'.format(item), 'ERROR', logger2)
                 
         if methods['create']:
             self.create_orderbooks([new_obs])
@@ -224,7 +221,7 @@ class poloniex(ExchangeSocket):
             a_type = item[0]
             try: tree[a_type].append(item)
             except KeyError:
-                logger2.error('{} - unknown account item: {}'.format(self.name, item))
+                self._log('unknown account item: {}'.format(item), 'ERROR', logger2)
                 
         if tree['b']:
             self.on_balances(tree['b'])

@@ -12,9 +12,6 @@ class coinsbit(ExchangeSocket):
     url_components = {
         'ws': 'wss://coinsbit.io/trade_ws', # crashes every 40 s
     }
-    channel_defaults = {
-        'unsub_option': False, # todo
-    }
     channels = {
         'ticker': {
             'merge_option': True,
@@ -80,7 +77,8 @@ class coinsbit(ExchangeSocket):
     }
     max_subscriptions_per_connection = 1 # symbol per connection
     subscription_push_rate_limit = 0.04
-    exceptions = {
+    intervals = {
+        'fetch_tickers': 10, # the ping is usually > 10s
     }
     message = {
         'id': {'key': 'id'},
@@ -108,7 +106,9 @@ class coinsbit(ExchangeSocket):
         if isinstance(r, dict):
             ch_id = r.get('method','').split('.')[0]
             if r.get('result') == 'pong':
-                tlogger0.debug(r)
+                self.log2(r)
+            elif isinstance(r.get('result'), dict) and 'status' in r['result']:
+                self.log(r)
             elif ch_id == 'state':
                 self.on_ticker(r)
             elif ch_id == 'depth':

@@ -93,12 +93,14 @@ class ccxtWrapper:
         if load_cached_markets is not False:
             try: currencies = poll.load(xc,'currencies',load_cached_markets,1)[0].data
             except (IndexError, json.JSONDecodeError) as e:
-                logger.error('{} - could not (init)load currencies.'.format(xc))
+                if self.verbose:
+                    logger.debug('{} - could not (init)load cached currencies.'.format(xc))
                 
         if load_cached_markets is not False:
             try: markets = poll.load(xc,'markets',load_cached_markets,1)[0].data
             except (IndexError, json.JSONDecodeError) as e:
-                logger.error('{} - could not (init)load markets.'.format(xc))
+                if self.verbose:
+                    logger.debug('{} - could not (init)load cached markets.'.format(xc))
         
         if markets:
             self.set_markets(markets, currencies)
@@ -162,7 +164,7 @@ class ccxtWrapper:
     
     
     def _set_trading_fees(self, fees):
-        if self.markets is None:
+        if self.markets is None or fees is None:
             return
         for symbol, _fees in fees.items():
             for x in ('taker','maker'):
@@ -241,10 +243,10 @@ class ccxtWrapper:
             return None
         self._set_lot_sizes()
         self._set_market_types()
-        default = poll.load_profile('__default__', get_name(self), 'markets')
+        default = poll.load_profile('__default__', get_name(self), 'markets', verbose=self.verbose)
         custom = []
         if getattr(self,'_profile_name',None) is not None:
-            custom = poll.load_profile(self._profile_name, get_name(self), 'markets')
+            custom = poll.load_profile(self._profile_name, get_name(self), 'markets', verbose=self.verbose)
         for item in default + custom:
             self.update_markets(item.data)
         self._ensure_synchronization()
@@ -1061,7 +1063,9 @@ class ccxtWrapper:
 
         sold = {}
         
-        print([(x,y) for x,y in balances['free'].items() if y])
+        if self.verbose:
+            logger.debug('{} - positive balances before selling dust: {}'.format(
+                self.id, [(x,y) for x,y in balances['free'].items() if y]))
         
         for cy,free in balances['free'].items():
             #print(cy)
@@ -1303,8 +1307,9 @@ def init_exchange(exchange):
         except KeyError: pass
         
     if not e_obj or e_obj.apiKey != auth.get('apiKey'):
-        prev_e_obj = e_obj       
-        logger.debug("Initiating ccxt-exchange '{}' with auth_id '{}'".format(e, auth.get('id')))
+        prev_e_obj = e_obj
+        if eobj_kw.get('verbose'):
+            logger.debug("Initiating ccxt-exchange '{}' with auth_id '{}'".format(e, auth.get('id')))
         e_obj = e_cls(*eobj_args, **eobj_kw, auth=auth)
         if prev_e_obj and not e_obj.markets:
             e_obj.set_markets(prev_e_obj.markets, prev_e_obj.currencies)

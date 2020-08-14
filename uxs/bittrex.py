@@ -7,7 +7,7 @@ import zlib
 import json
 import copy
 
-from uxs.base.socket import ExchangeSocket, ExchangeSocketError
+from uxs.base.socket import ExchangeSocket
 
 from fons.crypto import sign
 from fons.time import ctime_ms
@@ -109,7 +109,7 @@ class bittrex(ExchangeSocket):
             # data['I'] seems to be always '0'
             try: decoded_msg = self._decode_message(data['R'])
             except zlib.error:
-                logger.debug("{} - authentication procedure invoked".format(self.name))
+                self.log('authentication procedure invoke')
                 challenge = data['R']
                 params = {'_': 'Authenticate', 'challenge': challenge}
                 self.send(params)
@@ -119,11 +119,11 @@ class bittrex(ExchangeSocket):
                 elif isinstance(decoded_msg,dict) and 's' in decoded_msg:
                     self.on_query_summary_state(decoded_msg)
                 else:
-                    logger2.error('{} - unknown response: {}'.format(self.name, dict(data, R=decoded_msg)))
+                    self.notify_unknown(dict(data, R=decoded_msg))
         
-        #The first response:
-        #{'C': 'd-B1762C83-w,0|q80T,0|q80U,1', 'S': 1, 'M': []}
-        #Afterwards 'S' is missing and 'M' has items in it
+        # The first response:
+        # {'C': 'd-B1762C83-w,0|q80T,0|q80U,1', 'S': 1, 'M': []}
+        # Afterwards 'S' is missing and 'M' has items in it
         elif 'M' in data and isinstance(data['M'], list):
             for item in data['M']:
                 method = item['M']
@@ -139,24 +139,24 @@ class bittrex(ExchangeSocket):
                 elif method == 'uL':
                     pass
                 else:
-                    logger2.error('{} - item with unknown method: {}'.format(self.name, item))
+                    self._log('item with unknown method: {}'.format(item), 'ERROR')
                     
-        #Is G the description of a subscription? Couldn't decode it with ._decode_message.
-        #{'C': 'd-B1762C83-w,0|q80T,0|q80U,2|Bh,123445', 'G': 'a_long_non_decodable_str', 'M': []}
+        # Is G the description of a subscription? Couldn't decode it with ._decode_message.
+        # {'C': 'd-B1762C83-w,0|q80T,0|q80U,2|Bh,123445', 'G': 'a_long_non_decodable_str', 'M': []}
         elif 'C' in data and 'G' in data and isinstance(data['G'], str):
             pass
         
-        #A subscription was activated?
-        #{'R': True, 'I': '1'}
+        # A subscription was activated?
+        # {'R': True, 'I': '1'}
         elif 'R' in data:
             pass
         
-        #{'I': '0', 'E': "There was an error invoking Hub method 'c2.GetAuthContext'."}
+        # {'I': '0', 'E': "There was an error invoking Hub method 'c2.GetAuthContext'."}
         elif 'E' in data:
-            logger2.error('{} - {}'.format(self.name, data['E']))
-            
+            self.log_error(data['E'])
+        
         else:
-            logger2.error('{} - unknown response: {}'.format(self.name, data))
+            self.notify_unknown(data)
         
         
     @staticmethod

@@ -1,9 +1,6 @@
 import asyncio
-import aiohttp
-import functools
 import json
 import random
-from copy import deepcopy
 import datetime,time
 import ccxt
 from fons.aio import call_via_loop
@@ -11,7 +8,6 @@ dt = datetime.datetime
 td = datetime.timedelta
 
 from uxs.base.socket import ExchangeSocket
-from uxs.fintls.basics import as_direction
 
 from fons.sched import AsyncTicker
 from fons.time import ctime_ms
@@ -232,7 +228,7 @@ class kraken(ExchangeSocket):
                 self.notify_unknown(r)
         else:
             if isinstance(r, dict) and r.get('event') != 'heartbeat':
-                tlogger.debug(r)
+                pass
     
     
     def check_errors(self, r):
