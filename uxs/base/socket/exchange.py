@@ -2353,24 +2353,38 @@ class ExchangeSocket(WSClient):
             o = _copy.deepcopy(self.orders[order_id])
             return o
         else:
-            try: r = await self.api.edit_order(id, symbol, *args)
+            try:
+                r = await self.api.edit_order(id, symbol, *args)
             except ccxt.OrderNotFound as e:
                 _symbol = symbol if symbol is not None else deep_get([self.orders], [id, 'symbol'])
                 cancel_automatically = self.is_order_auto_canceling_enabled(_symbol)
                 if cancel_automatically:
                     await self.safely_mark_order_closed(id)
                 raise e
+            o_prev = self.orders.get(id, {})
+            new_type = args[0] if args and args[0] is not None else o_prev.get('type')
+            prev_amount = o_prev['remaining'] if r.get('id')!=id and o_prev.get('remaining') is not None \
+                          else o_prev.get('amount')
+            order = {
+                'id': r['id'] if r.get('id') else id,
+                'symbol': symbol,
+                'type': new_type,
+                'side': args[1] if len(args) > 1 and args[1] is not None else o_prev.get('side'),
+                'amount': args[2] if len(args) > 2 and args[2] is not None else prev_amount,
+                'price': args[3] if len(args) > 3 else (o_prev.get('price') if new_type!='market' else None),
+                'timestamp': self.api.milliseconds(),
+            }
+            # In case the order is likely to get filled immediately, but has no "filled"
+            # or "remaining" included in the edit_order response, nor is subscribed to fills/order feed
+            try:
+                if self.api.has['editOrder']!='emulated' and self.is_order_querying_enabled(order, 'edit_order'):
+                    r = self.api.extend(r, await self.query_order(order['id'], symbol))
+            except Exception as e:
+                self.log_error('could not query order {} {}' .format(order['id'], symbol), e)
+            
             if self.order['add_automatically']:
-                order = {
-                    'id': r['id'] if r.get('id') else id,
-                    'symbol': symbol,
-                    'type': args[0],
-                    'side': args[1],
-                    'timestamp': self.api.milliseconds(),
-                }
-                for key, value in zip(['type','side','amount','price'], args):
-                    order[key] = value
                 self.add_ccxt_order(r, order, 'edit_order')
+            
             return r
     
     
@@ -2468,7 +2482,7 @@ class ExchangeSocket(WSClient):
             return bool(coa)
     
     
-    def is_order_querying_enabled(self, order):
+    def is_order_querying_enabled(self, order, method='create_order'):
         """:type order: dict"""
         enable_querying = self.order['enable_querying']
         if not isinstance (enable_querying, str):
@@ -2476,7 +2490,7 @@ class ExchangeSocket(WSClient):
         elif enable_querying!='if-not-immediate':
             raise ValueError(enable_querying)
         symbol, type, side, price = order['symbol'], order['type'], order['side'], order.get('price')
-        if self.has_got('create_order', 'filled'):
+        if self.has_got(method, 'filled'):
             return False
         elif self.has_got('account', 'order', 'ws') and self.is_subscribed_to(('account',), True):
             return False
