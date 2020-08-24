@@ -4,8 +4,9 @@
 # https://github.com/ccxt/ccxt/blob/master/CONTRIBUTING.md#how-to-contribute-code
 
 from ccxt.base.exchange import Exchange
-import hashlib
 from ccxt.base.errors import ExchangeError
+from ccxt.base.errors import InvalidOrder
+from ccxt.base.errors import NotSupported
 
 
 class coinbene(Exchange):
@@ -17,34 +18,29 @@ class coinbene(Exchange):
             'countries': ['CN', 'US'],
             'version': 'v2',
             'rateLimit': 1500,
-            'certified': True,
-            # new metainfo interface
             'has': {
-                'cancelOrder': False,
-                'createLimitOrder': False,
-                'createMarketOrder': False,
-                'createOrder': False,
-                'editOrder': False,
-                'fetchBalance': False,
-                'fetchOHLCV': False,
-                'fetchTicker': False,
+                'cancelOrders': True,
+                'fetchClosedOrders': True,
+                'fetchMyTrades': False,
+                'fetchOHLCV': True,
+                'fetchOpenOrders': True,
+                'fetchOrder': True,
                 'fetchTickers': True,
-                'fetchTrades': False,
-                'privateAPI': False,
             },
             'timeframes': {
-                '1m': '1m',
-                '5m': '5m',
-                '15m': '15m',
-                '30m': '30m',
-                '1h': '1h',
-                '3h': '3h',
-                '6h': '6h',
-                '12h': '12h',
-                '1d': '1D',
-                '1w': '7D',
-                '2w': '14D',
-                '1M': '1M',
+                '1m': '1',
+                '3m': '3',
+                '5m': '5',
+                '15m': '15',
+                '30m': '30',
+                '1h': '60',
+                '2h': '120',
+                '4h': '240',
+                '6h': '360',
+                '12h': '720',
+                '1d': 'D',
+                '1w': 'W',
+                '1M': 'M',
             },
             'urls': {
                 'logo': 'https://res.coinbene.mobi/coinbene-article/9f524eb71731f51e.png',
@@ -86,6 +82,14 @@ class coinbene(Exchange):
                     ],
                 },
             },
+            'fees': {
+                'trading': {
+                    'tierBased': True,
+                    'percentage': True,
+                    'taker': 0.001,
+                    'maker': 0.001,
+                },
+            },
             'options': {
                 'currencyNames': None,
                 'orderTypes': {
@@ -104,22 +108,22 @@ class coinbene(Exchange):
         result = []
         for i in range(0, len(response['data'])):
             market = response['data'][i]
-            id = self.safe_string(market, 'symbol').upper()
+            slashedId = self.safe_string(market, 'symbol').upper()
             base = None
             quote = None
             baseId = None
             quoteId = None
-            if id.find('/') >= 0:
-                parts = id.split('/')
-                base = parts[0]
-                baseId = base.lower()
-                quote = parts[1]
-                quoteId = quote.lower()
+            if slashedId.find('/') >= 0:
+                parts = slashedId.split('/')
+                base = self.safe_currency_code(parts[0])
+                baseId = parts[0].lower()
+                quote = self.safe_currency_code(parts[1])
+                quoteId = parts[1].lower()
             symbol = base + '/' + quote
-            id = baseId + quoteId
+            id = (baseId + quoteId).upper()
             precision = {
-                'price': market['pricePrecision'],
-                'amount': market['amountPrecision'],
+                'price': self.safe_integer(market, 'pricePrecision'),
+                'amount': self.safe_integer(market, 'amountPrecision'),
             }
             priceFluctuation = self.safe_float(market, 'priceFluctuation')
             limits = {
@@ -128,16 +132,17 @@ class coinbene(Exchange):
                     'max': None,
                 },
                 'price': {
-                    'min': 1 - priceFluctuation,
-                    'max': 1 + priceFluctuation,
+                    'min': None,  # 1 - priceFluctuation,
+                    'max': None,  # 1 + priceFluctuation,
                 },
             }
             limits['cost'] = {
-                'min': limits['amount']['min'] * limits['price']['min'],
+                'min': None,  # limits['amount']['min'] * limits['price']['min'],
                 'max': None,
             }
             result.append({
-                'id': id,
+                'id': id,                # BTCUSDT
+                'slashedId': slashedId,  # BTC/USDT
                 'symbol': symbol,
                 'base': base,
                 'quote': quote,
@@ -150,12 +155,23 @@ class coinbene(Exchange):
             })
         return result
 
+    def parse_slashed_id(self, slashedId):
+        # convert slashedId to id
+        if slashedId is None:
+            return None
+        elif slashedId.find('/') < 0:
+            return slashedId.upper()
+        else:
+            split = slashedId.split('/')
+            return(split[0] + split[1]).upper()
+
     def fetch_order_book(self, symbol, limit=None, params={}):
         self.load_markets()
+        market = self.market(symbol)
         if limit is None:
             limit = 10  # 5, 10, 50, 100. Default value 10
         request = {
-            'symbol': symbol,
+            'symbol': market['slashedId'],
             'depth': limit,
         }
         response = self.publicGetMarketOrderBook( self.extend(request, params))
@@ -168,16 +184,39 @@ class coinbene(Exchange):
         return self.parse_order_book(orderBook, timestamp)
         return orderBook
 
+    def fetch_ticker(self, symbol, params={}):
+        self.load_markets()
+        market = self.market(symbol)
+        request = {
+            'symbol': market['slashedId'],
+        }
+        response = self.publicGetMarketTickerOne(self.extend(request, params))
+        return self.parse_ticker(response['data'], market)
+
     def fetch_tickers(self, symbols=None, params={}):
         self.load_markets()
         response = self.publicGetMarketTickerList(params)
         return self.parse_tickers(response['data'], symbols)
 
     def parse_ticker(self, ticker, market=None):
-        symbol = self.safe_string(ticker, 'symbol')
+        if market is None:
+            marketId = self.parse_slashed_id(self.safe_string(ticker, 'symbol'))
+            market = self.safe_value(self.markets_by_id, marketId)
         last = self.safe_float(ticker, 'latestPrice')
+        percentage = None
+        open = None
+        average = None
+        change = None
+        chg24h = self.safe_string(ticker, 'chg24h')
+        if chg24h is not None and chg24h.find('%') >= 0:
+            loc = chg24h.find('%')
+            percentage = float(chg24h[0:loc]) / 100
+            if last is not None:
+                open = last / (1 + percentage)
+                average = (open + last) / 2
+                change = last - open
         return {
-            'symbol': symbol,
+            'symbol': self.safe_string(market, 'symbol'),
             'info': ticker,
             'timestamp': None,
             'datetime': None,
@@ -188,15 +227,15 @@ class coinbene(Exchange):
             'ask': self.safe_float(ticker, 'bestAsk'),
             'askVolume': None,
             'vwap': None,
-            'open': None,
+            'open': open,
             'close': last,
             'last': last,
             'previousClose': None,
-            'change': None,
-            'percentage': None,
-            'average': None,
-            'baseVolume': self.safe_float(ticker, 'volume24h'),
-            'quoteVolume': None,
+            'change': average,
+            'percentage': percentage,
+            'average': average,
+            'baseVolume': None,
+            'quoteVolume': self.safe_float(ticker, 'volume24h'),
         }
 
     def parse_tickers(self, rawTickers, symbols=None):
@@ -204,6 +243,289 @@ class coinbene(Exchange):
         for i in range(0, len(rawTickers)):
             tickers.append(self.parse_ticker(rawTickers[i]))
         return self.filter_by_array(tickers, 'symbol', symbols)
+
+    def fetch_ohlcv(self, symbol, timeframe='1m', since=None, limit=None, params={}):
+        self.load_markets()
+        market = self.market(symbol)
+        request = {
+            'symbol': market['slashedId'],
+            'period': self.timeframes[timeframe],
+        }
+        if since is not None:
+            request['start'] = int(since / 1000)
+        response = self.publicGetMarketInstrumentsCandles(self.extend(request, params))
+        return self.parse_ohlcvs(response['data'], market, timeframe, since, limit)
+
+    def parse_ohlcv(self, ohlcv, market=None, timeframe='1m', since=None, limit=None):
+        return [
+            self.parse8601(self.safe_string(ohlcv, 0)),
+            self.safe_float(ohlcv, 1),
+            self.safe_float(ohlcv, 2),
+            self.safe_float(ohlcv, 3),
+            self.safe_float(ohlcv, 4),
+            self.safe_float(ohlcv, 5),
+        ]
+
+    def fetch_trades(self, symbol, since=None, limit=None, params={}):
+        self.load_markets()
+        market = self.market(symbol)
+        request = {
+            'symbol': market['slashedId'],
+        }
+        response = self.publicGetMarketTrades(self.extend(request, params))
+        return self.parse_trades(response['data'], market, since, limit)
+
+    def parse_trade(self, trade, market=None):
+        symbol = None
+        if market is None:
+            marketId = self.safe_string(trade, 0)
+            market = self.safe_value(self.markets_by_id, marketId)
+        if market is not None:
+            symbol = market['symbol']
+        price = self.safe_float_2(trade, 1, 'price')
+        # quantity = fill['quantity']
+        amount = self.safe_float_2(trade, 2, 'amount')
+        side = self.safe_string_2(trade, 3, 'direction')
+        timestamp = self.parse8601(self.safe_string_2(trade, 4, 'tradeTime'))
+        cost = None
+        if price is not None and amount is not None:
+            cost = price * amount
+        fee = None
+        feeAmount = self.safe_float(trade, 'fee')
+        # feeByConi = fill['feeByConi']
+        if feeAmount is not None:
+            fee = {
+                'cost': feeAmount,
+                'currency': self.safe_string(market, 'quote'),
+                'rate': None,
+            }
+        return {
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'symbol': symbol,
+            'id': None,
+            'order': None,
+            'type': None,
+            'side': side,
+            'takerOrMaker': None,
+            'price': price,
+            'amount': amount,
+            'cost': cost,
+            'fee': fee,
+        }
+
+    def fetch_balance(self, params={}):
+        self.load_markets()
+        response = self.privateGetAccountList(params)
+        code = response['code']
+        if code != 200:
+            return response
+        result = {'info': response}
+        for i in range(0, len(response['data'])):
+            balance = response['data'][i]
+            currencyId = self.safe_string(balance, 'asset')
+            code = self.safe_currency_code(currencyId)
+            account = self.account()
+            account['free'] = self.safe_float(balance, 'available')
+            account['used'] = self.safe_float(balance, 'frozenBalance')
+            account['total'] = self.safe_float(balance, 'totalBalance')
+            result[code] = account
+        return self.parse_balance(result)
+
+    def create_order(self, symbol, type, side, amount, price=None, params={}):
+        self.load_markets()
+        market = self.market(symbol)
+        if not (type in self.options['orderTypes']):
+            raise InvalidOrder(self.id + ' - invalid order type')
+        request = {
+            'symbol': market['slashedId'],
+            'direction': self.options['direction'][side],
+            'price': price,
+            'quantity': amount,
+            'orderType': self.options['orderTypes'][type],
+            'notional': None,
+        }
+        response = self.privatePostOrderPlace(self.extend(request, params))
+        code = response['code']
+        if code != 200:
+            return response
+        result = {}
+        result['id'] = response['data']['orderId']
+        result['info'] = response['data']
+        return result
+
+    def fetch_order(self, id, symbol=None, params={}):
+        self.load_markets()
+        request = {
+            'orderId': id,
+        }
+        response = self.privateGetOrderInfo(self.extend(request, params))
+        return self.parse_order(response['data'])
+
+    def cancel_order(self, id, params={}):
+        self.load_markets()
+        request = {
+            'orderId': id,
+        }
+        response = self.privatePostOrderCancel(self.extend(request, params))
+        code = response['code']
+        if code != 200:
+            return response
+        return {
+            'id' : id,
+            'result': True,
+        }
+
+    def cancel_orders(self, ids, symbol=None, params={}):
+        self.load_markets()
+        request = {
+            'orderIds': ids,
+        }
+        response = self.privatePostOrderBatchCancel(self.extend(request, params))
+        #  {
+        #      "code":200,
+        #      "data":[
+        #          {
+        #              "orderId":"1980983481458700288",
+        #              "code":"200",
+        #              "message":""
+        #          },
+        #          {
+        #              "orderId":"1980983581337661440",
+        #              "code":"200",
+        #              "message":""
+        #          },
+        #          {
+        #              "orderId":"1924511943331438592",
+        #              "code":"3004",
+        #              "message":"The order does not exist, the cancellation of failure"
+        #          }
+        #      ]
+        #  }
+
+    def parse_order_status(self, status):
+        statuses = {
+            'Open': 'open',
+            'Filled': 'closed',
+            'Cancelled': 'canceled',
+            'Partially cancelled': 'canceled',  # partially filled and canceled
+        }
+        return self.safe_string(statuses, status, status)
+
+    def parse_order(self, order, market=None):
+        id = self.safe_string(order, 'orderId')
+        symbol = None
+        base = self.safe_currency_code(self.safe_string(order, 'baseAsset'))
+        quote = self.safe_currency_code(self.safe_string(order, 'quoteAsset'))
+        marketId = self.safe_string(order, 'symbol')
+        if base is not None and quote is not None:
+            symbol = base + '/' + quote
+            if symbol in self.markets:
+                market = self.markets[symbol]
+        if marketId in self.markets_by_id:
+            market = self.markets_by_id[marketId]
+        if market is not None:
+            symbol = market['symbol']
+        type = self.safe_string(order, 'orderType')
+        side = self.safe_string(order, 'orderDirection')
+        filled = self.safe_float(order, 'filledQuantity')
+        amount = self.safe_float(order, 'quantity')            # '0' for market order
+        if type == 'market' and amount == 0:
+            amount = filled
+        remaining = None
+        cost = self.safe_float(order, 'filledAmount')
+        takerFee = self.safe_float(order, 'takerFeeRate')
+        makerFee = self.safe_float(order, 'makerFeeRate')
+        average = self.safe_float(order, 'avgPrice')         # '' always?
+        price = self.safe_float(order, 'orderPrice')           # '0' for market order
+        if not price:
+           price = None
+        if filled is not None:
+            if cost is not None and average is None and filled > 0:
+                average = cost / filled
+            if cost is None:
+                if average is not None:
+                    cost = average * filled
+                elif price is not None:
+                    cost = price * filled
+            if amount is not None:
+                remaining = amount - filled
+        status = self.parse_order_status(self.safe_string(order, 'orderStatus'))
+        timestamp = self.parse8601(self.safe_string(order, 'orderTime'))
+        fee = None
+        feeAmount = self.safe_float_2(order, 'fee', 'totalFee')
+        if feeAmount is not None:
+            fee = {
+                'cost': feeAmount,
+                'currency': self.safe_string(market, 'quote'),
+                'rate': None,
+            }
+        return {
+            'info': order,
+            'id': id,
+            'clientOrderId': None,
+            'timestamp': timestamp,
+            'datetime': self.iso8601(timestamp),
+            'lastTradeTimestamp': None,
+            'symbol': symbol,
+            'type': type,
+            'side': side,
+            'price': price,
+            'amount': amount,
+            'cost': cost,
+            'average': average,
+            'filled': filled,
+            'remaining': remaining,
+            'status': status,
+            'fee': fee,
+            'trades': None,
+        }
+
+    def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
+        self.load_markets()
+        request = {}
+        market = None
+        if symbol is not None:
+            market = self.market(symbol)
+            request['symbol'] = market['slashedId']
+        if limit is not None:
+            request['limit'] = limit
+        response = self.privateGetOrderOpenorders(self.extend(request, params))
+        orders = self.safe_value(response, 'data')
+        if orders is None:
+            return []
+        return self.parse_orders(orders, market, since, limit)
+
+    def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
+        self.load_markets()
+        request = {}
+        market = None
+        if symbol is not None:
+            market = self.market(symbol)
+            request['symbol'] = market['slashedId']
+        if limit is not None:
+            request['limit'] = limit
+        response = self.privateGetOrderClosedorders(self.extend(request, params))
+        orders = self.safe_value(response, 'data')
+        if orders is None:
+            return []
+        return self.parse_orders(orders, market, since, limit)
+
+    def fetch_my_trades(self, symbol=None, since=None, limit=None, params={}):
+        raise NotSupported(self.id + ' - fetchMyTrades is not supported yet')
+        # params required: 'orderId'
+        # self.load_markets()
+        # response = self.privateGetOrderTradeFills(params)
+        # code = response['code']
+        # if code != 200:
+        #     return response
+        # }
+        # trades = self.safe_value(response, 'data')
+        # if trades is None:
+        #     return []
+        # }
+       #  return self.parse_trades(trades, market, since, limit)
 
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         path = self.urls['prefixPath'] + path
@@ -233,7 +555,7 @@ class coinbene(Exchange):
                     body = self.json(query)
                     auth += body
                 headers['Content-Type'] = 'application/json'
-            signature = self.hmac(self.encode(auth), self.encode(self.secret))  # , hashlib.sha256, 'hex')
+            signature = self.hmac(self.encode(auth), self.encode(self.secret))
             headers['ACCESS-SIGN'] = signature
         return {'url': url, 'method': method, 'body': body, 'headers': headers}
 
