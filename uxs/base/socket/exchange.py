@@ -2801,25 +2801,35 @@ class ExchangeSocket(WSClient):
                 self.sn_load_markets(reload=True, limit=0)
     
     
-    def encode_symbols(self, symbols, topics):
-        if isinstance(topics, str):
-            topics = [topics]
+    def fill_in(self, strings, replace, replace_with, convert_function=None):
+        if isinstance(strings, str):
+            strings = [strings]
         
-        if symbols is None:
-            symbols = []
-        elif isinstance(symbols, str):
-            symbols = [symbols]
-        symbols = [self.convert_symbol(s,1) for s in symbols]
+        if replace_with is None:
+            replace_with = []
+        elif isinstance(replace_with, (str, float, int)):
+            replace_with = [replace_with]
+        if convert_function is not None:
+            replace_with = [convert_function(rw) for rw in replace_with]
         
-        with_symbol = [t for t in topics if '<symbol>' in t]
-        without_symbol = [t for t in topics if '<symbol>' not in t]
+        with_replace = [s for s in strings if replace in s]
+        without_replace = [s for s in strings if replace not in s]
         
-        args = without_symbol[:]
+        replaced = without_replace[:]
         
-        for s in symbols:
-            args += [t.replace('<symbol>',s) for t in with_symbol]
+        for rw in replace_with:
+            replaced += [s.replace(replace, str(rw)) for s in with_replace]
         
-        return args
+        return replaced
+    
+    
+    def fill_in_params(self, strings, symbols=None, timeframes=None, currencies=None):
+        replaced = self.fill_in(strings, '<symbol>', symbols, self.convert_symbol)
+        replaced = self.fill_in(replaced, '<timeframe>', timeframes, self.convert_timeframe)
+        replaced = self.fill_in(replaced, '<currency>', currencies, self.convert_cy)
+        replaced = self.fill_in(replaced, '<cy>', currencies, self.convert_cy)
+        
+        return replaced
     
     
     def safe_set_event(self, _, id, *broadcast, via_loop=None, op='set'):

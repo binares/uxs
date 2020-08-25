@@ -858,7 +858,7 @@ class bitmex(ExchangeSocket):
             self.ob_maintainer.set_limit(params['symbol'], limit)
         
         channel_ids = self.channel_ids[channel] if channel != 'orderbook' else orderbook
-        args = self.encode_symbols(params.get('symbol'), channel_ids)
+        args = self.fill_in_params(channel_ids, params.get('symbol'))
         #print(op,args)
         
         return {'op': op, 'args': args}

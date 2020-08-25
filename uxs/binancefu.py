@@ -231,7 +231,7 @@ class binancefu(binance):
             'ohlcv': ['<symbol>@kline_{}'.format(timeframe)],
         }
         
-        args = self.encode_symbols(params.get('symbol'), map[channel])
+        args = self.fill_in_params(map[channel], params.get('symbol'))
         id = nonce_ms()
         
         return ({

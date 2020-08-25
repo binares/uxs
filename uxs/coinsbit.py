@@ -73,7 +73,7 @@ class coinsbit(ExchangeSocket):
     connection_defaults = {
         'ping': 'm$ping',
         'ping_interval': 30,
-        'ping_as_message': True,
+        'ping_as_message': 'dump',
     }
     max_subscriptions_per_connection = 1 # symbol per connection
     subscription_push_rate_limit = 0.04

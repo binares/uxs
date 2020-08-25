@@ -14,6 +14,7 @@ Supported exchanges:
 | bitmex    |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
 | bittrex   |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  p   |          |
 | bw        |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
+| coinbene  |   +    |      +      |     +     |    |   +   |   +    |    p    |       |      |          |
 | coindcx   |   p    |      p      |     +     |    |   p   |   +    |    +    |       |  +   |          |
 | coinsbit  |   +    |      p      |     +     |    |   +   |   +    |    p    |   p   |  p   |          |
 | gateiofu  |        |             |     +     |    |   p   |        |         |       |      |          |
