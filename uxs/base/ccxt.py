@@ -428,6 +428,30 @@ class ccxtWrapper:
     
     
     @staticmethod
+    def balance_entry(currency=None, free=None, used=None, total=None, **kw):
+        e = dict({
+            'currency': currency, 
+            'free': free, 
+            'used': used,
+            'total': total, 
+        },**kw)
+        
+        for var in ['free', 'used', 'total']:
+            if isinstance(e[var],str):
+                e[var] = float(e[var])
+        
+        if e['total'] is not None:
+            if e['free'] is None and e['used'] is not None:
+                e['free'] = e['total'] - e['used']
+            elif e['used'] is None and e['free'] is not None:
+                e['used'] = e['total'] - e['free']
+        elif e['free'] is not None and e['used'] is not None:
+            e['total'] = e['free'] + e['used']
+        
+        return e
+    
+    
+    @staticmethod
     def position_entry(symbol=None, timestamp=None, datetime=None, price=None, amount=None, 
                        leverage=None, liq_price=None, **kw):
         """
