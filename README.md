@@ -14,8 +14,8 @@ Supported exchanges:
 | bitmex    |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
 | bittrex   |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  p   |          |
 | bw        |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
-| coinbene  |   +    |      +      |     +     |    |   +   |   +    |    p    |       |      |          |
-| coindcx   |   p    |      p      |     +     |    |   p   |   +    |    +    |       |  +   |          |
+| coinbene  |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
+| coindcx   |   p    |      p      |     +     |    |   p   |   +    |    +    |   p   |  +   |          |
 | coinsbit  |   +    |      p      |     +     |    |   +   |   +    |    p    |   p   |  p   |          |
 | gateiofu  |        |             |     +     |    |   p   |        |         |       |      |          |
 | hitbtc    |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
@@ -124,11 +124,11 @@ xs.trades[symbol]
 
 xs.balances[currency]
 
-xs.orders[symbol][order_id]
+xs.orders[order_id]
 
-xs.open_orders[symbol][order_id]
+xs.open_orders[order_id]
 
-xs.fills[symbol][order_id]
+xs.fills[order_id]
 
 xs.positions[symbol]
 ```

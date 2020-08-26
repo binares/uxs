@@ -256,10 +256,11 @@ class ExchangeSocket(WSClient):
         'fetch_order_book': 15,
         'fetch_trades': 60,
         'fetch_balance': 60,
-        'fetch_open_orders': 8,
-        'fetch_orders': 8,
+        'fetch_my_trades': 15,
+        'fetch_orders': 15,
+        'fetch_open_orders': 15,
+        'fetch_closed_orders': 15,
         'fetch_order': 15,
-        'fetch_my_trades': 8,
     }
     max_missed_intervals = {
         'default': 2,
@@ -541,10 +542,10 @@ class ExchangeSocket(WSClient):
             ['trades', ['fetch_trades']],
             ['ohlcv', ['fetch_ohlcv']],
             ['balance', ['fetch_balance']],
-            ['order', ['fetch_my_trades','fetch_orders']], # 'fetch_order','fetch_open_orders',
+            ['order', ['fetch_my_trades', 'fetch_orders', 'fetch_open_orders', 'fetch_order']],
             ['fill', ['fetch_my_trades']],
             ['position', []],
-            ['own_market_order', ['fetch_my_trades', 'fetch_orders']],
+            ['own_market_order', ['fetch_my_trades', 'fetch_orders', 'fetch_open_orders', 'fetch_order']],
             ['own_market_fill', ['fetch_my_trades']],
         ])
         do_not_fetch_on_emulated_sub = ['ticker','all_tickers','orderbook','trades','ohlcv','l3']
@@ -1364,6 +1365,7 @@ class ExchangeSocket(WSClient):
              'remaining': remaining,
              'payout': payout,
              'lastTradeTimestamp': lastTradeTimestamp,
+             'lastUpdateTimestamp': self.api.milliseconds(),
              'cum': cum,
             }, **params)
         
@@ -1491,6 +1493,8 @@ class ExchangeSocket(WSClient):
             cumulate(o)
         
         cumulate(o, *[o['cum'][x] for x in ['r','f','p']])
+        
+        o['lastUpdateTimestamp'] = self.api.milliseconds()
         
         if not o['remaining']:
             try:
@@ -1802,31 +1806,29 @@ class ExchangeSocket(WSClient):
             maintainer.is_synced[symbol] = False
     
     
-    async def poll_loop(self):
-        """Poll everything that can't be accessed via websocket"""
-        def _is_item_poll(emul_item):
+    @staticmethod
+    def _is_poll(emulated):
+        def is_item_poll(emul_item):
             if not isinstance(emul_item, str):
                 return emul_item
             else:
                 return emul_item=='poll' or emul_item.startswith('fetch')
-        def _is_poll(emulated):
-            if isinstance(emulated, list):
-                return any(_is_item_poll(x) for x in emulated)
-            else:
-                return _is_item_poll(emulated)
+        if isinstance(emulated, list):
+            return any(is_item_poll(x) for x in emulated)
+        else:
+            return is_item_poll(emulated)
+    
+    
+    def _is_time(self, method, id):
+        interval = deep_get([self.intervals], method, return2=self.intervals['default'])
+        return time.time() - self._last_fetches[id] > interval
+    
+    
+    async def poll_loop(self):
+        """Poll everything that can't be accessed via websocket"""
         def get_emulated_subs():
             return [s for s in self.subscriptions if self.has_got(s.channel, 'emulated') and
-                    _is_poll(self.has[s.channel]['emulated'])]
-        def get_order_fetch_method():
-            method = None
-            if self.has_got('fetch_my_trades'):
-                method = 'fetch_my_trades'
-            elif self.has_got('fetch_orders'):
-                method = 'fetch_orders'
-            return method
-        def is_time(method, id):
-            interval = deep_get([self.intervals], method, return2=self.intervals['default'])
-            return time.time() - self._last_fetches[id] > interval
+                    self._is_poll(self.has[s.channel]['emulated'])]
         methods = {
             'all_tickers': 'fetch_tickers',
             'ticker': 'fetch_ticker',
@@ -1860,41 +1862,104 @@ class ExchangeSocket(WSClient):
             
             account_sub  = self.get_subscription(('account',)) if self.is_subscribed_to(('account',)) else None
             own_market_subs = [s for s in self.subscriptions if s.channel=='own_market']
-            all_account_related_subs = ([account_sub] if account_sub else []) + own_market_subs
-            has_account_order_emul = _is_poll(self.has['account']['order']['emulated'])
-            has_own_market_order_emul = _is_poll(self.has['own_market']['order']['emulated'])
             
             if account_sub:
                 id_bal = ('fetch_balance',)
-                if _is_poll(self.has['account']['balance']['emulated']) and is_time('fetch_balance', id_bal):
+                if self._is_poll(self.has['account']['balance']['emulated'])\
+                            and self._is_time('fetch_balance', id_bal):
                     coros['balance'] = self.poll_fetch_and_activate(account_sub, 'fetch_balance', id=id_bal)
             
-            if (account_sub or own_market_subs) and (has_account_order_emul or has_own_market_order_emul):
-                method = get_order_fetch_method()
-                id_0 = (method,) # ('own_market', method)
-                if not method: pass
-                elif self.has_got(method, 'symbolRequired'):
-                    _id = lambda symbol: id_0 + (symbol,)
-                    symbols = unique((o['symbol'] for o in self.open_orders.values()
-                                      if is_time(method, _id(o['symbol']))), astype=list)
-                    for symbol in symbols:
-                        own_m_sub = next((s for s in own_market_subs if s.params['symbol']==symbol), None)
-                        if not has_account_order_emul and own_m_sub is None:
-                            continue
-                        subs = ([account_sub] if account_sub else []) + ([own_m_sub] if own_m_sub else [])
-                        coros['order'+':'+symbol] = self.poll_fetch_and_activate(subs, method, (symbol,), _id(symbol))
-                elif is_time(method, id_0):
-                    coros['order'] = self.poll_fetch_and_activate(all_account_related_subs, method, id=id_0)
+            if account_sub or own_market_subs:  
+                coros['order'] = self.poll_orders()
             
             for s in get_emulated_subs():
                 method = methods.get(s.channel)
                 id = s.id_tuple + (method,)
-                if method and is_time(method, id):
+                if method and self._is_time(method, id):
                     coros[s.id_tuple] = self.poll_fetch_and_activate(s, method, id=id)
             
             pending = [asyncio.ensure_future(c) for c in coros.values()]
             if not pending:
                 await asyncio.sleep(0.1)
+
+    
+    async def poll_orders(self):
+        
+        def get_order_fetch_methods():
+            methods = []
+            if self.has_got('fetch_my_trades'):
+                methods = ['fetch_my_trades']
+            elif self.has_got('fetch_orders'):
+                methods = ['fetch_orders']
+            elif self.has_got('fetch_open_orders'):
+                if self.has_got('fetch_order'):
+                    methods = ['fetch_open_orders', 'fetch_order']
+                elif self.has_got('fetch_closed_orders'):
+                    methods = ['fetch_open_orders', 'fetch_closed_orders']
+            elif self.has_got('fetch_order'):
+                methods = ['fetch_order']
+            return methods
+        
+        has_account_order_emul = self._is_poll(self.has['account']['order']['emulated'])
+        has_own_market_order_emul = self._is_poll(self.has['own_market']['order']['emulated'])
+        
+        def get_related_subs(symbol=None):
+            subs = []
+            account_sub  = self.get_subscription(('account',)) if self.is_subscribed_to(('account',)) else None
+            if account_sub and has_account_order_emul:
+                subs.append(account_sub)
+            own_market_subs = [s for s in self.subscriptions if s.channel=='own_market'
+                               and (symbol is None or s.params['symbol']==symbol)]
+            if has_own_market_order_emul:
+                subs += own_market_subs
+            return subs
+        
+        
+        def filter_orders_by_last_update(orders, method):
+            interval = deep_get([self.intervals], method, return2=self.intervals['default'])
+            return [o for o in orders if time.time() - o['lastUpdateTimestamp']/1000 > interval]
+        
+        
+        def sched_method(method, orders_to_be_probed):
+            coros = {}
+            _id = lambda *args: (method,) + args
+            all_subs = get_related_subs()
+            if method == 'fetch_order':
+                for o in orders_to_be_probed:
+                    subs = get_related_subs(o['symbol'])
+                    _args = (o['id'], o['symbol'],)
+                    if subs and self._is_time(method, _id(*_args)):
+                        coros[method+':'+o['id']+':'+o['symbol']] = \
+                            self.poll_fetch_and_activate(subs, method, _args, _id(*_args))
+            elif self.has_got(method, 'symbolRequired'):
+                symbols = unique((o['symbol'] for o in orders_to_be_probed
+                                  if self._is_time(method, _id(o['symbol']))), astype=list)
+                for symbol in symbols:
+                    subs = get_related_subs(symbol)
+                    if subs:
+                        coros[method+':'+symbol] = \
+                            self.poll_fetch_and_activate(subs, method, (symbol,), _id(symbol))
+            elif all_subs and self._is_time(method, _id(None)) and orders_to_be_probed:
+                coros[method] = self.poll_fetch_and_activate(all_subs, method, id=_id(None))
+            return coros
+        
+        methods = get_order_fetch_methods()
+        orders_to_be_probed = list(self.open_orders.values())
+        luts = {o['id']: o['lastUpdateTimestamp'] for o in orders_to_be_probed}
+        
+        for i, method in enumerate(methods):
+            # make sure that individual orders are not be updated too frequently
+            orders_to_be_probed = filter_orders_by_last_update(orders_to_be_probed, method)
+            coros = sched_method(method, orders_to_be_probed)
+            if coros:
+                await asyncio.wait(coros.values())
+            elif i==0:
+                # fetch_order / fetch_closed orders is only allowed to be polled if fetch_open_orders 
+                # has been polled first
+                break
+            # on 2nd loop probe orders that "fetch_open_orders" didn't touch (i.e. were closed in the meanwhile)
+            orders_to_be_probed = [o for o in self.open_orders.values()
+                                   if o['lastUpdateTimestamp'] == luts.get(o['id'])]
     
     
     async def poll_fetch_and_activate(self, subscription, method, args=None, id=None):
@@ -2160,33 +2225,44 @@ class ExchangeSocket(WSClient):
         return ohlcv
     
     
-    async def fetch_order(self, id, symbol=None, params={}):
+    async def fetch_order(self, id, symbol=None, params={}, *, skip=False):
         r = await self.api.fetch_order(id, symbol, params)
-        self._last_fetches[('account', 'fetch_order', id)] = time.time()
+        self._last_fetches[('fetch_order', id, symbol)] = time.time()
         try:
-            self.add_ccxt_order(r, from_method='fetch_order')
+            self.add_ccxt_order(r, from_method='fetch_order', skip=skip)
         except Exception as e:
             logger.exception(e)
         return r
     
     
-    async def fetch_orders(self, symbol=None, since=None, limit=None, params={}):
+    async def fetch_orders(self, symbol=None, since=None, limit=None, params={}, *, skip=False):
         orders = await self.api.fetch_orders(symbol, since, limit, params)
         self._last_fetches[('fetch_orders', symbol)] = time.time()
         for o in orders:
             try:
-                self.add_ccxt_order(o, from_method='fetch_orders')
+                self.add_ccxt_order(o, from_method='fetch_orders', skip=skip)
             except Exception as e:
                 logger.exception(e)
         return orders
     
     
-    async def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}):
+    async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}, *, skip=False):
+        orders = await self.api.fetch_open_orders(symbol, since, limit, params)
+        self._last_fetches[('fetch_open_orders', symbol)] = time.time()
+        for o in orders:
+            try:
+                self.add_ccxt_order(o, from_method='fetch_open_orders', skip=skip)
+            except Exception as e:
+                logger.exception(e)
+        return orders
+    
+    
+    async def fetch_closed_orders(self, symbol=None, since=None, limit=None, params={}, *, skip=False):
         orders = await self.api.fetch_closed_orders(symbol, since, limit, params)
         self._last_fetches[('fetch_closed_orders', symbol)] = time.time()
         for o in orders:
             try:
-                self.add_ccxt_order(o, from_method='fetch_closed_orders')
+                self.add_ccxt_order(o, from_method='fetch_closed_orders', skip=skip)
             except Exception as e:
                 logger.exception(e)
         return orders
@@ -2203,23 +2279,6 @@ class ExchangeSocket(WSClient):
         return trades
     
     
-    async def fetch_open_orders(self, symbol=None, since=None, limit=None, params={}):
-        """[{'id': '1a8eedf7-18cf-d779-0d15-3199ad677dc8', 'timestamp': 1564361280061,
-             'datetime': '2019-07-29T00:48:00.610Z', 'lastTradeTimestamp': None,
-             'symbol': 'ETH/BTC', 'type': 'limit', 'side': 'sell', 'price': 0.02201,
-             'cost': 0.0, 'average': None, 'amount': 8.024, 'filled': 0.0,
-             'remaining': 8.024, 'status': 'open',
-             'fee': {'cost': 0.0, 'currency': 'BTC'}}]"""
-        orders = await self.api.fetch_open_orders(symbol, since, limit, params)
-        self._last_fetches[('fetch_open_orders', symbol)] = time.time()
-        for o in orders:
-            try:
-                self.add_ccxt_order(o, from_method='fetch_open_orders')
-            except Exception as e:
-                logger.exception(e)
-        return orders
-    
-    
     async def query_order(self, id, symbol):
         o = None
         if self.has_got('fetch_my_trades'):
@@ -2230,12 +2289,12 @@ class ExchangeSocket(WSClient):
             o = {'id': id, 'symbol': symbol, 'trades': [t for t in trades if t['order']==id]}
         elif self.has_got('fetch_order', 'filled'):
             self.log('querying order {} {} via fetch_order'.format(id, symbol))
-            o = await self.fetch_order(id, symbol)
+            o = await self.fetch_order(id, symbol, skip=True)
         elif self.has_got('fetch_orders', 'filled'):
             symbolRequired = self.has_got('fetch_orders', 'symbolRequired')
             _args = [symbol] if symbolRequired else []
             self.log('querying order {} {} via fetch_orders'.format(id, symbol))
-            orders = await self.fetch_orders(*_args)
+            orders = await self.fetch_orders(*_args, skip=[id]) # update all except this order
             o = next((x for x in orders if x['id']==id), None)
             if o is None:
                 raise ccxt.ExchangeError('Order {} {} not found'.format(id, symbol))
@@ -2388,14 +2447,17 @@ class ExchangeSocket(WSClient):
             return r
     
     
-    def add_ccxt_order(self, response, order={}, from_method='create_order', overwrite=None):
-        if overwrite is None:
-            overwrite = (from_method=='edit_order')
+    def add_ccxt_order(self, response, order={}, from_method='create_order', skip=None):
+        if skip is None:
+            skip = (from_method != 'edit_order')
         parsed = self.parse_ccxt_order(response, from_method)
-        exists = 'id' in response and response['id'] in self.orders
+        final_order = dict(order, **parsed.get('order', {}))
+        id = final_order.get('id')
+        exists = id in self.orders
+        if hasattr(skip, '__iter__') and not isinstance(skip, str):
+            skip = id in skip # skip these
         
-        if not exists or overwrite:
-            final_order = dict(order, **parsed.get('order', {}))
+        if not exists or not skip:
             self.add_order_from_dict(final_order)
         
         for f in parsed.get('fills',[]):
@@ -2440,25 +2502,27 @@ class ExchangeSocket(WSClient):
         if not o['remaining']:
             return 
         if self.has_got('fetch_my_trades') and self.order['update_filled_on_fill']:
-            try: await self.fetch_my_trades(symbol)
+            _args = [symbol] if self.has_got('fetch_my_trades', 'symbolRequired') else []
+            try: await self.fetch_my_trades(*_args)
             except Exception as e:
                 self.log_error('error fetching my trades to mark order {} {} as closed'.format(id, symbol), e)
             else:
                 self.update_order(id, remaining=0)
-        elif self.has_got('fetch_order', 'closed'):
-            try: o2 = self.fetch_order(id, o['symbol'])
+        elif self.has_got('fetch_order'):
+            try: o2 = self.fetch_order(id, symbol)
             except Exception as e:
                 self.log_error('error fetching order {} {} to mark it as closed'.format(id, symbol), e)
             else:
                 o3 = self.parse_ccxt_order(o2)['order']
                 self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
-        elif self.has_got('fetch_closed_orders'):
-            try: co = await self.fetch_closed_orders(o['symbol'])
+        elif self.has_got('fetch_orders') or self.has_got('fetch_closed_orders'):
+            method = 'fetch_orders' if self.has_got('fetch_orders') else 'fetch_closed_orders'
+            _args = [symbol] if self.has_got(method, 'symbolRequired') else []
+            try: orders = await getattr(self, method)(*_args)
             except Exception as e:
                 self.log_error('error fetching closed orders to mark {} {} as closed'.format(id, symbol), e)
-                logger.exception(e)
             else:
-                o2 = next((x for x in co if x['id']==id), None)
+                o2 = next((x for x in orders if x['id']==id), None)
                 if o2 is not None:
                     o3 = self.parse_ccxt_order(o2)['order']
                     self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
