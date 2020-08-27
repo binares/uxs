@@ -5,8 +5,17 @@
 
 from ccxt.base.exchange import Exchange
 from ccxt.base.errors import ExchangeError
+from ccxt.base.errors import AuthenticationError
+from ccxt.base.errors import PermissionDenied
+from ccxt.base.errors import BadRequest
+from ccxt.base.errors import BadSymbol
+from ccxt.base.errors import InsufficientFunds
 from ccxt.base.errors import InvalidOrder
+from ccxt.base.errors import OrderNotFound
 from ccxt.base.errors import NotSupported
+from ccxt.base.errors import DDoSProtection
+from ccxt.base.errors import ExchangeNotAvailable
+from ccxt.base.errors import InvalidNonce
 
 
 class coinbene(Exchange):
@@ -89,6 +98,78 @@ class coinbene(Exchange):
                     'taker': 0.001,
                     'maker': 0.001,
                 },
+            },
+            'exceptions': {
+                '429': DDoSProtection,	        # Requests are too frequent
+                '430': ExchangeError,	        # API user transactions are not supported at self time
+                '10001': BadRequest,	        # "ACCESS_KEY" cannot be empty
+                '10002': BadRequest,	        # "ACCESS_SIGN" cannot be empty
+                '10003': BadRequest,	        # "ACCESS_TIMESTAMP" cannot be empty
+                '10005': InvalidNonce,	        # Invalid ACCESS_TIMESTAMP
+                '10006': AuthenticationError,	# Invalid ACCESS_KEY
+                '10007': BadRequest,	        # Invalid Content_Type, please use "application / json" format
+                '10008': InvalidNonce,	        # Request timestamp expired
+                '10009': ExchangeNotAvailable,	# System Error
+                '10010': AuthenticationError,	# API authentication failed
+                '11000': BadRequest,        	# Required parameter cannot be empty
+                '11001': BadRequest,        	# Incorrect parameter value
+                '11002': InvalidOrder,     	    # Parameter value exceeds maximum limit
+                '11003': ExchangeError,      	# No data returned by third-party interface
+                '11004': InvalidOrder,         	# Order price accuracy does not match
+                '11005': InvalidOrder,      	# The currency pair has not yet opened leverage
+                '11007': ExchangeError,      	# Currency pair does not match asset
+                '51800': ExchangeError,     	# The transaction has been traded, failure
+                '51801': OrderNotFound,     	# The order does not exist, the cancellation of failure
+                '51802': BadSymbol,         	# TradePair Wrong
+                '51803': InvalidOrder,      	# Buy Price must not be more than current price {0}%
+                '51804': InvalidOrder,      	# Sell price must not be less than current price {0}%
+                '51805': InvalidOrder,      	# Order price Most decimal point {0}
+                '51806': InvalidOrder,      	# Order quantity Most decimal point {0}
+                '51807': InvalidOrder,      	# Buy at least {0}
+                '51808': InvalidOrder,      	# Sell at least {0}
+                '51809': InsufficientFunds,	    # Insufficient balance or account is frozen
+                '51810': ExchangeError,	        # selling not supported
+                '51811': PermissionDenied,  	# Sorry, you do not have the authority to trade.
+                '51812': InvalidOrder,      	# The buy price exceeds the limit of {1} within current {0}-hour cycle. Please adjust the price.
+                '51813': InvalidOrder,      	# The sell price exceeds the limit of {1} within current {0}-hour cycle. Please adjust the price.
+                '51814': InvalidOrder,      	# Schedule Order can only be cancelled before triggering
+                '51815': InvalidOrder,      	# Order Type Error
+                '51816': BadRequest,      	    # Account Type Error
+                '51817': BadSymbol,         	# Trade Pair Error
+                '51818': InvalidOrder,        	# Trade Orientation Error
+                '51819': InvalidOrder,        	# Order Interface Error
+                '51820': InvalidOrder,        	# Trigger Price Error
+                '51821': InvalidOrder,      	# Trigger price Most decimal point {0}
+                '51822': InvalidOrder,      	# Purchase price shall not be higher than trigger price {0}%
+                '51823': InvalidOrder,      	# Selling Price shall not be under Trigger Price{0}%
+                '51824': InvalidOrder,      	# Order Price Error
+                '51825': InvalidOrder,      	# Order Amount Error
+                '51826': InvalidOrder,      	# Order amount Most decimal point {0}
+                '51827': InvalidOrder,      	# Order Quantity Error
+                '51828': InvalidOrder,      	# Quantity of senior open order can not exceed {0}
+                '51829': InvalidOrder,      	# Trigger price shall be higher than the latest filled price
+                '51830': InvalidOrder,      	# Trigger price shall be lower than the latest filled price
+                '51831': InvalidOrder,      	# Limited Price Error
+                '51832': InvalidOrder,      	# Limited price Most decimal point {0}
+                '51833': InvalidOrder,      	# Limited price shall be higher than the latest filled price
+                '51834': InvalidOrder,      	# Limited price shall be lower than the latest filled price
+                '51835': ExchangeError,     	# Account not found
+                '51836': OrderNotFound,     	# Order does not exist
+                '51837': InvalidOrder,      	# Order Number Error
+                '51838': InvalidOrder,      	# Quantity of batch ordering can not exceed {0}
+                '51839': ExchangeError,     	# Account freezing failed
+                '51840': ExchangeError,     	# Account checking failed
+                '51841': InvalidOrder,      	# Trade pair have no settings of price limit
+                '51842': InvalidOrder,      	# Showing Quantity of Iceberg Order shall be greater than 0
+                '51843': InvalidOrder,      	# Price limit checking failed
+                '51844': BadRequest,        	# Start time error
+                '51845': BadRequest,      	    # End time error
+                '51846': BadRequest,      	    # Start time should be earlier than end time
+                '51847': BadRequest,      	    # Maximum download time period is {0} days
+                '51848': InvalidOrder,      	# Purchase Price shall not be under Trigger Price {0}%
+                '51849': InvalidOrder,      	# Selling price can not be higher than trigger price {0}%
+                '51850': ExchangeError,     	# The maximum number of download tasks is {0}
+                '51851': BadRequest,     	    # Start time: Only a specific time of the past 3 months is available
             },
             'options': {
                 'currencyNames': None,
@@ -175,10 +256,6 @@ class coinbene(Exchange):
             'depth': limit,
         }
         response = self.publicGetMarketOrderBook( self.extend(request, params))
-        code = response['code']
-        message = response['message']
-        if code != 200:
-            raise ExchangeError(self.id + ' message = ' + message)
         orderBook = response['data']
         timestamp = self.parse8601(self.safe_string(orderBook, 'timestamp'))
         return self.parse_order_book(orderBook, timestamp)
@@ -318,9 +395,6 @@ class coinbene(Exchange):
     def fetch_balance(self, params={}):
         self.load_markets()
         response = self.privateGetAccountList(params)
-        code = response['code']
-        if code != 200:
-            return response
         result = {'info': response}
         for i in range(0, len(response['data'])):
             balance = response['data'][i]
@@ -347,9 +421,6 @@ class coinbene(Exchange):
             'notional': None,
         }
         response = self.privatePostOrderPlace(self.extend(request, params))
-        code = response['code']
-        if code != 200:
-            return response
         result = {}
         result['id'] = response['data']['orderId']
         result['info'] = response['data']
@@ -369,9 +440,6 @@ class coinbene(Exchange):
             'orderId': id,
         }
         response = self.privatePostOrderCancel(self.extend(request, params))
-        code = response['code']
-        if code != 200:
-            return response
         return {
             'id' : id,
             'result': True,
@@ -562,10 +630,12 @@ class coinbene(Exchange):
     def handle_errors(self, code, reason, url, method, headers, body, response, requestHeaders, requestBody):
         if response is None:
             return
-        if code >= 400:
-            if body[0] == '{':
-                feedback = self.id + ' ' + body
-                message = self.safe_string_2(response, 'message', 'error')
-                self.throw_exactly_matched_exception(self.exceptions['exact'], message, feedback)
-                self.throw_broadly_matched_exception(self.exceptions['broad'], message, feedback)
+        if body[0] == '{':
+            feedback = self.id + ' ' + body
+            code2 = self.safe_string(response, 'code', '200')
+            # message = self.safe_string_2(response, 'message', 'error')
+            if code2 != '200':
+                self.throw_exactly_matched_exception(self.exceptions, code2, feedback)
+                raise ExchangeError(feedback)
+            if code >= 400:
                 raise ExchangeError(feedback)  # unknown message

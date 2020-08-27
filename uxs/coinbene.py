@@ -132,7 +132,8 @@ class coinbene(ExchangeSocket):
     
     def on_ticker(self, r):
         enable_sub = True if not r['topic'].endswith('ticker.all') else 'all_tickers'
-        tickers = [self.parse_ticker(x) for x in r['data']]
+        # it sometimes contains tickers that are not listed under "markets"
+        tickers = [self.parse_ticker(x) for x in r['data'] if x['s'] in self.api.markets_by_id]
         self.update_tickers(tickers, enable_sub=enable_sub)
     
     

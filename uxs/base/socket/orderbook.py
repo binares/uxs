@@ -479,7 +479,9 @@ class OrderbookMaintainer:
     def set_limit(self, symbol, limit):
         symbols = [symbol] if isinstance(symbol, str) else symbol
         for symbol in symbols:
-            s = self.xs.get_subscription(self.id_tuple(symbol))
+            try: s = self.xs.get_subscription(self.id_tuple(symbol))
+            except ValueError:
+                continue
             s.params['limit'] = limit
             if s.merger is not None:
                 s.merger.params['limit'] = limit
