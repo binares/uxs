@@ -2324,20 +2324,26 @@ class ExchangeSocket(WSClient):
             o = _copy.deepcopy(self.orders[order_id])
             return o
         else:
-            r = await self.api.create_order(symbol, type, side, amount, price, params)
             order = {
-                'id': r['id'],
+                'id': None,
                 'symbol': symbol,
                 'type': type,
                 'side': side,
                 'amount': amount,
                 'price': price,
-                'timestamp': self.api.milliseconds(),
+                'timestamp': None,
             }
+            immediate_fill = None
+            try:
+                immediate_fill = self.is_immediate_fill(order)
+            except Exception as e:
+                self.log_error('could not determine if order {} is immediate fill' .format(order), e)
+            r = await self.api.create_order(symbol, type, side, amount, price, params)
+            order.update({'id': r['id'], 'timestamp': self.api.milliseconds()})
             # In case the order is likely to get filled immediately, but has no "filled"
             # or "remaining" included in the create_order response, nor is subscribed to fills/order feed
             try:
-                if self.is_order_querying_enabled(order):
+                if self.is_order_querying_enabled(order, is_immediate_fill=immediate_fill):
                     r = self.api.extend(r, await self.query_order(r['id'], symbol))
             except Exception as e:
                 self.log_error('could not query order {} {}' .format(r['id'], symbol), e)
@@ -2412,31 +2418,40 @@ class ExchangeSocket(WSClient):
             o = _copy.deepcopy(self.orders[order_id])
             return o
         else:
+            o_prev = self.orders.get(id, {}).copy()
+            new_type = args[0] if args and args[0] is not None else o_prev.get('type')
+            _symbol = symbol if symbol is not None else o_prev.get('symbol')
+            order = {
+                'id': id,
+                'symbol': _symbol,
+                'type': new_type,
+                'side': args[1] if len(args) > 1 and args[1] is not None else o_prev.get('side'),
+                'amount': args[2] if len(args) > 2 and args[2] is not None else None,
+                'price': args[3] if len(args) > 3 else (o_prev.get('price') if new_type!='market' else None),
+                'timestamp': None,
+            }
+            immediate_fill = None
+            try:
+                immediate_fill = self.is_immediate_fill(order)
+            except Exception as e:
+                self.log_error('could not determine if order {} is immediate fill' .format(order), e)
             try:
                 r = await self.api.edit_order(id, symbol, *args)
             except ccxt.OrderNotFound as e:
-                _symbol = symbol if symbol is not None else deep_get([self.orders], [id, 'symbol'])
                 cancel_automatically = self.is_order_auto_canceling_enabled(_symbol)
                 if cancel_automatically:
                     await self.safely_mark_order_closed(id)
                 raise e
-            o_prev = self.orders.get(id, {})
-            new_type = args[0] if args and args[0] is not None else o_prev.get('type')
             prev_amount = o_prev['remaining'] if r.get('id')!=id and o_prev.get('remaining') is not None \
                           else o_prev.get('amount')
-            order = {
-                'id': r['id'] if r.get('id') else id,
-                'symbol': symbol,
-                'type': new_type,
-                'side': args[1] if len(args) > 1 and args[1] is not None else o_prev.get('side'),
-                'amount': args[2] if len(args) > 2 and args[2] is not None else prev_amount,
-                'price': args[3] if len(args) > 3 else (o_prev.get('price') if new_type!='market' else None),
-                'timestamp': self.api.milliseconds(),
-            }
+            order.update({'id': r['id'] if r.get('id') else id,
+                          'amount': order['amount'] if order.get('amount') is not None else prev_amount,
+                          'timestamp': self.api.milliseconds()})
             # In case the order is likely to get filled immediately, but has no "filled"
             # or "remaining" included in the edit_order response, nor is subscribed to fills/order feed
             try:
-                if self.api.has['editOrder']!='emulated' and self.is_order_querying_enabled(order, 'edit_order'):
+                if self.api.has['editOrder']!='emulated' \
+                        and self.is_order_querying_enabled(order, 'edit_order', is_immediate_fill=immediate_fill):
                     r = self.api.extend(r, await self.query_order(order['id'], symbol))
             except Exception as e:
                 self.log_error('could not query order {} {}' .format(order['id'], symbol), e)
@@ -2509,7 +2524,7 @@ class ExchangeSocket(WSClient):
             else:
                 self.update_order(id, remaining=0)
         elif self.has_got('fetch_order'):
-            try: o2 = self.fetch_order(id, symbol)
+            try: o2 = await self.fetch_order(id, symbol)
             except Exception as e:
                 self.log_error('error fetching order {} {} to mark it as closed'.format(id, symbol), e)
             else:
@@ -2546,7 +2561,34 @@ class ExchangeSocket(WSClient):
             return bool(coa)
     
     
-    def is_order_querying_enabled(self, order, method='create_order'):
+    def is_immediate_fill(self, order):
+        """Includes partial fill"""
+        symbol, type, side, price = order['symbol'], order['type'], order['side'], order.get('price')
+        if type not in ('limit', 'market'):
+            return False
+        is_ob_subbed = self.is_subscribed_to(('orderbook', symbol), True)
+        is_st_subbed = self.is_subscribed_to(('ticker', symbol), True)\
+                       and self.has_got('ticker', ['ws','bid','ask'])
+        is_at_subbed = self.is_subscribed_to(('all_tickers'), True)\
+                       and self.has_got('all_tickers', ['ws','bid','ask'])
+        if not is_ob_subbed and not is_st_subbed and not is_at_subbed:
+            return None
+        if is_ob_subbed:
+            ticker = get_bidask(self.orderbooks[symbol], as_dict=True)
+        else:
+            ticker = self.tickers[symbol]
+        fill_side = ('bid' if side=='sell' else 'ask')
+        bidAsk = ticker[fill_side]
+        if not bidAsk:
+            return False
+        if type=='market':
+            return True
+        if side=='sell' and price <= bidAsk or side=='buy' and price >= bidAsk:
+            return True
+        return False
+    
+    
+    def is_order_querying_enabled(self, order, method='create_order', *, is_immediate_fill=None):
         """:type order: dict"""
         enable_querying = self.order['enable_querying']
         if not isinstance (enable_querying, str):
@@ -2565,24 +2607,11 @@ class ExchangeSocket(WSClient):
             return True
         elif type != 'limit' or not price:
             return False
-        is_ob_subbed = self.is_subscribed_to(('orderbook', symbol), True)
-        is_st_subbed = self.is_subscribed_to(('ticker', symbol), True)\
-                       and self.has_got('ticker', ['ws','bid','ask'])
-        is_at_subbed = self.is_subscribed_to(('all_tickers'), True)\
-                       and self.has_got('all_tickers', ['ws','bid','ask'])
-        if not is_ob_subbed and not is_st_subbed and not is_at_subbed:
+        if is_immediate_fill is None:
+            is_immediate_fill = self.is_immediate_fill(order)
+        if is_immediate_fill is None: # no active ob / ticker subscription
             return True
-        if is_ob_subbed:
-            ticker = get_bidask(self.orderbooks[symbol], as_dict=True)
-        else:
-            ticker = self.tickers[symbol]
-        fill_side = ('bid' if side=='sell' else 'ask')
-        bidAsk = ticker[fill_side]
-        if not bidAsk:
-            return False
-        if side=='sell' and price <= bidAsk or side=='buy' and price >= bidAsk:
-            return True
-        return False
+        return is_immediate_fill
     
     
     def is_order_conflicting(self, symbol, side, price):
