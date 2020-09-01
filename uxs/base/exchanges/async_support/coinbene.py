@@ -434,7 +434,7 @@ class coinbene(Exchange):
         response = await self.privateGetOrderInfo(self.extend(request, params))
         return self.parse_order(response['data'])
 
-    async def cancel_order(self, id, params={}):
+    async def cancel_order(self, id, symbol=None, params={}):
         await self.load_markets()
         request = {
             'orderId': id,
