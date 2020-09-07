@@ -61,6 +61,7 @@ class ccxtWrapper:
     """Wraps any ccxt exchange"""
     Position = Position
     socks_proxy = None
+    _wrapper_initiated = False
         
     def __init__(self, config={}, *, test=False,
                  load_cached_markets=None, profile=None, auth=None):
@@ -88,6 +89,8 @@ class ccxtWrapper:
             self.set_sandbox_mode(True)
         self.FEE_FROM_TARGET = self._custom_name in FEE_FROM_TARGET
         self.COST_LIMIT_WITH_FEE = self._custom_name in COST_LIMIT_WITH_FEE
+        self._wrapper_initiated = True
+        
         currencies = markets = None
         
         if load_cached_markets is not False:
@@ -239,7 +242,7 @@ class ccxtWrapper:
     def set_markets(self, markets, currencies=None):
         import uxs.base.poll as poll
         super().set_markets(markets, currencies)
-        if self.markets is None:
+        if self.markets is None or not self._wrapper_initiated:
             return None
         self._set_lot_sizes()
         self._set_market_types()
