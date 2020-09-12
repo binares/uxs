@@ -251,7 +251,7 @@ class ExchangeSocket(WSClient):
     
     intervals = {
         'default': 30,
-        'fetch_tickers': 5,
+        'fetch_tickers': 15,
         'fetch_ticker': 15,
         'fetch_order_book': 15,
         'fetch_trades': 60,
@@ -504,6 +504,7 @@ class ExchangeSocket(WSClient):
         self.l3_maintainer = L3Maintainer(self)
         self._last_fetches = defaultdict(float)
         self._last_markets_loaded_ts = 0
+        self._cancel_scheduled = set()
     
     
     def _init_events(self):
@@ -1428,8 +1429,17 @@ class ExchangeSocket(WSClient):
     def update_order(self, id, remaining=None, filled=None, payout=None, cost=None, average=None,
                      lastTradeTimestamp=None, params={}, *, from_fills=False, set_event=True,
                      enable_sub=False):
-        try: o = self.orders[id]
-        except KeyError:
+        was_dict = isinstance(id, dict)
+        if was_dict:
+            o = self.api.extend(dict.fromkeys(self.ORDER_KEYWORDS), _copy.deepcopy(id))
+            id = o['id']
+            if o.get('cum') is None:
+                o['cum'] = {'f': .0, 'r': o['remaining'], 'p': .0}
+            if 'info' not in o:
+                o['info'] = None
+        elif id in self.orders:
+            o = self.orders[id]
+        else:
             self.log_error('not recognized order: {}'.format(id))
             return
         
@@ -1496,6 +1506,9 @@ class ExchangeSocket(WSClient):
         
         o['lastUpdateTimestamp'] = self.api.milliseconds()
         
+        if was_dict:
+            return o
+        
         if not o['remaining']:
             try:
                 del self.open_orders[id]
@@ -1524,6 +1537,21 @@ class ExchangeSocket(WSClient):
         self.exec_callbacks(cb_input, 'order', id)
         self.exec_callbacks(cb_input, 'order', o['symbol'])
         self.exec_callbacks([cb_input], 'order', -1)
+    
+    
+    def close_order_assume_filled(self, order):
+        o = order if isinstance(order, dict) else self.orders[order]
+        average = o['average']
+        payout = o['payout']
+        cost = o['cost']
+        if o['price'] is not None and o['remaining']:
+            added_payout = self.api.calc_payout(o['symbol'], o['side'], o['remaining'], o['price'])
+            payout = payout + added_payout if payout is not None else added_payout
+            added_cost = o['price'] * o['remaining']
+            cost = cost + added_cost if cost is not None else added_cost
+            average = cost / o['amount']
+        return self.update_order(order, remaining=0, filled=o['amount'], payout=payout,
+                                 cost=cost, average=average, enable_sub=True)
     
     
     def add_fill(self, id, symbol, side, price, amount, timestamp=None,
@@ -1896,6 +1924,8 @@ class ExchangeSocket(WSClient):
                     methods = ['fetch_open_orders', 'fetch_order']
                 elif self.has_got('fetch_closed_orders'):
                     methods = ['fetch_open_orders', 'fetch_closed_orders']
+                else:
+                    methods = ['fetch_open_orders'] # this is going to be a bit tricky one
             elif self.has_got('fetch_order'):
                 methods = ['fetch_order']
             return methods
@@ -1929,7 +1959,7 @@ class ExchangeSocket(WSClient):
                     subs = get_related_subs(o['symbol'])
                     _args = (o['id'], o['symbol'],)
                     if subs and self._is_time(method, _id(*_args)):
-                        coros[method+':'+o['id']+':'+o['symbol']] = \
+                        coros[(method, o['id'], o['symbol'])] = \
                             self.poll_fetch_and_activate(subs, method, _args, _id(*_args))
             elif self.has_got(method, 'symbolRequired'):
                 symbols = unique((o['symbol'] for o in orders_to_be_probed
@@ -1937,11 +1967,29 @@ class ExchangeSocket(WSClient):
                 for symbol in symbols:
                     subs = get_related_subs(symbol)
                     if subs:
-                        coros[method+':'+symbol] = \
+                        coros[(method, None, symbol)] = \
                             self.poll_fetch_and_activate(subs, method, (symbol,), _id(symbol))
             elif all_subs and self._is_time(method, _id(None)) and orders_to_be_probed:
-                coros[method] = self.poll_fetch_and_activate(all_subs, method, id=_id(None))
+                coros[(method, None, None)] = self.poll_fetch_and_activate(all_subs, method, id=_id(None))
             return coros
+        
+        async def exec_coros(coros):
+            if not coros:
+                return [], []
+            nametuples_by_futs = {asyncio.ensure_future(coro): name for name, coro in coros.items()}
+            done, _ = await asyncio.wait(nametuples_by_futs.keys())
+            successful, unsuccessful = [], []
+            for f in done:
+                nt = nametuples_by_futs[f]
+                try:
+                    if f.result() is None:
+                        successful.append(nt)
+                    else:
+                        unsuccessful.append(nt)
+                except Exception as e:
+                    self.log_error('error occurred', e)
+                    unsuccessful.append(nt)
+            return successful, unsuccessful
         
         methods = get_order_fetch_methods()
         orders_to_be_probed = list(self.open_orders.values())
@@ -1951,15 +1999,20 @@ class ExchangeSocket(WSClient):
             # make sure that individual orders are not be updated too frequently
             orders_to_be_probed = filter_orders_by_last_update(orders_to_be_probed, method)
             coros = sched_method(method, orders_to_be_probed)
-            if coros:
-                await asyncio.wait(coros.values())
-            elif i==0:
+            successful, unsuccessful = await exec_coros(coros)
+            if i==0 and not successful:
                 # fetch_order / fetch_closed orders is only allowed to be polled if fetch_open_orders 
                 # has been polled first
                 break
-            # on 2nd loop probe orders that "fetch_open_orders" didn't touch (i.e. were closed in the meanwhile)
-            orders_to_be_probed = [o for o in self.open_orders.values()
-                                   if o['lastUpdateTimestamp'] == luts.get(o['id'])]
+            # on 2nd loop probe orders on which "fetch_open_orders" didn't raise error AND which it didn't touch
+            # (i.e. were closed in the meanwhile)
+            orders_to_be_probed = [o for o in orders_to_be_probed if any(nt[1] is None or nt[1]==o['symbol'] for nt in successful)
+                                   and o['lastUpdateTimestamp'] == luts.get(o['id'])]
+            # This does some assuming (actual payout and cost could be larger)
+            if methods == ['fetch_open_orders']:
+                for o in orders_to_be_probed:
+                    if o['id'] not in self._cancel_scheduled:
+                        self.close_order_assume_filled(o['id'])
     
     
     async def poll_fetch_and_activate(self, subscription, method, args=None, id=None):
@@ -1974,7 +2027,7 @@ class ExchangeSocket(WSClient):
         except Exception as e:
             self.log('error occurred while polling {}{} - {}'.format(method, args, repr(e)))
             self.log(e)
-            return
+            return e
         finally:
             self._last_fetches[id] = time.time()
         for s in subs:
@@ -2290,12 +2343,15 @@ class ExchangeSocket(WSClient):
         elif self.has_got('fetch_order', 'filled'):
             self.log('querying order {} {} via fetch_order'.format(id, symbol))
             o = await self.fetch_order(id, symbol, skip=True)
-        elif self.has_got('fetch_orders', 'filled'):
-            symbolRequired = self.has_got('fetch_orders', 'symbolRequired')
+        elif self.has_got('fetch_orders', 'filled') or self.has_got('fetch_open_orders', 'filled'):
+            method = next(x for x in ['fetch_orders', 'fetch_open_orders'] if self.has_got(x, 'filled'))
+            symbolRequired = self.has_got(method, 'symbolRequired')
             _args = [symbol] if symbolRequired else []
-            self.log('querying order {} {} via fetch_orders'.format(id, symbol))
-            orders = await self.fetch_orders(*_args, skip=[id]) # update all except this order
+            self.log('querying order {} {} via {}'.format(id, symbol, method))
+            orders = await getattr(self, method)(*_args, skip=[id]) # update all except this order
             o = next((x for x in orders if x['id']==id), None)
+            if o is None and method=='fetch_open_orders':
+                return 'closed'
             if o is None:
                 raise ccxt.ExchangeError('Order {} {} not found'.format(id, symbol))
         return o
@@ -2344,7 +2400,11 @@ class ExchangeSocket(WSClient):
             # or "remaining" included in the create_order response, nor is subscribed to fills/order feed
             try:
                 if self.is_order_querying_enabled(order, is_immediate_fill=immediate_fill):
-                    r = self.api.extend(r, await self.query_order(r['id'], symbol))
+                    q = await self.query_order(r['id'], symbol)
+                    if q == 'closed':
+                        r = self.close_order_assume_filled(r)
+                    elif q is not None:
+                        r = self.api.extend(r, q)
             except Exception as e:
                 self.log_error('could not query order {} {}' .format(r['id'], symbol), e)
             
@@ -2381,11 +2441,23 @@ class ExchangeSocket(WSClient):
             return o
         else:
             error = None
+            _symbol = symbol if symbol is not None else deep_get([self.orders], [id, 'symbol'])
+            cancel_automatically = self.is_order_auto_canceling_enabled(_symbol)
+            if cancel_automatically and not self._is_subbed_to_order_ws(_symbol) and self.has_only_fetch_open_orders():
+                _args = [_symbol] if self.has_got('fetch_open_orders', 'symbolRequired') else []
+                self.log('pre querying order {} {} via fetch_open_orders before canceling'.format(id, _symbol))
+                oo = await self.fetch_open_orders(*_args)
+                if not any(o['id']==id for o in oo):
+                    self.log('order {} {} already closed'.format(id, _symbol))
+                    self.close_order_assume_filled(id)
+                    return None
+            self._cancel_scheduled.add(id)
             #tlogger.debug('Canceling order: {},{}'.format(id, symbol))
             try: r = await self.api.cancel_order(id, symbol, params)
             except ccxt.OrderNotFound as e:
                 error = e
-            _symbol = symbol if symbol is not None else deep_get([self.orders], [id, 'symbol'])
+            finally:
+                self._cancel_scheduled.remove(id)
             # Canceling due to not being found is somewhat dangerous,
             # as the latest filled updates may not be received yet
             cancel_automatically = self.is_order_auto_canceling_enabled(_symbol)
@@ -2452,7 +2524,11 @@ class ExchangeSocket(WSClient):
             try:
                 if self.api.has['editOrder']!='emulated' \
                         and self.is_order_querying_enabled(order, 'edit_order', is_immediate_fill=immediate_fill):
-                    r = self.api.extend(r, await self.query_order(order['id'], symbol))
+                    q = await self.query_order(order['id'], symbol)
+                    if q == 'closed':
+                        r = self.close_order_assume_filled(r)
+                    elif q is not None:
+                        r = self.api.extend(r, q)
             except Exception as e:
                 self.log_error('could not query order {} {}' .format(order['id'], symbol), e)
             
@@ -2463,8 +2539,6 @@ class ExchangeSocket(WSClient):
     
     
     def add_ccxt_order(self, response, order={}, from_method='create_order', skip=None):
-        if skip is None:
-            skip = (from_method != 'edit_order')
         parsed = self.parse_ccxt_order(response, from_method)
         final_order = dict(order, **parsed.get('order', {}))
         id = final_order.get('id')
@@ -2472,7 +2546,7 @@ class ExchangeSocket(WSClient):
         if hasattr(skip, '__iter__') and not isinstance(skip, str):
             skip = id in skip # skip these
         
-        if not exists or not skip:
+        if not skip: # or not exists 
             self.add_order_from_dict(final_order)
         
         for f in parsed.get('fills',[]):
@@ -2514,9 +2588,11 @@ class ExchangeSocket(WSClient):
         """Used when OrderNotFound is raised"""
         o = self.orders[id]
         symbol = o['symbol']
+        kwds = ['filled','payout','cost','average']
         if not o['remaining']:
-            return 
+            return
         if self.has_got('fetch_my_trades') and self.order['update_filled_on_fill']:
+            self.log('final querying order {} {} via fetch_my_trades'.format(id, symbol))
             _args = [symbol] if self.has_got('fetch_my_trades', 'symbolRequired') else []
             try: await self.fetch_my_trades(*_args)
             except Exception as e:
@@ -2524,37 +2600,51 @@ class ExchangeSocket(WSClient):
             else:
                 self.update_order(id, remaining=0)
         elif self.has_got('fetch_order'):
-            try: o2 = await self.fetch_order(id, symbol)
+            self.log('final querying order {} {} via fetch_order'.format(id, symbol))
+            try: o2 = await self.fetch_order(id, symbol, skip=True)
             except Exception as e:
                 self.log_error('error fetching order {} {} to mark it as closed'.format(id, symbol), e)
             else:
                 o3 = self.parse_ccxt_order(o2)['order']
-                self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
+                self.update_order(id, remaining=0, **{k: o3.get(k) for k in kwds})
         elif self.has_got('fetch_orders') or self.has_got('fetch_closed_orders'):
             method = 'fetch_orders' if self.has_got('fetch_orders') else 'fetch_closed_orders'
+            self.log('final querying order {} {} via {}'.format(id, symbol, method))
             _args = [symbol] if self.has_got(method, 'symbolRequired') else []
-            try: orders = await getattr(self, method)(*_args)
+            try: orders = await getattr(self, method)(*_args, skip=[id])
             except Exception as e:
-                self.log_error('error fetching closed orders to mark {} {} as closed'.format(id, symbol), e)
+                self.log_error('error invoking {} to mark {} {} as closed'.format(method, id, symbol), e)
             else:
                 o2 = next((x for x in orders if x['id']==id), None)
                 if o2 is not None:
                     o3 = self.parse_ccxt_order(o2)['order']
-                    self.update_order(id, remaining=0, filled=o3.get('filled'), payout=o3.get('payout'))
+                    self.update_order(id, remaining=0, **{k: o3.get(k) for k in kwds})
+        else:
+            self.update_order(id, remaining=0)
+    
+    
+    def has_only_fetch_open_orders(self, *args):
+        methods = ['fetch_my_trades', 'fetch_orders', 'fetch_order', 'fetch_closed_orders']
+        if any(self.has_got(x, *args) for x in methods):
+            return False
+        return self.has_got('fetch_open_orders', *args)
+    
+    
+    def _is_subbed_to_order_ws(self, symbol=None):
+        if self.has_got('account', 'order', 'ws'):
+            return self.is_subscribed_to(('account',), True)
+        elif self.has_got('own_market', 'order', 'ws'):
+            return self.is_subscribed_to(('own_market', symbol), True)
+        return False
     
     
     def is_order_auto_canceling_enabled(self, symbol=None):
         coa = self.order['cancel_automatically']
-        if isinstance(coa,str):
+        if isinstance(coa, str):
             if coa == 'if-not-active':
                 return not self.is_active()
             elif coa == 'if-not-subbed-to-account':
-                if self.has_got('account', 'order', 'ws'):
-                    return not self.is_subscribed_to(('account',), True)
-                elif self.has_got('own_market', 'order', 'ws'):
-                    return not self.is_subscribed_to(('own_market', symbol), True)
-                else:
-                    return True
+                return not self._is_subbed_to_order_ws(symbol)
             else:
                 return True
         else:
