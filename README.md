@@ -7,23 +7,24 @@ This free to use python library is ccxt based. I use it for personal trading and
 
 Supported exchanges:
 
-|           | ticker | all_tickers | orderbook | l3 | ohlcv | trades | balance | order | fill | position |
-|-----------|--------|-------------|-----------|----|-------|--------|---------|-------|------|----------|
-| binance   |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
-| binancefu |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
-| bitmex    |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
-| bittrex   |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  p   |          |
-| bw        |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
-| coinbene  |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
-| coindcx   |   p    |      p      |     +     |    |   p   |   +    |    +    |   p   |  +   |          |
-| coinsbit  |   +    |      p      |     +     |    |   +   |   +    |    p    |   p   |  p   |          |
-| gateiofu  |        |             |     +     |    |   p   |        |         |       |      |          |
-| hitbtc    |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
-| kraken    |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |
-| krakenfu  |   +    |      p      |     +     |    |   p   |   +    |    +    |   +   |  +   |    +     |
-| kucoin    |   +    |      +      |     +     |    |   p   |   +    |    +    |   o   |  o   |          |
-| luno      |   p    |      p      |     w     | +  |   p   |   w    |    p    |   o   |  o   |          |
-| poloniex  |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
+|              | ticker | all_tickers | orderbook | l3 | ohlcv | trades | balance | order | fill | position |
+|--------------|--------|-------------|-----------|----|-------|--------|---------|-------|------|----------|
+| binance      |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
+| binancefu    |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
+| bitmex       |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
+| bittrex      |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  p   |          |
+| bw           |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
+| coinbene     |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
+| coindcx      |   p    |      p      |     +     |    |   p   |   +    |    +    |   p   |  +   |          |
+| coinsbit     |   +    |      p      |     +     |    |   +   |   +    |    p    |   p   |  p   |          |
+| gateiofu     |        |             |     +     |    |   p   |        |         |       |      |          |
+| hitbtc       |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
+| kraken       |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |
+| krakenfu     |   +    |      p      |     +     |    |   p   |   +    |    +    |   +   |  +   |    +     |
+| kucoin       |   +    |      +      |     +     |    |   p   |   +    |    +    |   o   |  o   |          |
+| luno         |   p    |      p      |     w     | +  |   p   |   w    |    p    |   o   |  o   |          |
+| poloniex     |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
+| southxchange |   p    |      p      |     +     |    |   p   |   +    |    p    |   p   |      |          |
 
 Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. However some exchanges like bitmex require you to subscribe to each market directly for order and fill updates: `xs.subscribe_to_own_market(symbol)` (but you'll still want to also subscribe to account, as it contains balance and position updates). 
 

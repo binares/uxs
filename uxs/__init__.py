@@ -1,4 +1,4 @@
-__version__ = '0.3.0'
+__version__ = '0.4.0'
 __author__ = 'binares'
 
 import os
@@ -35,6 +35,7 @@ from uxs.krakenfu import krakenfu
 from uxs.kucoin import kucoin
 from uxs.luno import luno
 from uxs.poloniex import poloniex
+from uxs.southxchange import southxchange
 
 
 def list_streaming_exchanges():

@@ -17,6 +17,7 @@ from .dragonex import dragonex
 from .hitbtc import hitbtc
 from .krakenfu import krakenfu
 from .luno import luno
+from .southxchange import southxchange
 
 __all__ = [
     'binancefu',
@@ -29,4 +30,5 @@ __all__ = [
     'hitbtc',
     'krakenfu',
     'luno',
+    'southxchange',
 ]

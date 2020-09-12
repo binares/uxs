@@ -79,6 +79,11 @@ python -m uxs.test_xc coinbene ob=BTC/USDT
 python -m uxs.test_xc coinbene ohlcv=BTC/USDT
 python -m uxs.test_xc coinbene trades=BTC/USDT
 python -m uxs.test_xc coinbene order+BTC/USDT,limit,buy,0.0011,11000 d
+python -m uxs.test_xc southxchange ob=BTC/USDT trades=BTC/USDT,ETH/BTC u r d
+python -m uxs.test_xc southxchange ob=BTC/USDT
+python -m uxs.test_xc southxchange order+ETH/BTC,limit,buy,0.03,0.036 d
+
+python -m gen.markets southxchange recalculate symbols=BTC/USDT min_cost=12USDT
 
 python -m pytest
 python -m pytest test/test_auth.py -vv -ss
