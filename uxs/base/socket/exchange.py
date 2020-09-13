@@ -2006,7 +2006,7 @@ class ExchangeSocket(WSClient):
                 break
             # on 2nd loop probe orders on which "fetch_open_orders" didn't raise error AND which it didn't touch
             # (i.e. were closed in the meanwhile)
-            orders_to_be_probed = [o for o in orders_to_be_probed if any(nt[1] is None or nt[1]==o['symbol'] for nt in successful)
+            orders_to_be_probed = [o for o in orders_to_be_probed if any(nt[2] is None or nt[2]==o['symbol'] for nt in successful)
                                    and o['lastUpdateTimestamp'] == luts.get(o['id'])]
             # This does some assuming (actual payout and cost could be larger)
             if methods == ['fetch_open_orders']:
