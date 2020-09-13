@@ -118,7 +118,7 @@ class coinbene(Exchange):
                 '11004': InvalidOrder,         	# Order price accuracy does not match
                 '11005': InvalidOrder,      	# The currency pair has not yet opened leverage
                 '11007': ExchangeError,      	# Currency pair does not match asset
-                '51800': ExchangeError,     	# The transaction has been traded, failure
+                '51800': OrderNotFound,     	# The transaction has been traded, failure
                 '51801': OrderNotFound,     	# The order does not exist, the cancellation of failure
                 '51802': BadSymbol,         	# TradePair Wrong
                 '51803': InvalidOrder,      	# Buy Price must not be more than current price {0}%
