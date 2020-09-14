@@ -35,6 +35,7 @@ from .krakenfu import krakenfu
 from .mxc import mxc
 from .nominex import nominex
 from .primexbt import primexbt
+from .remitano import remitano
 from .slicex import slicex
 from .tokenomy import tokenomy
 from .tokensnet import tokensnet
