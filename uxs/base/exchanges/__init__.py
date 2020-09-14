@@ -40,6 +40,7 @@ from .tokenomy import tokenomy
 from .tokensnet import tokensnet
 from .tradeogre import tradeogre
 from .txbit import txbit
+from .vinex import vinex
 from .yunex import yunex
 
 # Add the custom-defined exchanges to ccxt
