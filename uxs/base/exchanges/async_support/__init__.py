@@ -40,6 +40,7 @@ from .tokensnet import tokensnet
 from .tradeogre import tradeogre
 from .txbit import txbit
 from .vinex import vinex
+from .wazirx import wazirx
 from .yunex import yunex
 
 # Add the custom-defined exchanges to ccxt.async_support
