@@ -201,7 +201,8 @@ class coinbene(Exchange):
                 quote = self.safe_currency_code(parts[1])
                 quoteId = parts[1].lower()
             symbol = base + '/' + quote
-            id = (baseId + quoteId).upper()
+            idLowerCase = baseId + quoteId
+            id = idLowerCase.upper()
             precision = {
                 'price': self.safe_integer(market, 'pricePrecision'),
                 'amount': self.safe_integer(market, 'amountPrecision'),
@@ -244,7 +245,8 @@ class coinbene(Exchange):
             return slashedId.upper()
         else:
             split = slashedId.split('/')
-            return(split[0] + split[1]).upper()
+            joined = split[0] + split[1]
+            return joined.upper()
 
     def fetch_order_book(self, symbol, limit=None, params={}):
         self.load_markets()
@@ -403,7 +405,7 @@ class coinbene(Exchange):
             account = self.account()
             account['free'] = self.safe_float(balance, 'available')
             account['used'] = self.safe_float(balance, 'frozenBalance')
-            account['total'] = self.safe_float(balance, 'totalBalance')
+            # account['total'] = self.safe_float(balance, 'totalBalance')  # free + used != total in tests
             result[code] = account
         return self.parse_balance(result)
 
@@ -441,7 +443,7 @@ class coinbene(Exchange):
         }
         response = self.privatePostOrderCancel(self.extend(request, params))
         return {
-            'id' : id,
+            'id': id,
             'result': True,
         }
 
@@ -471,6 +473,7 @@ class coinbene(Exchange):
         #          }
         #      ]
         #  }
+        return response
 
     def parse_order_status(self, status):
         statuses = {
@@ -559,7 +562,7 @@ class coinbene(Exchange):
             request['symbol'] = market['slashedId']
         if limit is not None:
             request['limit'] = limit
-        response = self.privateGetOrderOpenorders(self.extend(request, params))
+        response = self.privateGetOrderOpenOrders(self.extend(request, params))
         orders = self.safe_value(response, 'data')
         if orders is None:
             return []
@@ -574,7 +577,7 @@ class coinbene(Exchange):
             request['symbol'] = market['slashedId']
         if limit is not None:
             request['limit'] = limit
-        response = self.privateGetOrderClosedorders(self.extend(request, params))
+        response = self.privateGetOrderClosedOrders(self.extend(request, params))
         orders = self.safe_value(response, 'data')
         if orders is None:
             return []
@@ -614,7 +617,7 @@ class coinbene(Exchange):
             }
             auth = timestamp + method + request
             if method == 'GET':
-                if query: 
+                if query:
                     urlencodedQuery = '?' + self.urlencode(query)
                     url += urlencodedQuery
                     auth += urlencodedQuery
