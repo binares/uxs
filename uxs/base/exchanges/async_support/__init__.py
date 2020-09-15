@@ -28,6 +28,7 @@ from .cossdex import cossdex
 from .cryptocom import cryptocom
 from .delta import delta
 from .dragonex import dragonex
+from .duedex import duedex
 from .equos import equos
 from .felixo import felixo
 from .foblgate import foblgate
