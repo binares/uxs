@@ -1,5 +1,6 @@
 import ccxt
 import ccxt.async_support
+import os
 import json
 import time
 from copy import deepcopy
@@ -47,6 +48,7 @@ _E_REPLACE = {
 _E_REPLACE_PRO = _E_REPLACE.copy()
 #PRICE_ACCURACY = 3
 AMOUNT_ACCURACY = 3
+DATA_DIR = os.path.realpath(os.path.join(__file__, '..', '..', '_data'))
 
 _ccxt_cls_wrapped = {}
 _ccxt_cls_wrapped_async = {}
@@ -62,7 +64,7 @@ class ccxtWrapper:
     Position = Position
     socks_proxy = None
     _wrapper_initiated = False
-        
+    
     def __init__(self, config={}, *, test=False,
                  load_cached_markets=None, profile=None, auth=None):
         import uxs.base.poll as poll
@@ -149,6 +151,26 @@ class ccxtWrapper:
                 setattr(self, attr, _map.get(attr, dict)())
         
         self.marketsById = self.markets_by_id
+    
+    
+    def _read_extendMarkets(self):
+        path = os.path.join(DATA_DIR, '{}_markets.json'.format(self.id))
+        markets = {}
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as f:
+                markets = json.load(f)
+        return markets
+    
+    
+    def describe(self):
+        return self.deep_extend(
+            super().describe(),
+            {
+                'options': {
+                    'extendMarkets': self._read_extendMarkets(),
+                },
+            } 
+        )
     
     
     def repeatedTry(self, f, args=None, kwargs=None, attempts=2, sleep=0.5):
@@ -281,6 +303,13 @@ class ccxtWrapper:
     def poll_load_markets(self, limit=None):
         import uxs.base.poll as poll
         return poll.sn_load_markets(self, limit)
+    
+    
+    def fetch_markets(self, params={}):
+        markets = super().fetch_markets(params)
+        for i in range(len(markets)):
+            markets[i] = self.deep_extend(markets[i], self.safe_value(self.options['extendMarkets'], markets[i]['symbol'], {}))
+        return markets
     
     
     def update_markets(self, changed, deep=True, dismiss_new=True):
@@ -1184,6 +1213,13 @@ class asyncCCXTWrapper(ccxtWrapper):
         if (no_fees or reload):
             fees = await self.fetch_trading_fees()
             self._set_trading_fees(fees)
+    
+    
+    async def fetch_markets(self, params={}):
+        markets = await super(ccxtWrapper, self).fetch_markets(params)
+        for i in range(len(markets)):
+            markets[i] = self.deep_extend(markets[i], self.safe_value(self.options['extendMarkets'], markets[i]['symbol'], {}))
+        return markets
     
     
     async def create_order(self, symbol, type, side, amount, price=None, params={}):

@@ -1,11 +1,3 @@
-import os
-import json
-
-path = os.path.join(os.path.dirname(__file__), '..', '..', '_data', 'southxchange_markets.json')
-with open(path, encoding='utf-8') as f:
-    markets = json.load(f)
-
-
 class southxchange:
     def describe(self):
         return self.deep_extend(
@@ -13,9 +5,6 @@ class southxchange:
             {
                 'urls': {
                     'v2': 'https://www.southxchange.com/api/v2',
-                },
-                'options': {
-                    'markets': markets,
                 },
             } 
         )
