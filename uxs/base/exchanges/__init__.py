@@ -43,6 +43,7 @@ from .tokensnet import tokensnet
 from .tradeogre import tradeogre
 from .txbit import txbit
 from .vinex import vinex
+from .vitex import vitex
 from .wazirx import wazirx
 from .yunex import yunex
 
