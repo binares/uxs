@@ -33,6 +33,7 @@ from .felixo import felixo
 from .foblgate import foblgate
 from .gateiofu import gateiofu
 from .krakenfu import krakenfu
+from .multi import multi
 from .mxc import mxc
 from .nominex import nominex
 from .primexbt import primexbt
