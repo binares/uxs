@@ -36,6 +36,7 @@ from .mxc import mxc
 from .nominex import nominex
 from .primexbt import primexbt
 from .remitano import remitano
+from .silgonex import silgonex
 from .slicex import slicex
 from .tokenomy import tokenomy
 from .tokensnet import tokensnet
