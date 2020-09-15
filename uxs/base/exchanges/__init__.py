@@ -21,6 +21,7 @@ from .bitzfu import bitzfu
 from .bkex import bkex
 from .btse import btse
 from .ceo import ceo
+from .changellypro import changellypro
 from .coinbene import coinbene
 from .coindcx import coindcx
 from .coinsbit import coinsbit
