@@ -252,14 +252,14 @@ async def show_balances():
     while True:
         await _print_changed('balance','balances')
         
-async def place_order(*args):
+async def place_order(*args, sleep=6):
     global oid
     symbol, type, side, amount, price = args[:5] \
         if len(args) else ('ETH/BTC', 'limit', 'buy', 0.1, 0.01)
     amount = float(amount)
     price = float(price) if price!='null' else None
     params = {} if len(args) < 6 else yaml.safe_load(args[5])
-    await asyncio.sleep(4)
+    await asyncio.sleep(sleep)
     try:
         _args = (params,) if params else ()
         print('Creating order: {}'.format((symbol, type, side, amount, price) + _args))
@@ -269,9 +269,9 @@ async def place_order(*args):
     except Exception as e:
         logger2.exception(e)
 
-async def cancel_order(*args):
+async def cancel_order(*args, sleep=8):
     symbol = args[0] if len(args) else 'ETH/BTC'
-    await asyncio.sleep(6)
+    await asyncio.sleep(sleep)
     print('Canceling order - id: {} symbol: {}'.format(oid, symbol))
     r = await xs.cancel_order(oid, symbol)
     print('r_cancel ', r)

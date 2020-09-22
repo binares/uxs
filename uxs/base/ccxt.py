@@ -732,13 +732,27 @@ class ccxtWrapper:
         return self.round_entity(amount, inf['precision']['amount'], method, **kw)
 
 
-    def round_price(self, symbol, price, direction=None, limit=False, *, method=None):
+    def round_price(self, symbol, price, direction=None, limit=False, *, method=None,
+                    limit_divergence=False, current_price=None):
         if direction is not None:
             direction = as_direction(direction)
         if method is None:
             method = 'round' if direction is None else ['up','down'][direction]
+        side = ['sell','buy'][direction]
         inf = self.markets[symbol]
-        p_round = self.round_entity(price, inf['precision']['price'], method, precisionMode=self.precisionMode)
+        precision = inf['precision']['price']
+        p_round = self.round_entity(price, precision, method, precisionMode=self.precisionMode)
+        if limit_divergence:
+            if current_price is None:
+                raise ValueError('`current_price` must not be `None` if `limit_divergence` is set to `True`')
+            divergence = None if not isinstance(self.options.get('maxDivergence'), dict) else self.options['maxDivergence'].get(side)
+            if divergence is not None:
+                if direction:
+                    div_price = self.round_entity(current_price * (1 + divergence), precision, 'down', precisionMode=self.precisionMode)
+                    p_round = min(p_round, div_price)
+                else:
+                    div_price = self.round_entity(current_price * (1 - divergence), precision, 'up', precisionMode=self.precisionMode)
+                    p_round = max(p_round, div_price)
         #TODO: binance is missing price limits. make pull request on ccxt repo.
         if limit:
             if direction is None:

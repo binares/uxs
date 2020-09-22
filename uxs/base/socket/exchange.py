@@ -2041,11 +2041,34 @@ class ExchangeSocket(WSClient):
                 self.change_subscription_state(s, 1)
     
     
+    def get_current_price(self, symbol, components=['last','bid','ask'], *, active=True):
+        has_tAll_bidAsk = self.has_got('all_tickers', ('bid','ask')) # must have both bid and ask
+        has_t_bidAsk = self.has_got('ticker', ('bid','ask'))
+        has_tAll_last = self.has_got('all_tickers','last')
+        has_t_last = self.has_got('ticker','last')
+        is_subbed_ob = self.is_subscribed_to(('orderbook', symbol), active)
+        is_subbed_t = self.is_subscribed_to(('ticker', symbol), active)
+        is_subbed_tAll = self.is_subscribed_to(('all_tickers',), active)
+        prices = dict.fromkeys(['last','bid','ask'])
+        t = self.tickers.get(symbol, {})
+        ob = self.orderbooks.get(symbol)
+        if is_subbed_ob and ob:
+            prices['bid'], prices['ask'] = get_bidask(ob)
+        elif has_tAll_bidAsk and is_subbed_tAll or has_t_bidAsk and is_subbed_t:
+            prices.update({x: t.get(x) for x in ['bid','ask']})
+        if has_tAll_last and is_subbed_tAll or has_t_last and is_subbed_t:
+            prices['last'] = t.get('last')
+        prices = {k: v for k,v in prices.items() if v is not None and k in components}
+        if not prices:
+            return None
+        return sum(prices.values()) / len(prices)
+    
+    
     def get_markets_with_active_tickers(self, last=True, bidAsk=True):
         has_tAll = self.has_got('all_tickers')
-        has_tAll_bidAsk = self.has_got('all_tickers','bid') and self.has_got('all_tickers','ask')
+        has_tAll_bidAsk = self.has_got('all_tickers', ('bid','ask'))
         has_t = self.has_got('ticker')
-        has_t_bidAsk = self.has_got('ticker','bid') and self.has_got('ticker','ask')
+        has_t_bidAsk = self.has_got('ticker', ('bid','ask'))
         has_ob = self.has_got('orderbook')
         ob_sends_bidAsk = self.ob['sends_bidAsk']
         from_all_tickers = set()
@@ -2363,7 +2386,9 @@ class ExchangeSocket(WSClient):
         direction = as_direction(side)
         side = ['sell','buy'][direction]
         if price is not None:
-            price = self.api.round_price(symbol, price, side)
+            current_price = self.get_current_price(symbol)
+            limit_divergence = current_price is not None
+            price = self.api.round_price(symbol, price, side, limit_divergence=limit_divergence, current_price=current_price)
         if self.has_got('create_order','ws') and self.is_active():
             pms = {
                 '_': 'create_order',
@@ -2476,7 +2501,10 @@ class ExchangeSocket(WSClient):
         # price
         if len(args) >= 4:
             if args[3] is not None:
-                args = args[:3] + (self.api.round_price(symbol, args[3], args[1]),) + args[4:]
+                current_price = self.get_current_price(symbol)
+                limit_divergence = current_price is not None
+                new_price = self.api.round_price(symbol, args[3], args[1], limit_divergence=limit_divergence, current_price=current_price)
+                args = args[:3] + (new_price,) + args[4:]
                 
         if self.has_got('edit_order','ws') and self.is_active():
             pms = {
