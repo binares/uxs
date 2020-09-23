@@ -2041,7 +2041,7 @@ class ExchangeSocket(WSClient):
                 self.change_subscription_state(s, 1)
     
     
-    def get_current_price(self, symbol, components=['last','bid','ask'], *, active=True):
+    def get_current_price(self, symbol, components=['last','bid','ask'], *, active=True, as_dict=False):
         has_tAll_bidAsk = self.has_got('all_tickers', ('bid','ask')) # must have both bid and ask
         has_t_bidAsk = self.has_got('ticker', ('bid','ask'))
         has_tAll_last = self.has_got('all_tickers','last')
@@ -2058,7 +2058,10 @@ class ExchangeSocket(WSClient):
             prices.update({x: t.get(x) for x in ['bid','ask']})
         if has_tAll_last and is_subbed_tAll or has_t_last and is_subbed_t:
             prices['last'] = t.get('last')
-        prices = {k: v for k,v in prices.items() if v is not None and k in components}
+        prices = {k: v for k,v in prices.items() if k in components}
+        if as_dict:
+            return prices
+        prices = {k: v for k,v in prices.items() if v is not None}
         if not prices:
             return None
         return sum(prices.values()) / len(prices)
@@ -2386,9 +2389,8 @@ class ExchangeSocket(WSClient):
         direction = as_direction(side)
         side = ['sell','buy'][direction]
         if price is not None:
-            current_price = self.get_current_price(symbol)
-            limit_divergence = current_price is not None
-            price = self.api.round_price(symbol, price, side, True, limit_divergence=limit_divergence, current_price=current_price)
+            cp = self.get_current_price(symbol, as_dict=True)
+            price = self.api.round_price(symbol, price, side, True, limit_divergence=True, current_price=(cp['bid'], cp['ask']))
             if not price and type!='market': # raise error as price `0` / `None` might accidentally create a market order
                 raise ccxt.InvalidOrder('{} - {} order price {} is limited to 0'.format(self.name, symbol, price))
         if self.has_got('create_order','ws') and self.is_active():
@@ -2506,9 +2508,8 @@ class ExchangeSocket(WSClient):
             args = args[:2] + (self.api.round_amount(_symbol, args[2]),) + args[3:]
         # price
         if len(args) >= 4 and args[3] is not None:
-            current_price = self.get_current_price(symbol)
-            limit_divergence = current_price is not None
-            new_price = self.api.round_price(_symbol, args[3], new_side, True, limit_divergence=limit_divergence, current_price=current_price)
+            cp = self.get_current_price(symbol, as_dict=True)
+            new_price = self.api.round_price(_symbol, args[3], new_side, True, limit_divergence=True, current_price=(cp['bid'], cp['ask']))
             if not new_price and new_type!='market': # raise error as price `0` / `None` might accidentally create a market order
                 raise ccxt.InvalidOrder('{} - {} order price {} is limited to 0'.format(self.name, _symbol, new_price))
             args = args[:3] + (new_price,) + args[4:]
