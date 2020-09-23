@@ -738,34 +738,58 @@ class ccxtWrapper:
             direction = as_direction(direction)
         if method is None:
             method = 'round' if direction is None else ['up','down'][direction]
-        side = ['sell','buy'][direction]
         inf = self.markets[symbol]
         precision = inf['precision']['price']
         p_round = self.round_entity(price, precision, method, precisionMode=self.precisionMode)
         if limit_divergence:
+            if direction is None:
+                raise ValueError('`direction` must not be `None` if `limit_divergence` is set to `True`')
             if current_price is None:
                 raise ValueError('`current_price` must not be `None` if `limit_divergence` is set to `True`')
-            divergence = None if not isinstance(self.options.get('maxDivergence'), dict) else self.options['maxDivergence'].get(side)
-            if divergence is not None:
-                if direction:
-                    div_price = self.round_entity(current_price * (1 + divergence), precision, 'down', precisionMode=self.precisionMode)
-                    p_round = min(p_round, div_price)
-                else:
-                    div_price = self.round_entity(current_price * (1 - divergence), precision, 'up', precisionMode=self.precisionMode)
-                    p_round = max(p_round, div_price)
-        #TODO: binance is missing price limits. make pull request on ccxt repo.
+            p_round = self.limit_price_by_divergence(symbol, direction, price, current_price)
         if limit:
             if direction is None:
                 raise ValueError('`direction` must not be `None` if `limit` is set to `True`')
             min_p = inf['limits']['price']['min']
             max_p = inf['limits']['price']['max']
-            if min_p is None: min_p = pow(10,-inf['precision']['price'])
+            if min_p is None:
+                min_p = precision if self.precisionMode==ccxt.TICK_SIZE else pow(10,-precision)
             if min_p is not None and p_round < min_p:
                 p_round = None if direction else min_p
             if max_p is not None and p_round is not None and p_round > max_p:
                 p_round = max_p if direction else None
                 
         return p_round
+    
+    
+    def limit_price_by_divergence(self, symbol, direction, price, current_price=None):
+        direction = as_direction(direction)
+        side = ['sell','buy'][direction]
+        maxDivergence = self.options.get('maxDivergence')
+        if not isinstance(maxDivergence, dict) or maxDivergence.get(side) is None or current_price is None:
+            return price
+        divergence = maxDivergence[side]
+        if isinstance(current_price, (float, int)):
+            # assume the current price is `ask` in the worse case scenario, resulting in larger spread
+            bid = self.price_step(symbol, current_price, 'buy', where='inwards')
+            ask = self.price_step(symbol, bid, 'buy', where='outwards')
+        else:
+            bid, ask = current_price
+            current_price = ask if direction else bid
+        if current_price is None:
+            return price
+        minTimesSpread = maxDivergence.get('minTimesSpread')
+        if bid is not None and ask is not None and minTimesSpread is not None:
+            spread = ask/bid - 1
+            divergence = max(minTimesSpread * spread, divergence)
+        precision = self.markets[symbol]['precision']['price']
+        if direction:
+            div_price = self.round_entity(current_price * (1 + divergence), precision, 'down', precisionMode=self.precisionMode)
+            price = min(price, div_price)
+        else:
+            div_price = self.round_entity(current_price * (1 - divergence), precision, 'up', precisionMode=self.precisionMode)
+            price = max(price, div_price)
+        return price
     
     
     @property
