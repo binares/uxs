@@ -2388,7 +2388,9 @@ class ExchangeSocket(WSClient):
         if price is not None:
             current_price = self.get_current_price(symbol)
             limit_divergence = current_price is not None
-            price = self.api.round_price(symbol, price, side, limit_divergence=limit_divergence, current_price=current_price)
+            price = self.api.round_price(symbol, price, side, True, limit_divergence=limit_divergence, current_price=current_price)
+            if not price and type!='market': # raise error as price `0` / `None` might accidentally create a market order
+                raise ccxt.InvalidOrder('{} - {} order price {} is limited to 0'.format(self.name, symbol, price))
         if self.has_got('create_order','ws') and self.is_active():
             pms = {
                 '_': 'create_order',
@@ -2495,16 +2497,21 @@ class ExchangeSocket(WSClient):
     
     async def edit_order(self, id, symbol, *args):
         await self.load_markets()
+        o_prev = self.orders.get(id, {}).copy()
+        _symbol = symbol if symbol is not None else o_prev.get('symbol')
+        new_type = args[0] if args and args[0] is not None else o_prev.get('type')
+        new_side = args[1] if len(args) > 1 and args[1] is not None else o_prev.get('side')
         # amount
-        if len(args) >= 3:
-            args = args[:2] + (self.api.round_amount(symbol, args[2]),) + args[3:]
+        if len(args) >= 3 and args[2] is not None:
+            args = args[:2] + (self.api.round_amount(_symbol, args[2]),) + args[3:]
         # price
-        if len(args) >= 4:
-            if args[3] is not None:
-                current_price = self.get_current_price(symbol)
-                limit_divergence = current_price is not None
-                new_price = self.api.round_price(symbol, args[3], args[1], limit_divergence=limit_divergence, current_price=current_price)
-                args = args[:3] + (new_price,) + args[4:]
+        if len(args) >= 4 and args[3] is not None:
+            current_price = self.get_current_price(symbol)
+            limit_divergence = current_price is not None
+            new_price = self.api.round_price(_symbol, args[3], new_side, True, limit_divergence=limit_divergence, current_price=current_price)
+            if not new_price and new_type!='market': # raise error as price `0` / `None` might accidentally create a market order
+                raise ccxt.InvalidOrder('{} - {} order price {} is limited to 0'.format(self.name, _symbol, new_price))
+            args = args[:3] + (new_price,) + args[4:]
                 
         if self.has_got('edit_order','ws') and self.is_active():
             pms = {
@@ -2518,14 +2525,11 @@ class ExchangeSocket(WSClient):
             o = _copy.deepcopy(self.orders[order_id])
             return o
         else:
-            o_prev = self.orders.get(id, {}).copy()
-            new_type = args[0] if args and args[0] is not None else o_prev.get('type')
-            _symbol = symbol if symbol is not None else o_prev.get('symbol')
             order = {
                 'id': id,
                 'symbol': _symbol,
                 'type': new_type,
-                'side': args[1] if len(args) > 1 and args[1] is not None else o_prev.get('side'),
+                'side': new_side,
                 'amount': args[2] if len(args) > 2 and args[2] is not None else None,
                 'price': args[3] if len(args) > 3 else (o_prev.get('price') if new_type!='market' else None),
                 'timestamp': None,
@@ -2552,13 +2556,13 @@ class ExchangeSocket(WSClient):
             try:
                 if self.api.has['editOrder']!='emulated' \
                         and self.is_order_querying_enabled(order, 'edit_order', is_immediate_fill=immediate_fill):
-                    q = await self.query_order(order['id'], symbol)
+                    q = await self.query_order(order['id'], _symbol)
                     if q == 'closed':
                         r = self.close_order_assume_filled(r)
                     elif q is not None:
                         r = self.api.extend(r, q)
             except Exception as e:
-                self.log_error('could not query order {} {}' .format(order['id'], symbol), e)
+                self.log_error('could not query order {} {}' .format(order['id'], _symbol), e)
             
             if self.order['add_automatically']:
                 self.add_ccxt_order(r, order, 'edit_order')
