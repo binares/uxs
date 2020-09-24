@@ -168,13 +168,13 @@ xs.create_order automatically rounds the price down for buy orders, and up for s
 
 ## Logging
 
-Initialize with `verbose` value 1 (connection, subscription, send, fetch/polling events), 2 (1 + ping + some inner mechanisms) or 3 (1 + 2 + recv events) depending on how detailed log you want. Unexpected errors (not connectivity related) are logged in any case.
+Initialize with `verbose` value 0.5 (create/edit/cancel order), 1 (0.5 + connection, subscription, send, fetch/polling events), 2 (0.5 + 1 + ping + some inner mechanisms) or 3 (0.5 + 1 + 2 + recv events) depending on how detailed log you want. Unexpected errors (not connectivity related) are logged in any case.
 
 ```
 uxs.binance({'verbose': 1})
 ```
 
-If you just want to see recv output without including 1 and 2, init with
+If you just want to see recv output without including 0.5, 1 and 2, init with
 
 ```
 uxs.binance({'connection_defaults': {'handle': print}})

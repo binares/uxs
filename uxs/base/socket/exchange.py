@@ -980,7 +980,7 @@ class ExchangeSocket(WSClient):
                 self.safe_set_event('l3', symbol, {'_': 'l3',
                                                    'symbol': symbol,
                                                    'bids_count': len(new['bids']),
-                                                   'aks_count': len(new['asks'])})
+                                                   'asks_count': len(new['asks'])})
             if self.l3['assert_integrity']:
                 assert_l3_integrity(self.l3_books[symbol])
             
@@ -2393,6 +2393,8 @@ class ExchangeSocket(WSClient):
             price = self.api.round_price(symbol, price, side, True, limit_divergence=True, current_price=(cp['bid'], cp['ask']))
             if not price and type!='market': # raise error as price `0` / `None` might accidentally create a market order
                 raise ccxt.InvalidOrder('{} - {} order price {} is limited to 0'.format(self.name, symbol, price))
+        if self.verbose and self.verbose >= 0.5:
+            self._log('creating order {}'.format((symbol, type, side, amount, price, params)))
         if self.has_got('create_order','ws') and self.is_active():
             pms = {
                 '_': 'create_order',
@@ -2457,6 +2459,8 @@ class ExchangeSocket(WSClient):
     
     async def cancel_order(self, id, symbol=None, params={}):
         await self.load_markets()
+        if self.verbose and self.verbose >= 0.5:
+            self._log('canceling order {}'.format((id, symbol, params)))
         if self.has_got('cancel_order','ws') and self.is_active():
             pms = {
                 '_': 'cancel_order',
@@ -2513,7 +2517,10 @@ class ExchangeSocket(WSClient):
             if not new_price and new_type!='market': # raise error as price `0` / `None` might accidentally create a market order
                 raise ccxt.InvalidOrder('{} - {} order price {} is limited to 0'.format(self.name, _symbol, new_price))
             args = args[:3] + (new_price,) + args[4:]
-                
+        
+        if self.verbose and self.verbose >= 0.5:
+            self._log('editing order {}'.format((id, symbol) + args))
+        
         if self.has_got('edit_order','ws') and self.is_active():
             pms = {
                 'id': id,
