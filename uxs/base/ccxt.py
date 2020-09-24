@@ -188,6 +188,28 @@ class ccxtWrapper:
                 if i == attempts-1: raise e
     
     
+    def _set_missing_market_keys(self):
+        subkeys = {
+            'precision': ['price', 'amount'],
+            'limits': ['price', 'amount', 'cost'],
+        }
+        for market in self.markets.values():
+            for key in subkeys:
+                is_limits = (key == 'limits')
+                if market.get(key) is None:
+                    market[key] = {}
+                for subkey in subkeys[key]:
+                    if market[key].get(subkey) is None:
+                        market[key][subkey] = {} if is_limits else None
+                    if is_limits:
+                        for minmax in ('min', 'max'):
+                            if minmax not in market[key][subkey]:
+                                market[key][subkey][minmax] = None
+            for key in ('taker', 'maker', 'active', 'info'):
+                if key not in market:
+                    market[key] = None
+    
+    
     def _set_trading_fees(self, fees):
         if self.markets is None or fees is None:
             return
@@ -266,6 +288,7 @@ class ccxtWrapper:
         super().set_markets(markets, currencies)
         if self.markets is None or not self._wrapper_initiated:
             return None
+        self._set_missing_market_keys()
         self._set_lot_sizes()
         self._set_market_types()
         default = poll.load_profile('__default__', get_name(self), 'markets', verbose=self.verbose)
@@ -706,10 +729,13 @@ class ccxtWrapper:
                     cur_price = self.tickers[symbol]['last']
                     limit = self.round_amount(symbol, limit * cur_price/price, method=method)
                 add_to.append(limit)
-
-        if min_v is None: min_v = pow(10,-inf['precision']['amount'])
-                
-        _min = max([x for x in [min_v] + min_from_xv if x is not None])
+        
+        if min_v is None and inf['precision']['amount'] is not None:
+            min_v = pow(10,-inf['precision']['amount'])
+         
+        try: _min = max([x for x in [min_v] + min_from_xv if x is not None])
+        except ValueError: _min = None
+        
         try: _max = min([x for x in [max_v] + max_from_xv if x is not None])
         except ValueError: _max = None
         
