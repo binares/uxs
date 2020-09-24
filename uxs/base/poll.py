@@ -68,6 +68,9 @@ _MAXLENS = {
 
 _LOADS_MARKETS = ('balances','balances-account','tickers','ticker','orderbook','trades','ohlcv')
 
+ITERATION_SLEEP = 0.02
+ASYNC_ITERATION_SLEEP = 0.02
+
 storage = {}
 
 def _assign_storage_deque(exchange, type, *args):
@@ -239,7 +242,7 @@ async def get(exchange, type, limit=None, max=1,*,
         wait_for = _is_blocked(exchange,type)
         if not wait_for: pass
         elif blocked == 'sleep':
-            await asyncio.sleep(wait_for, loop=loop)
+            await _async_wait_till_released(exchange, type, wait_for, loop=loop)
         else:
             return []
     
@@ -288,7 +291,7 @@ def sn_get(exchange, type, limit=None, max=1,*,
         wait_for = _is_blocked(exchange,type)
         if not wait_for: pass
         elif blocked == 'sleep':
-            time.sleep(wait_for)
+            _wait_till_released(exchange, type, wait_for)
         else:
             return []
     
@@ -424,11 +427,11 @@ async def update(exchange, type, args=None, kwargs=None, *,
             logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
         api = get_exchange(config)
     
-    if blocked != 'ignore': 
+    if blocked != 'ignore':
         wait_for = _is_blocked(exchange, type)
         if not wait_for: pass
         elif blocked == 'sleep':
-            await asyncio.sleep(wait_for, loop=loop)
+            await _async_wait_till_released(exchange, type, wait_for, loop=loop)
             if file:
                 return load(exchange, type, limit, 1, globals=globals)
             elif globals:
@@ -483,11 +486,14 @@ async def update(exchange, type, args=None, kwargs=None, *,
         i += 1
     
     if exc is not None and i >= attempts-1 and raise_e:
+        if cache:
+            _release(exchange, [type])
         raise exc
     
     if cache:
         globalise(inf)
         save(inf)
+        _release(exchange, [type])
     
     if is_market and inf:
         inf = inf[:1]
@@ -531,7 +537,7 @@ def sn_update(exchange, type, args=None, kwargs=None, *,
         wait_for = _is_blocked(exchange, type)
         if not wait_for: pass
         elif blocked == 'sleep':
-            time.sleep(wait_for, loop=loop)
+            _wait_till_released(exchange, type, wait_for)
             if file:
                 return load(exchange, type, limit, 1, globals=globals)
             elif globals:
@@ -586,11 +592,14 @@ def sn_update(exchange, type, args=None, kwargs=None, *,
         i += 1
     
     if exc is not None and i >= attempts-1 and raise_e:
+        if cache:
+            _release(exchange, [type])
         raise exc
     
     if cache:
         globalise(inf)
         save(inf)
+        _release(exchange, [type])
     
     if is_market and inf:
         inf = inf[:1]
@@ -812,7 +821,22 @@ def _release(exchange, types):
     for b in blocks:
         try: os.remove(os.path.join(_dir, b.file))
         except OSError: pass
-    
+
+
+def _wait_till_released(exchange, type, timeout=None):
+    iterations = max(0, int(timeout / ITERATION_SLEEP)) if timeout is not None else None
+    i = 0
+    while (iterations is None or i < iterations) and _is_blocked(exchange, type):
+        time.sleep(ITERATION_SLEEP)
+        i += 1
+
+async def _async_wait_till_released(exchange, type, timeout=None, *, loop=None):
+    iterations = max(0, int(timeout / ASYNC_ITERATION_SLEEP)) if timeout is not None else None
+    i = 0
+    while (iterations is None or i < iterations) and _is_blocked(exchange, type):
+        await asyncio.sleep(ASYNC_ITERATION_SLEEP, loop=loop)
+        i += 1
+
 
 def _resolve_limit(exchange, type, limit):
     if limit is None:
