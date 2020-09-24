@@ -340,7 +340,7 @@ class ExchangeSocket(WSClient):
         'l3': 1000,
         'trades': 10000,
         'ohlcv': 100,
-        'event': 1000,
+        'event': 10000, # fetch_tickers can return hundreds/thousands of tickers at once
         'received': 1000,
         'send': 100,
     }
