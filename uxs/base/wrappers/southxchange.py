@@ -9,6 +9,9 @@ class southxchange:
             } 
         )
     
+    def nonce(self):
+        return self.milliseconds()
+    
     def sign(self, path, api='public', method='GET', params={}, headers=None, body=None):
         signed = super().sign(path, api, method, params, headers, body)
         if path == 'markets' and not self.urls['v2'] in signed['url']:
