@@ -154,7 +154,7 @@ class ccxtWrapper:
     
     
     def _read_extendMarkets(self):
-        path = os.path.join(DATA_DIR, '{}_markets.json'.format(self.id))
+        path = os.path.join(DATA_DIR, '{}_markets.json'.format(get_name(self)))
         markets = {}
         if os.path.exists(path):
             with open(path, encoding='utf-8') as f:
