@@ -532,6 +532,55 @@ class ccxtWrapper:
         return e
     
     
+    @staticmethod
+    def order_entry(id=None, symbol=None, side=None, amount=None, price=None, timestamp=None, 
+                    remaining=None, filled=None, payout=None, datetime=None, type=None,
+                    stop=None, cost=None, average=None, lastTradeTimestamp=None,
+                    **kw):
+        datetime, timestamp = resolve_times([datetime, timestamp])
+        
+        e = dict(
+            {'id': id,
+             'symbol': symbol,
+             'type': type,
+             'side': side,
+             'price': price,
+             'stop': stop,
+             'amount': amount,
+             'timestamp': timestamp,
+             'datetime': datetime,
+             'cost': cost,
+             'average': average,
+             'filled': filled,
+             'remaining': remaining,
+             'payout': payout,
+             'lastTradeTimestamp': lastTradeTimestamp,
+             'lastUpdateTimestamp': ccxt.Exchange.milliseconds(),
+             'cum': None,
+            }, **kw)
+        
+        for var in ['price', 'stop', 'amount', 'cost', 'average', 'filled',
+                    'remaining', 'payout', 'lastTradeTimestamp']:
+            if isinstance(e[var],str):
+                e[var] = float(e[var]) if var!='lastTradeTimestamp' else int(e[var])
+        
+        if e['price'] == 0:
+            e['price'] = None
+        
+        if e['remaining'] is None:
+            e['remaining'] = e['amount']
+        if e['filled'] is None and e['remaining'] is not None:
+            e['filled'] = e['amount'] - e['remaining']
+        if e['payout'] is None and e['filled']==0:
+            e['payout'] = .0
+        
+        if e['cum'] is None:
+            # filled, payout, remaining calculated from fills
+            e['cum'] = {'f': .0, 'r': e['remaining'], 'p': .0}
+        
+        return e
+    
+    
     def lazy_parse(self, source, keywords=[], map={}, apply={}):
         """
         Retrieve keywords and the values from the source dict

@@ -2433,7 +2433,8 @@ class ExchangeSocket(WSClient):
                 if self.is_order_querying_enabled(order, is_immediate_fill=immediate_fill):
                     q = await self.query_order(r['id'], symbol)
                     if q == 'closed':
-                        r = self.close_order_assume_filled(r)
+                        _o = self.api.order_entry(**dict(order, **{k: v for k, v in r.items() if k not in order or v is not None}))
+                        r = self.close_order_assume_filled(_o)
                     elif q is not None:
                         r = self.api.extend(r, q)
             except Exception as e:
@@ -2566,7 +2567,8 @@ class ExchangeSocket(WSClient):
                         and self.is_order_querying_enabled(order, 'edit_order', is_immediate_fill=immediate_fill):
                     q = await self.query_order(order['id'], _symbol)
                     if q == 'closed':
-                        r = self.close_order_assume_filled(r)
+                        _o = self.api.order_entry(**dict(order, **{k: v for k, v in r.items() if k not in order or v is not None}))
+                        r = self.close_order_assume_filled(_o)
                     elif q is not None:
                         r = self.api.extend(r, q)
             except Exception as e:
