@@ -6,6 +6,9 @@ class southxchange:
                 'urls': {
                     'v2': 'https://www.southxchange.com/api/v2',
                 },
+                'commonCurrencies': {
+                    'BCH': 'PreForkBCH',
+                }
             } 
         )
     
