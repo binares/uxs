@@ -215,7 +215,7 @@ class poloniex(ExchangeSocket):
         tlogger.debug(r)
         try: data = r[2]
         except IndexError: return #[1000, 1]
-        tree = {k:[] for k in ('b','n','o','t')}
+        tree = {k:[] for k in ('b','p','n','o','t','m')}
         
         for item in data:
             a_type = item[0]
@@ -225,24 +225,33 @@ class poloniex(ExchangeSocket):
                 
         if tree['b']:
             self.on_balances(tree['b'])
+        for item in tree['p']:
+            self.on_pending_order(item)
         for item in tree['n']:
             self.on_new_order(item)
         for item in tree['o']:
             self.on_order_update(item)
         for item in tree['t']:
             self.on_fill(item)
-            
+        for item in tree['m']:
+            self.on_margin_position_update(item)
+        
         self.change_subscription_state({'_':'account'}, 1)
-                
+    
     def on_balances(self, balances):
         #["b",292,"e","-0.01185766"]
         balances = [[self.id_to_cy(x[1]), float(x[3])] for x in balances if x[2] == 'e']
         self.update_balances_delta(balances)
     
+    def on_pending_order(self, item):
+        #['p', 750510274182, 121, '11401.22123605', '0.01941609', '0', None]
+        #["p", <order number>, <currency pair id>, "<rate>", "<amount>", "<order type>", "<clientOrderId>"]
+        pass
+    
     def on_new_order(self, item):
-        #["n", 148, 6083059, 1, "0.03000000", "2.00000000", "2018-09-08 04:54:09", "2.00000000"]
-        #["n", <currency pair id>, <order number>, <order type>, "<price>", "<amount>", "<date>", "<amount remaining?>"]
-        _, pair_id, oid, otype, price, remaining, tstr, amount = item
+        #["n", 148, 6083059, 1, "0.03000000", "2.00000000", "2018-09-08 04:54:09", "2.00000000", None]
+        #["n", <currency pair id>, <order number>, <order type>, "<price>", "<amount>", "<date>", "<original amount ordered>" "<clientOrderId>"]
+        _, pair_id, oid, otype, price, remaining, tstr, amount, clientOrderId = item[:9]
         #Convert to string because api.create_order returns id as string
         oid = str(oid)
         symbol = self.id_to_symbol(pair_id)
@@ -261,18 +270,19 @@ class poloniex(ExchangeSocket):
             self.add_order(id=oid, symbol=symbol, side=side, price=price, amount=amount,
                            timestamp=ts, remaining=remaining, filled=0)
         else:
-            self.update_order(oid, remaining)
+            self.update_order(id=oid, remaining=remaining)
     
     def on_order_update(self, item):
         #["o", 12345, "1.50000000"]
         #["o", 12345, "0.00000000", "c"]
-        _,oid,remaining = item[:3]
-        self.update_order(str(oid),float(remaining))
+        #["o", <order number>, "<new amount>", "<order type>", "<clientOrderId>"]
+        _, oid, remaining = item[:3]
+        self.update_order(id=str(oid), remaining=float(remaining))
     
     def on_fill(self, item):
         #["t", 12345, "0.03000000", "0.50000000", "0.00250000", 0, 6083059, "0.00000375", "2018-09-08 05:54:09"]
         #['t', 9394539, '0.00057427', '0.00000476', '0.00000000', 0, 274547887461]
-        #["t", <trade ID>, "<price>", "<amount>", "<fee multiplier>", <funding type>, <order number>, <total fee>, <date>]
+        #["t", <trade ID>, "<rate>", "<amount>", "<fee multiplier>", <funding type>, <order number>, <total fee>, <date>, "<clientOrderId>", "<trade total>"]
         #funding_type: 0 (exchange wallet), 1 (borrowed funds), 2 (margin funds), or 3 (lending funds).
         _, tid, price, amount, fee_rate, funding_type, oid = item[:7]
         tid, oid = str(tid), str(oid)
@@ -286,7 +296,11 @@ class poloniex(ExchangeSocket):
         ts = timestamp_ms(dto.replace(tzinfo=None))
         self.add_fill(id=tid, symbol=None, side=None, price=price, amount=amount,
                       fee_rate=fee_rate, timestamp=ts, order=oid)
-        
+    
+    def on_margin_position_update(self, item):
+        #["m", <order number>, "<currency>", "<amount>", "<clientOrderId>"]
+        pass
+    
     def parse_ccxt_order(self, r, *args):
         """{
         'info': {'timestamp': 1541421971000, 'status': 'open', 'type': 'limit', 
