@@ -1,26 +1,31 @@
 import pandas as pd
 
 FULL_NAMES = ['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume']
+FULL_NAMES_LOWERCASE = [x.lower() for x in FULL_NAMES]
 SHORT_NAMES = ['timestamp', 'O', 'H', 'L', 'C', 'V']
-FULL_NAMES_BY_SHORT = dict(zip(SHORT_NAMES, FULL_NAMES))
-SHORT_NAMES_BY_FULL = dict(zip(FULL_NAMES, SHORT_NAMES))
+SHORT_NAMES_LOWERCASE = [x.lower() for x in SHORT_NAMES]
+
+SETS = {
+    'full': FULL_NAMES,
+    'short': SHORT_NAMES,
+    'full_lower': FULL_NAMES_LOWERCASE,
+    'short_lower': SHORT_NAMES_LOWERCASE,
+}
 
 
-def ohlcvs_as_df(x, full_names=False):
+def ohlcvs_as_df(x, full_names=False, lowercase=False):
     """
     :type x: pd.DataFrame, list
     Convert OHLCVs (list) to dataframe format"""
-    if isinstance(x, pd.DataFrame):
-        cols = FULL_NAMES[1:] if any(c in x.columns for c in FULL_NAMES) else SHORT_NAMES[1:]
-        is_indexed = x.columns.tolist() == cols
-        if not is_indexed:
-            x = x.reindex(cols[1:])
-        else:
-            x = x.copy()
-        replace_names(x, full=full_names, inplace=True)
-        return x
+    name = ('full' if full_names else 'short') + ('_lower' if lowercase else '')
+    columns = SETS[name]
     
-    columns = FULL_NAMES if full_names else SHORT_NAMES
+    if isinstance(x, pd.DataFrame):
+        if x.columns.tolist() == columns[1:]:
+            return x.copy()
+        x = replace_names(x, full=full_names, lowercase=lowercase, inplace=False)
+        return x.reindex(columns=columns[1:])
+    
     df = pd.DataFrame(x, columns=columns)
     df['timestamp'] = df['timestamp'].astype('datetime64[ms]')
     df.set_index('timestamp', drop=True, inplace=True)
@@ -36,7 +41,7 @@ def ohlcvs_as_list(x):
     if isinstance(x, list):
         return x.copy()
     
-    cols = FULL_NAMES if any(c in x.columns for c in FULL_NAMES) else SHORT_NAMES
+    cols = next((_columns for _columns in SETS.values() if any(c in x.columns for c in _columns)), SHORT_NAMES)
     x = x.reindex(columns=cols)
     x['timestamp'] = x.index.astype('int64') // 10**6
     x = x.where(pd.notnull(x), None)
@@ -45,6 +50,10 @@ def ohlcvs_as_list(x):
     return ohlcvs
 
 
-def replace_names(df, full=True, inplace=False):
-    map = FULL_NAMES_BY_SHORT if full else SHORT_NAMES_BY_FULL
+def replace_names(df, full=True, lowercase=False, *, inplace=False):
+    name = ('full' if full else 'short') + ('_lower' if lowercase else '')
+    map = {}
+    for _name, _columns in SETS.items():
+        map.update(dict(zip(_columns, SETS[name])))
+    
     return df.rename(map, axis=1, inplace=inplace)
