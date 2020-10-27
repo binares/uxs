@@ -17,6 +17,8 @@ _DEFAULT_CACHE_EXPIRY = {
     'tickers': 0,
     'ticker': 0,
     'orderbook': 0,
+    'ohlcv': 0,
+    'trades': 0,
 }
 
 APPDATA_DIR = get_appdata_dir('uxs-python', make=True)
