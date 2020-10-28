@@ -9,12 +9,9 @@ from .beaxy import beaxy
 from .biki import biki
 from .bitbns import bitbns
 from .bitclude import bitclude
-from .bitcoincom import bitcoincom
 from .bitforexfu import bitforexfu
-from .bitget import bitget
 from .bitkub import bitkub
 from .bitopro import bitopro
-from .bitpanda import bitpanda
 from .bitrue import bitrue
 from .bitzfu import bitzfu
 from .bkex import bkex
