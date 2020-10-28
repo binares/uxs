@@ -7,7 +7,8 @@ import yaml
 from uxs.base.socket import (ExchangeSocket, ExchangeSocketError)
 
 from uxs.base.ccxt import (get_name, get_exchange, get_sn_exchange, init_exchange,
-                           list_exchanges, ccxtWrapper, asyncCCXTWrapper, PUBLIC_AUTH_REQUIRED)
+                           list_exchanges, close_all_exchanges, ccxtWrapper, asyncCCXTWrapper,
+                           PUBLIC_AUTH_REQUIRED)
 
 from uxs.base._settings import *
 

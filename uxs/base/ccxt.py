@@ -7,6 +7,7 @@ from copy import deepcopy
 import ssl
 import aiohttp
 import aiohttp_socks
+import asyncio
 
 from .auth import (get_auth2, EXTRA_TOKEN_KEYWORDS, _interpret_exchange)
 from . import wrappers as _wrappers
@@ -1532,7 +1533,17 @@ def list_exchanges():
                 and v is not ccxt.Exchange:
             exchanges.append(attr)
     return exchanges
-        
+
+
+async def close_all_exchanges():
+    for x in [_exchange_instances, _exchange_instances_async, _ccxtpro_instances]:
+        for e_name, apis in x.items():
+            for apiKey, api in apis.items():
+                if asyncio.iscoroutinefunction(api.close):
+                    await api.close()
+                else:
+                    api.close()
+
 
 #Notes:
 #If you create_limit_buy_order(symbol, x_amount, y_price),
