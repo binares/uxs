@@ -32,6 +32,16 @@ def _calc_log_b(a, p, base=10):
     return base ** (math.log(p.y, base) - a * p.x)
 
 
+def _resolve_precision(precision=None):
+    if precision is None:
+        precision = {}
+    elif isinstance(precision, (int, float)):
+        precision = {'y': precision}
+    elif not isinstance(precision, dict):
+        raise TypeError('`precision` must be int/float/dict. Got: {}'.format(type(precision)))
+    return precision
+
+
 class BaseVector:
     __slots__ = ('x', 'y')
     
@@ -174,14 +184,14 @@ class Point(BasePoint):
 
 
 class BaseTrendline:
-    __slots__ = ('a', 'b', 'p', 'base', 'slope')
+    __slots__ = ('a', 'b', 'p', 'base', 'slope', 'precision')
     units = (1, 1)
     point_cls = BasePoint
     _calc_b_on_init = True
     _is_log = False
     
     
-    def __init__(self, *args, is_unit=True, base=None, p_x=None):
+    def __init__(self, *args, is_unit=True, base=None, p_x=None, precision=None):
         """
         y = ax + b
         Args:
@@ -197,6 +207,7 @@ class BaseTrendline:
             raise ValueError('`base` argument is only accepted in BaseLogTrendline subclasses')
         elif base is None and self._is_log:
             raise ValueError('`base` argument must not be None')
+        precision = _resolve_precision(precision)
         _args = [x if not isinstance(x, tuple) else self.point_cls(*x) for x in args]
         is_point = [isinstance(x, BasePoint) for x in _args]
         a = None
@@ -237,6 +248,7 @@ class BaseTrendline:
         self.p = point
         self.base = base
         self.slope = slope
+        self.precision = dict({'x': None, 'y': None}, **precision)
         
         if p_x is not None and p_x != self.p.x:
             self.p = self.point_cls(p_x, self.calc_y(p_x))
@@ -249,12 +261,19 @@ class BaseTrendline:
             return _calc_log_b(a, point, base)
     
     
-    def calc_y(self, x):
-        return ((x - self.p.x) * self.a) + self.p.y
+    def calc_y(self, x, **kw):
+        unknown_kw = [k for k in kw if k not in ('precision',)]
+        if unknown_kw:
+            raise ValueError('Got unknown kwargs: {}'.format(unknown_kw))
+        y = ((x - self.p.x) * self.a) + self.p.y
+        precision = dict(self.precision, **_resolve_precision(kw.get('precision')))
+        if precision['y'] is not None:
+            y = round(y, precision['y'])
+        return y
     
     
-    def calc_coords(self, x):
-        return self.point_cls(x, self.calc_y(x))
+    def calc_coords(self, x, **kw):
+        return self.point_cls(x, self.calc_y(x, **kw))
     
     
     def calc_distance(self, point, as_ratio=False):
@@ -309,7 +328,7 @@ class BaseLogTrendline(BaseTrendline):
     _is_log = True
     _calc_b_on_init = False
     
-    def __init__(self, *args, base=10, is_unit=True, p_x=None):
+    def __init__(self, *args, base=10, is_unit=True, p_x=None, precision=None):
         """
         log(y, base) - log(b, base) = a * x
         y = (base ** (a * x)) * b
@@ -323,11 +342,18 @@ class BaseLogTrendline(BaseTrendline):
           Point, Point
         where slope = a * (units[0] / units[1])
         """
-        super().__init__(*args, base=base, is_unit=is_unit, p_x=p_x)
+        super().__init__(*args, base=base, is_unit=is_unit, p_x=p_x, precision=precision)
     
     
-    def calc_y(self, x):
-        return (self.base ** (self.a * (x - self.p.x))) * self.p.y
+    def calc_y(self, x, **kw):
+        unknown_kw = [k for k in kw if k not in ('precision',)]
+        if unknown_kw:
+            raise ValueError('Got unknown kwargs: {}'.format(unknown_kw))
+        y = (self.base ** (self.a * (x - self.p.x))) * self.p.y
+        precision = dict(self.precision, **_resolve_precision(kw.get('precision')))
+        if precision['y'] is not None:
+            y = round(y, precision['y'])
+        return y
     
     
     def __add__(self, other):
@@ -423,6 +449,48 @@ def is_above_at(point, line, min_distance=0, is_ratio=True):
 def is_below_at(point, line, min_distance=0, is_ratio=True):
     """Test if point is below or at line. min_distance as percentage from the *line*, e.g. 0.02 (2%)"""
     return is_below(point, line, min_distance, is_ratio, True)
+
+
+def calc_intersection(l1, l2, *, precision=None):
+    are_logs = sum([l1._is_log, l2._is_log])
+    precision = dict(l1.precision, **_resolve_precision(precision))
+    
+    if are_logs == 1:
+        raise TypeError('Both lines must be either linear or logarithmic. Got types: {}, {}'.format(type(l1), type(l2)))
+    if are_logs == 2 and l1.base != l2.base:
+        raise ValueError('`base` of two logarithmic lines must be equal. Got: {}, {}'.format(l1.base, l2.base))
+    
+    if l1.units == l2.units and l1.slope == l2.slope:
+        return None
+    
+    a1, b1, p1, base = l1.a, l1.b, l1.p, l1.base
+    a2, b2, p2 = l2.a, l2.b, l2.p
+    
+    if a1 == a2:
+        return None
+    
+    if are_logs == 0:
+        # a1*x + b1 = a2*x + b2
+        # (a1 - a2)*x = b2 - b1
+        # x = (b2 - b1) / (a1 - a2)
+        x = (b2 - b1) / (a1 - a2)
+    else:
+        # (base ** (a1 * (x - p1.x))) * p1.y == (base ** (a2 * (x - p2.x))) * p2.y
+        # (base ** (a1 * (x - p1.x))) / (base ** (a2 * (x - p2.x))) = p2.y / p1.y
+        # base ** (a1 * (x - p1.x) - a2 * (x - p2.x)) = p2.y / p1.y
+        # a1 * (x - p1.x) - a2 * (x - p2.x) = log(p2.y / p1.y, base)
+        # a1 * x - a1* p1.x - a2 * x + a2* p2.x = log(p2.y / p1.y, base)
+        # (a1 - a2) * x = log(p2.y / p1.y, base) + a1* p1.x - a2* p2.x
+        # x = (log(p2.y / p1.y, base) + a1* p1.x - a2* p2.x) / (a1 - a2)
+        x = (math.log(p2.y / p1.y, base) + a1* p1.x - a2* p2.x) / (a1 - a2)
+    
+    if precision['x'] is not None:
+        x = round(x, precision['x'])
+    
+    y = l1.calc_y(x, precision=precision)
+    
+    return l1.point_cls(x, y)
+
 
 
 """class Channel:

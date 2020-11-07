@@ -1,7 +1,8 @@
-from uxs.fintls.charting import Point, Vector, Trendline, LogTrendline, is_near, is_above, is_below
+from uxs.fintls.charting import Point, Vector, Trendline, LogTrendline, is_near, is_above, is_below, calc_intersection
 from fons.time import timestamp_ms
 import datetime
 dt = datetime.datetime
+td = datetime.timedelta
 
 P0 = Point(dt(2000, 1, 1), 1000)
 P1 = Point(dt(2000, 1, 2), 1240)
@@ -57,7 +58,7 @@ def test_log_trendline():
 
 
 def test_calc_log_y():
-    assert round(lL.calc_y(timestamp_ms(dt(2000, 1, 1, 2))), 6) == 1000
+    assert lL.calc_y(timestamp_ms(dt(2000, 1, 1, 2)), precision=6) == 1000
 
 
 def test_calc_log_distance():
@@ -96,3 +97,19 @@ def test_is_below():
     assert is_below(oP2, L, 20, False, include=False) == False
     assert is_below(oP2, L, 20, False, include=True) == True
     assert is_below(P2, L, 21, False) == False
+
+
+L_parallel = Trendline(L.slope, L.b + 2)
+L_cross = Trendline(P1, Point(dt(2000, 1, 3), P0.y))
+lL_parallel = LogTrendline(lL.slope, lP1 + Vector(0, 30))
+lP_new = Point(dt(2000, 1, 1, 2), lP0.y)
+lL_cross_1 = LogTrendline(lP1, lP_new)
+lL_cross_2 = LogTrendline(lP_new, lP1)
+
+
+def test_calc_intersection():
+    assert calc_intersection(L, L_parallel) is None
+    assert calc_intersection(L, L_cross) == P1
+    assert calc_intersection(lL, lL_parallel) is None
+    assert calc_intersection(lL, lL_cross_1, precision=6) == lP1
+    assert calc_intersection(lL, lL_cross_2, precision=6) == lP1
