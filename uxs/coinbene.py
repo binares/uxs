@@ -69,6 +69,11 @@ class coinbene(ExchangeSocket):
     connection_defaults = {
         'pong': lambda x: None if x!='ping' else 'pong',
     }
+    intervals = {
+        'fetch_open_orders': 60,
+        'fetch_closed_orders': 60,
+        'fetch_order': 60,
+    }
     #max_subscriptions_per_connection = 1 # symbol per connection
     #subscription_push_rate_limit = 0.04
     message = {
