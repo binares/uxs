@@ -492,9 +492,91 @@ def calc_intersection(l1, l2, *, precision=None):
     return l1.point_cls(x, y)
 
 
-
-"""class Channel:
-    def __init__(self, line1, line2):
-        ":type: line1: Trendline"
-        self.line1 = line1
-        self.line2 = line2"""
+class Range:
+    def __init__(self, l1, l2):
+        are_logs = [l1.base is not None, l2.base is not None]
+        if sum(are_logs) == 1:
+            raise TypeError('Both or none of the lines must be logarithmic. '
+                            'Got types: {}, {}'.format(type(l1), type(l2)))
+        self.l1 = l1
+        self.l2 = l2
+        self.base = l1.base
+        self.is_log = self.base is not None
+        
+        self.pi = calc_intersection(l1, l2)
+        self.are_parallel = self.pi is None
+    
+    
+    def _calc_y_at_inner_ratio(self, y_low, y_high, q, ref_line='bottom'):
+        """ 0 <= q <= 1 """
+        if not 0 <= q <= 1:
+            raise ValueError('`q` must be in range [0, 1], got: {}'.format(q))
+        
+        q_transposed = q if ref_line=='bottom' else (1 - q)
+        
+        if not self.is_log:
+            yq = y_low + (y_high - y_low) * q_transposed
+        else:
+            # y = y1 * (base ** dY)
+            # dY = (log(y2) - log(y1)) * q
+            # yq = y1 * base ** ((log(y2) - log(y1)) * q)
+            # yq = y1 * ( base ** (log(y2)*q)) / (base ** (log(y1)*q)) )
+            # yq = y1 * ( y2 ** q) / (y1 ** q)
+            # yq = (y1 ** (1 -q)) * (y2 ** q)
+            yq = (y_low ** (1 - q_transposed)) * (y_high ** q_transposed)
+        return yq
+    
+    
+    def calc_y_at_ratio(self, x, q, ref_line='bottom'):
+        """
+        If 0 <= q <= 1, calculates y at that ratio between the lines. (0.5 is exactly in the middle)
+        q < 0 is below the bottom line (ref_line='bottom') or above the top line (ref_line='top')
+        q > 1 is above the top line (ref_line='bottom') or below the bottom line (ref_line='top')
+        """
+        if ref_line not in ('bottom', 'top'):
+            raise ValueError(ref_line)
+        y1 = self.l1.calc_y(x)
+        y2 = self.l2.calc_y(x)
+        y_low = min(y1, y2)
+        y_high = max(y1, y2)
+        is_single = isinstance(q, (int, float))
+        q_values = [q] if is_single else q
+        yq_values = []
+        
+        for q in q_values:
+            if 0 <= q <= 1:
+                y = self._calc_y_at_inner_ratio(y_low, y_high, q, ref_line)
+            else:
+                delta = y_high - y_low
+                percentage = y_high / y_low - 1
+                if ref_line=='bottom':
+                    if q > 1:
+                        y = y_low + q * delta
+                    else:
+                        y = y_low / (1 + abs(q) * percentage)
+                else:
+                    if q < 0:
+                        y = y_high + abs(q) * delta
+                    else:
+                        y = y_high / (1 + q * percentage)
+            yq_values.append(y)
+        
+        return yq_values[0] if is_single else yq_values
+    
+    
+    def calc_line_at_ratio(self, x, q, ref_line='bottom'):
+        """
+        Line that passes through 
+            P0 = (x, calc_y_at_ratio(x, q))
+            P1 = (1) intersection of (l1, l2) [if l1 and l2 cross]
+                 (2) so that line is parallel to l1 & l2 [if l1 and l2 are parallel]
+        """
+        yq = self.calc_y_at_ratio(x, q, ref_line)
+        pq = self.l1.point_cls(x, yq)
+        
+        if self.pi is None:
+            line = type(self.l1)(pq, self.l1.slope, base=self.base)
+        else:
+            line = type(self.l1)(pq, self.pi, base=self.base)
+        
+        return line
