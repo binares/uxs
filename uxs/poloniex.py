@@ -114,7 +114,7 @@ class poloniex(ExchangeSocket):
     order = {
         'update_filled_on_fill': True,
         'update_payout_on_fill': True,
-        'update_remaining_on_fill': False,
+        'update_remaining_on_fill': True,
     }
     symbol = {
         'quote_ids': ['BTC', 'USDT', 'ETH', 'USDC', 'XMR', 'LTC'],
@@ -320,18 +320,13 @@ class poloniex(ExchangeSocket):
             'order': None, 'type': 'limit', 'side': 'buy', 'takerOrMaker': None, 'price': 0.02341327, 
             'amount': 0.02, 'cost': 0.00046826, 'fee': None}], 
         'fee': None}"""
-        # If the order is filled immediately then only trade is sent, thus have to acquire 
-        # 'remaining' from ccxt order.
-        # Adding the trades too to avoid delay between "remaining" and "filled"/"payout" being updated
-        # (delay between .create_order and websocket order recv; in websocket itself this is not a problem
-        #  as poloniex sends new_order,order_updates,trades in one batch)
         #Note: 'remaining' == 'amount', neither is 'filled' always accurate (check ccxt.poloniex.parse_order)
         filled = sum(t['amount'] for t in r.get('trades',[]))
         parsed = {
-            'order': {'remaining': max(0, r['amount']-filled), 
-                      'filled': 0}, #'filled' is calculated from trades
+            #'order': {#'remaining': max(0, r['amount']-filled), 
+            #          'filled': 0}, #'filled' is calculated from trades
             'fills': [
-                    {'id': t['info']['tradeID'],
+                    {'id': str(t['info']['tradeID']), # websocket only sends fill's 'tradeID', not 'globalTradeID'
                      'symbol': t['symbol'], 
                      'side': t['side'],
                      'price': t['price'],
@@ -349,8 +344,6 @@ class poloniex(ExchangeSocket):
                 for t in r.get('trades',[])
             ]
         }
-        #print('r: {}'.format(r))
-        #print('parsed: {}'.format(parsed))
         return parsed
     
     def encode(self, rq, sub=None):

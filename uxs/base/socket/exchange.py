@@ -1367,12 +1367,14 @@ class ExchangeSocket(WSClient):
              'payout': payout,
              'lastTradeTimestamp': lastTradeTimestamp,
              'lastUpdateTimestamp': self.api.milliseconds(),
+             'previousIds': [],
              'cum': cum,
             }, **params)
         
-        self.orders[id] = o
-        if remaining:
-            self.open_orders[id] = o
+        for _id in [id] + o['previousIds']:
+            self.orders[_id] = o
+            if remaining:
+                self.open_orders[_id] = o
         
         if self.is_order_balance_updating_enabled(o):
             try: self.update_balances_from_order_delta(o)
@@ -1435,6 +1437,8 @@ class ExchangeSocket(WSClient):
             id = o['id']
             if o.get('cum') is None:
                 o['cum'] = {'f': .0, 'r': o['remaining'], 'p': .0}
+            if o.get('previousIds') is None:
+                o['previousIds'] = []
             if 'info' not in o:
                 o['info'] = None
         elif id in self.orders:
@@ -1510,10 +1514,11 @@ class ExchangeSocket(WSClient):
             return o
         
         if not o['remaining']:
-            try:
-                del self.open_orders[id]
-            except KeyError:
-                pass
+            for _id in [id] + o['previousIds']:
+                try:
+                    del self.open_orders[_id]
+                except KeyError:
+                    pass
         
         if self.is_order_balance_updating_enabled(o):
             try: self.update_balances_from_order_delta(o, o_prev)
@@ -2555,10 +2560,23 @@ class ExchangeSocket(WSClient):
                 if cancel_automatically:
                     await self.safely_mark_order_closed(id)
                 raise e
+            # If the order id changed during edit (poloniex)
+            if r.get('id') and r['id'] != id and id in self.orders:
+                _o = self.orders[r['id']] = self.orders[id]
+                _o['id'] = r['id']
+                _o['previousIds'].insert(0, id)
+                if id in self.open_orders:
+                    self.open_orders[r['id']] = _o
+                if id in self.fills:
+                    self.fills[r['id']] = self.fills[id]
+                else:
+                    self.fills[r['id']] = self.fills[id] = []
             prev_amount = o_prev['remaining'] if r.get('id')!=id and o_prev.get('remaining') is not None \
                           else o_prev.get('amount')
+            new_amount = order['amount'] if order.get('amount') is not None else prev_amount
             order.update({'id': r['id'] if r.get('id') else id,
-                          'amount': order['amount'] if order.get('amount') is not None else prev_amount,
+                          'amount': new_amount,
+                          'remaining': new_amount,
                           'timestamp': self.api.milliseconds()})
             # In case the order is likely to get filled immediately, but has no "filled"
             # or "remaining" included in the edit_order response, nor is subscribed to fills/order feed
@@ -2582,13 +2600,17 @@ class ExchangeSocket(WSClient):
     
     def add_ccxt_order(self, response, order={}, from_method='create_order', skip=None):
         parsed = self.parse_ccxt_order(response, from_method)
-        final_order = dict(order, **parsed.get('order', {}))
+        parsed_filtered = {k: v for k,v in parsed.get('order', {}).items() if v is not None or k not in order}
+        final_order = dict(order, **parsed_filtered)
         id = final_order.get('id')
-        exists = id in self.orders
         if hasattr(skip, '__iter__') and not isinstance(skip, str):
             skip = id in skip # skip these
         
-        if not skip: # or not exists 
+        if not skip:
+            o = self.orders.get(id)
+            if from_method=='edit_order' and o and o['remaining'] and final_order.get('remaining'):
+                o['remaining'] = max(0, final_order['remaining'])
+                o['cum']['r'] = max(0, o['filled'] + o['remaining'] - o['cum']['f'])
             self.add_order_from_dict(final_order)
         
         for f in parsed.get('fills',[]):
