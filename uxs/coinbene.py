@@ -50,8 +50,8 @@ class coinbene(ExchangeSocket):
             'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
             'filled': True, 'id': True, 'lastTradeTimestamp': False, 'price': True, 'remaining': True, 'side': True,
             'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
-        'fetch_open_orders': {'symbolRequired': False},
-        'fetch_closed_orders': {'symbolRequired': False},
+        'fetch_open_orders': {'symbolRequired': True},
+        'fetch_closed_orders': {'symbolRequired': True},
     }
     has['all_tickers'] = has['ticker'].copy()
     has['fetch_ticker'] = has['fetch_tickers'].copy()
