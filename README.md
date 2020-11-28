@@ -16,7 +16,6 @@ Supported exchanges:
 | bw           |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
 | coinbene     |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
 | coindcx      |   p    |      p      |     +     |    |   p   |   +    |    +    |   p   |  +   |          |
-| coinsbit     |   +    |      p      |     +     |    |   +   |   +    |    p    |   p   |  p   |          |
 | gateiofu     |        |             |     +     |    |   p   |        |         |       |      |          |
 | hitbtc       |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
 | kraken       |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |

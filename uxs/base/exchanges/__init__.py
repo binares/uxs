@@ -21,7 +21,6 @@ from .ceo import ceo
 from .changellypro import changellypro
 from .coinbene import coinbene
 from .coindcx import coindcx
-from .coinsbit import coinsbit
 from .coinsuper import coinsuper
 from .cossdex import cossdex
 from .cryptocom import cryptocom

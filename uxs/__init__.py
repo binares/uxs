@@ -1,4 +1,4 @@
-__version__ = '0.4.1'
+__version__ = '0.5.0'
 __author__ = 'binares'
 
 import os
@@ -28,7 +28,6 @@ from uxs.bittrex import bittrex
 from uxs.bw import bw
 from uxs.coinbene import coinbene
 from uxs.coindcx import coindcx
-from uxs.coinsbit import coinsbit
 from uxs.gateiofu import gateiofu
 from uxs.hitbtc import hitbtc
 from uxs.kraken import kraken

@@ -13,7 +13,6 @@ from .bittrex import bittrex
 from .btsefu import btsefu
 from .bw import bw
 from .coinbene import coinbene
-from .coinsbit import coinsbit
 from .dragonex import dragonex
 from .hitbtc import hitbtc
 from .krakenfu import krakenfu
@@ -28,7 +27,6 @@ __all__ = [
     'btsefu',
     'bw',
     'coinbene',
-    'coinsbit',
     'dragonex',
     'hitbtc',
     'krakenfu',
