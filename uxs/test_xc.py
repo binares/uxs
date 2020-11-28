@@ -22,6 +22,7 @@ Params:
 import asyncio
 import functools
 import itertools
+import multiprocessing
 import time
 import warnings
 import sys
@@ -286,11 +287,15 @@ async def _restart(stop_wait_time):
     await xs.start()   
         
 
-def main():
+def main(argv=sys.argv):
     global xs
+    print('pid: {}'.format(multiprocessing.current_process().pid))
     
-    try: xc = sys.argv.pop(1)
+    from_index = 2
+    
+    try: xc = argv[1]
     except IndexError:
+        from_index = 3
         xc = DEFAULT_EXCHANGE
     
     def _to_float(x):
@@ -313,7 +318,7 @@ def main():
                                 'account','pos','position','positions'], _split))
     apply['log'] = apply['loggers'] = apply['verbose'] = _to_int
     
-    p = parse_argv(sys.argv[1:], apply)
+    p = parse_argv(argv[from_index:], apply)
     
     unsub = p.which(['u','unsub'], False)
     resub = p.which(['r','resub'], False)

@@ -1862,18 +1862,9 @@ class ExchangeSocket(WSClient):
         def get_emulated_subs():
             return [s for s in self.subscriptions if self.has_got(s.channel, 'emulated') and
                     self._is_poll(self.has[s.channel]['emulated'])]
-        methods = {
-            'all_tickers': 'fetch_tickers',
-            'ticker': 'fetch_ticker',
-            'orderbook': 'fetch_order_book',
-            'trades': 'fetch_trades',
-            'l3': 'fetch_l3_order_book',
-        }
-        pending = []
-        while self.is_running():
+        
+        def change_states():
             now = time.time()
-            coros = {}
-            
             # disactivate subscriptions that have missed N fetch intervals
             for s in get_emulated_subs():
                 if s.channel not in methods:
@@ -1887,11 +1878,25 @@ class ExchangeSocket(WSClient):
                     self.change_subscription_state(s, 0)
                     symbol = s.params.get('symbol')
                     if s.channel=='l3' and self.l3_maintainer.is_subbed_to_l2_ob(symbol):
-                        self.change_subscription_state(('orderbook', symbol), 0) 
+                        self.change_subscription_state(('orderbook', symbol), 0)
+        
+        methods = {
+            'all_tickers': 'fetch_tickers',
+            'ticker': 'fetch_ticker',
+            'orderbook': 'fetch_order_book',
+            'trades': 'fetch_trades',
+            'l3': 'fetch_l3_order_book',
+        }
+        pending = []
+        sleep = 0.1
+        while self.is_running():
+            start = time.time()
+            coros = {}
+            change_states()
             
-            if pending:
-                _, pending = await asyncio.wait(pending, timeout=0.1)
-                continue
+            while pending:
+                _, pending = await asyncio.wait(pending, timeout=sleep)
+                change_states()
             
             account_sub  = self.get_subscription(('account',)) if self.is_subscribed_to(('account',)) else None
             own_market_subs = [s for s in self.subscriptions if s.channel=='own_market']
@@ -1912,9 +1917,12 @@ class ExchangeSocket(WSClient):
                     coros[s.id_tuple] = self.poll_fetch_and_activate(s, method, id=id)
             
             pending = [asyncio.ensure_future(c) for c in coros.values()]
+            undertime = max(0, sleep - (time.time() - start))
             if not pending:
-                await asyncio.sleep(0.1)
-
+                await asyncio.sleep(sleep)
+            elif undertime:
+                await asyncio.sleep(undertime)
+    
     
     async def poll_orders(self):
         
