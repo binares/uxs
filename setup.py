@@ -11,7 +11,7 @@ if 'uxs._data' not in packages:
 
 setup(
    name='uxs',
-   version='0.5.0',
+   version='0.5.1',
    description='A unified crypto exchange websocket',
    long_description=README,
    long_description_content_type='text/markdown',
@@ -26,7 +26,7 @@ setup(
    install_requires=[
        'aiohttp>=3.0',
        'aiohttp_socks>=0.2',
-       'ccxt>=1.38.5',
+       'ccxt>=1.39.37',
        'python_dateutil>=2.1',
        'pandas>=0.21',
        'PyYAML>=3.10',
