@@ -11,8 +11,12 @@ python -m uxs.test_xc binance order -c 4
 python -m uxs.test_xc binance order+
 python -m uxs.test_xc binance ticker=ETH/BTC,BTC/USDT m ob=ETH/BTC order+ u r s
 python -m uxs.test_xc bittrex tickers u r s
-python -m uxs.test_xc bittrex ob=ETH/BTC order u r s
+python -m uxs.test_xc bittrex ticker=BTC/USDT u r
+python -m uxs.test_xc bittrex ob=ETH/BTC u r s
 python -m uxs.test_xc bittrex ob=ETH/BTC order c
+python -m uxs.test_xc bittrex ohlcv=BTC/USDT u r
+python -m uxs.test_xc bittrex trades=BTC/USDT u r
+python -m uxs.test_xc bittrex order+-BTC/USDT,limit,buy,0.0005,19000
 python -m uxs.test_xc hitbtc ob d
 python -m uxs.test_xc hitbtc ob=ETH/BTC,BTC/USDT -unsub 3 -resub 2
 python -m uxs.test_xc hitbtc tickers=ETH/BTC,BTC/USDT -unsub 3 -resub 2

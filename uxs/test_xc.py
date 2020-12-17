@@ -204,8 +204,8 @@ async def fetch_trades(symbols=(), sub=True, unsub=False, resub=False, merge=Fal
     while True:
         await _print_changed('trades', 'trades', clear_first=True, from_index=-5)
         
-async def fetch_ohlcv(symbols=(), sub=True, unsub=False, resub=False, merge=False):
-    timeframes = dict.fromkeys(symbols, '1m')
+async def fetch_ohlcv(symbols=(), timeframe='1m', sub=True, unsub=False, resub=False, merge=False):
+    timeframes = dict.fromkeys(symbols, timeframe) if isinstance(timeframe, str) else timeframe.copy()
     for x in symbols:
         if '_' in x:
             del timeframes[x]
@@ -387,6 +387,7 @@ def main(argv=sys.argv):
     p_param = p.which(['pos','position','positions'], '')
     any_account = any([a_param, o_param, p_param])
     no_account = p.contains('no_account')
+    timeframe = p.get(p.which(['timeframe','tf']), '1m')
     account_symbols = set()
     
     def _get_items(param, default_symbols=('ETH/BTC',)):
@@ -432,7 +433,7 @@ def main(argv=sys.argv):
         
     if ohlcv_param:
         oh_symbols, oh_merge = _get_items(ohlcv_param)
-        coros += [fetch_ohlcv(oh_symbols, sub=True, unsub=unsub, resub=resub, merge=oh_merge)]
+        coros += [fetch_ohlcv(oh_symbols, timeframe, sub=True, unsub=unsub, resub=resub, merge=oh_merge)]
     
     if a_param:
         a_symbols, _ = _get_items(a_param)

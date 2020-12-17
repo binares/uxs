@@ -1,15 +1,17 @@
 import datetime
 dt = datetime.datetime
 td = datetime.timedelta
+import hashlib
 from base64 import b64decode
 from zlib import decompress, MAX_WBITS
 import zlib
+import uuid
 import json
 import copy
 
 from uxs.base.socket import ExchangeSocket
 
-from fons.crypto import sign
+#from fons.crypto import sign
 from fons.time import ctime_ms
 import fons.log
 logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
@@ -18,137 +20,157 @@ logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
 class bittrex(ExchangeSocket): 
     exchange = 'bittrex'
     url_components = {
-        'ws': 'https://socket.bittrex.com/signalr',
+        'ws': 'https://socket-v3.bittrex.com/signalr',
     }
     auth_defaults = {
-        'takes_input': True,
+        'takes_input': False,
         'each_time': False,
-        'send_separately': False,
-        'set_authenticated': False,
+        'send_separately': True,
+        'set_authenticated': True,
     }
     channel_defaults = {
-        'unsub_option': False,
-        'merge_option': False,
-    }
-    channels = {
-        'account': {
-            'required': [],
-            'is_private': True,
-        },
-        'Authenticate': {
-            'required': ['challenge'],
-            'is_private': True,
-            'auth': {'set_authenticated': True},
-        },
-        'fetch_order_book': {
-            'required': ['symbol'],
-        },
-        'fetch_tickers': {
-            'required': [],
-        },
+        'unsub_option': True,
+        'merge_option': True,
     }
     has = {
         'all_tickers': {
             'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True,
-            'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False, 
-            'change': False, 'percentage': False, 'average': False, 'vwap': True,
-            'baseVolume': True, 'quoteVolume': True},
-        'ticker': False,
+            'high': False, 'low': False, 'open': False, 'close': True, 'previousClose': False, 
+            'change': False, 'percentage': False, 'average': False, 'vwap': False,
+            'baseVolume': False, 'quoteVolume': False},
+        'ticker': True,
         'orderbook': True,
-        'account': {'balance': True, 'order': True, 'fill': False},
-        'fetch_tickers': {'ws': True},
-        'fetch_ticker': True,
-        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
-        'fetch_order_book': {'ws': True},
-        'fetch_trades': {
+        'ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
+        'trades': {
             'amount': True, 'cost': True, 'datetime': True, 'fee': False, 'id': True, 'order': False,
-            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True},
+            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
+        'account': {'balance': True, 'order': True, 'fill': True},
+        'fetch_tickers': True,
+        'fetch_ticker': True,
+        'fetch_ohlcv': True,
+        'fetch_order_book': {'bids': True, 'asks': True, 'datetime': False, 'nonce': True, 'timestamp': False},
+        'fetch_trades': True,
         'fetch_balance': {'free': True, 'used': True, 'total': True},
         'fetch_my_trades': {
+            'symbolRequired': False,
             'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
             'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': True},
         'fetch_order': {
             'amount': True, 'average': True, 'clientOrderId': False, 'cost': True, 'datetime': True, 'fee': True,
-            'filled': True, 'id': True, 'lastTradeTimestamp': True, 'price': True, 'remaining': True, 'side': True,
-            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
+            'filled': True, 'id': True, 'lastTradeTimestamp': True, 'postOnly': True, 'price': True, 'remaining': True,
+            'side': True, 'status': True, 'stopPrice': False, 'symbol': True, 'timeInForce': True, 'timestamp': True,
+            'trades': False, 'type': True,
+        },
         'fetch_open_orders': {'symbolRequired': False},
         'fetch_closed_orders': {'symbolRequired': False},
-        'create_order': {'id': True, 'side': True, 'status': True, 'symbol': True, 'type': True},
+        'create_order': True,
     }
-    has['fetch_tickers'].update(has['all_tickers'])
+    has['ticker'] = has['all_tickers'].copy()
+    has['fetch_tickers'] = has['all_tickers'].copy()
     has['fetch_ticker'] = has['all_tickers'].copy()
+    has['fetch_ohlcv'] = has['ohlcv'].copy()
+    has['fetch_trades'] = has['trades'].copy()
     has['fetch_open_orders'].update(has['fetch_order'])
     has['fetch_closed_orders'].update(has['fetch_order'])
+    has['create_order'] = has['fetch_order'].copy()
+    channels = {
+        'ticker': {'fetch_data_on_sub': False},
+    }
+    channel_ids = {
+        'account': ['balance','order','conditional_order','execution'], # 'deposit'
+        'all_tickers': 'tickers',
+        'ticker': 'ticker_<symbol>',
+        'ohlcv': 'candle_<symbol>_<timeframe>',
+        'orderbook': 'orderbook_<symbol>_<limit>',
+        'trades': 'trade_<symbol>',
+        'market_summaries': 'market_summaries',
+        'market_summary': 'market_summary_<symbol>',
+        'heartbeat': 'heartbeat',
+    }
     connection_defaults = {
         'signalr': True,
-        'hub_name': 'c2',
-        'hub_methods': ['uE','uS','uL','uB','uO'],
+        'hub_name': 'c3',
+        'hub_methods': ['balance','order','conditionalOrder','execution','deposit',
+                        'tickers','ticker','candle','orderBook','trade',
+                        'marketSummaries','marketSummary','heartbeat',
+                        'authenticationExpiring'],
         'rate_limit': (1, 0.12),
-        #'recv_timeout': 10,
     }
     max_subscriptions_per_connection = 95
     subscription_push_rate_limit = 0.12
+    ob = {
+        'default_limit': 25,
+        'limits': [1, 25, 500],
+        'fetch_limits': [1, 25, 500],
+    }
     order = {
         'cancel_automatically': 'if-not-subbed-to-account',
         'update_payout_on_fill': False,
     }
     symbol = {
-        'quote_ids': ['BTC','ETH','USDT','USD'],
+        'quote_ids': ['BTC','ETH','USDT','USD','EUR'],
         'sep': '-',
-        'startswith': 'quote',
+        'startswith': 'base',
+    }
+    trade = {
+        'sort_by': lambda x: (x['timestamp'], x['price'], x['amount']),
     }
     
     
-    def handle(self, response):
-        data = response.data
+    async def handle(self, R):
+        data = R.data
         """:param data: json-decoded data directly from signalr socket"""
-        #print('received: {}'.format(data))
         if not len(data): pass
         
-        elif 'R' in data and type(data['R']) is not bool:
-            # data['I'] seems to be always '0'
-            try: decoded_msg = self._decode_message(data['R'])
-            except zlib.error:
-                self.log('authentication procedure invoke')
-                challenge = data['R']
-                params = {'_': 'Authenticate', 'challenge': challenge}
-                self.send(params)
-            else:
-                if isinstance(decoded_msg,dict) and 'M' in decoded_msg:
-                    self.on_query_exchange_state(decoded_msg)
-                elif isinstance(decoded_msg,dict) and 's' in decoded_msg:
-                    self.on_query_summary_state(decoded_msg)
-                else:
-                    self.notify_unknown(dict(data, R=decoded_msg))
+        # {'R': [{'Success': True, 'ErrorCode': None}], 'I': '1'}
+        # {'R': {'Success': True, 'ErrorCode': None}, 'I': '3'}
+        elif 'R' in data:
+            if isinstance(data['R'], list) and not all(x.get('Success') for x in data['R']) \
+                    or isinstance(data['R'], dict) and not data['R'].get('Success'):
+                self.log_error(data)
         
         # The first response:
-        # {'C': 'd-B1762C83-w,0|q80T,0|q80U,1', 'S': 1, 'M': []}
+        # {'C': 'd-2684AECE-B,0|EX8i,0|EX8j,1', 'S': 1, 'M': []}
         # Afterwards 'S' is missing and 'M' has items in it
+        # 'M': [
+        #   {
+        #     'H': 'C3',
+        #     'M': 'ticker',
+        #     'A': ['q1YqrsxNys9RslJyCnHWDQ12CVHSUcpJLC4JKUpMSQ1KLEkFShlamhuY6hlAAVBBUmYKkpSJnpmZsYWBgZE5UCqxOBshZWSgZwmUMzI1tFSqBQA=']
+        #   }
+        # ]
         elif 'M' in data and isinstance(data['M'], list):
             for item in data['M']:
                 method = item['M']
-                msg = self._decode_message(item['A'][0])
-                if method == 'uE':
-                    self.on_exchange_delta(msg)
-                elif method == 'uS':
-                    self.on_summary_delta(msg)
-                elif method == 'uO':
+                msg = self._decode_message(item['A'][0]) if item['A'] else None
+                #print(msg)
+                if method == 'tickers':
+                    self.on_all_tickers(msg)
+                elif method == 'ticker':
+                    self.on_ticker(msg)
+                elif method == 'orderBook':
+                    self.on_orderbook_delta(msg)
+                elif method == 'candle':
+                    self.on_ohlcv(msg)
+                elif method == 'trade':
+                    self.on_trade(msg)
+                elif method in ['order','conditionalOrder']:
                     self.on_order(msg)
-                elif method == 'uB':
+                elif method == 'execution':
+                    self.on_fill(msg)
+                elif method == 'balance':
                     self.on_balance(msg)
-                elif method == 'uL':
-                    pass
+                elif method == 'authenticationExpiring':
+                    self.log('authentication expiring. re-authenticating')
+                    await self.reauthenticate(R.id)
                 else:
                     self._log('item with unknown method: {}'.format(item), 'ERROR')
                     
         # Is G the description of a subscription? Couldn't decode it with ._decode_message.
-        # {'C': 'd-B1762C83-w,0|q80T,0|q80U,2|Bh,123445', 'G': 'a_long_non_decodable_str', 'M': []}
+        # {'C': 'd-2684AECE-B,0|EX8i,0|EX8j,2|RC,1658',
+        #  'G': 'p+R46GFZcolE3hEunHlD8xmF8C7t39BTGkNlY61rhStzhyyaY6lo/IM1AH1CkcMQGYa91Vi8vC8l7rRVUpNInhEJj/GWJwOMVeW3ATTmygplYsD1U4HjY753rGnxpj4WByPRVw==',
+        #  'M': []}
         elif 'C' in data and 'G' in data and isinstance(data['G'], str):
-            pass
-        
-        # A subscription was activated?
-        # {'R': True, 'I': '1'}
-        elif 'R' in data:
             pass
         
         # {'I': '0', 'E': "There was an error invoking Hub method 'c2.GetAuthContext'."}
@@ -168,268 +190,373 @@ class bittrex(ExchangeSocket):
         return json.loads(deflated_msg.decode())
     
     
-    def on_query_exchange_state(self, r):
-        """{
-            'M': 'BTC-NEO',
-            'N': 597609,
-            'Z': [{'Q': 23.54562619, 'R': 0.00155089}],
-            'S': [{'Q': 227.50512533, 'R': 0.00155742}],
-            'f': [{
-                   'I': 25593666,
-                   'T': 1560696043750,
-                   'Q': 20.0,
-                   'P': 0.00153292,
-                   't': 0.0306584,
-                   'F': 'FILL',
-                   'OT': 'SELL',
-                   'U': 'b0482d8d-3e98-4b72-a0dd-eef262ad053c'
-                }] #100 last fills
+    def on_all_tickers(self, r):
+        """
+        {
+            'sequence': 417697,
+            'deltas': [{'symbol': 'DEP-USDT', 'lastTradeRate': '0.00581000', 'bidRate': '0.00577000', 'askRate': '0.00587000'}, ...]
         }"""
-        #print('on_query_exchange_state r: {}'.format(r))
-        ts = ctime_ms()
-        d = {
-            'symbol': self.convert_symbol(r['M'],0),
-            'bids': [[x['R'],x['Q']] for x in r['Z']],
-            'asks': [[x['R'],x['Q']] for x in r['S']],
-            'timestamp': ts,
-            'datetime': self.api.iso8601(ts),
-            'nonce': r['N'],
+        tickers = [self.parse_ticker(x) for x in r['deltas']]
+        self.update_tickers(tickers, enable_sub='all_tickers')
+    
+    
+    def on_ticker(self, r):
+        """
+        {
+            'symbol': 'BTC-USDT',
+            'lastTradeRate': '20642.38980007',
+            'bidRate': '20642.38980009',
+            'askRate': '20657.90199999'
         }
-        #self.create_orderbooks([d])
-        id = 'fetch_order_book+{}'.format(d['symbol'])
-        #print('id: {}, has_waiter: {}'.format(id,self.has_waiter(id)))
-        if self.tp.has_waiter(id):
-            self.tp.forward_to_waiters(id, d, copy=1)
-        else:
-            # Send only when nonce is larger than previous?
-            self.orderbook_maintainer.send_orderbook(d)
+        """
+        self.update_tickers([self.parse_ticker(r)], enable_sub=True)
     
     
-    def on_exchange_delta(self, e):
-        #TY: 0 = ADD, 1 = REMOVE, 2 = UPDATE
-        """{   
-            'M': 'BTC-ETH',
-            'N': 671830, 
-            'Z': [{'TY': 2, 'R': 0.0287, 'Q': 0.92360582}],
-            'S': [{'TY': 1, 'R': 0.02969634, 'Q': 0.0}, {'TY': 0, 'R': 0.02971151, 'Q': 13.47412842}],
-            'f': [] #fills (see .on_query_exchange_state)
-         }"""
-        d = {
-            'symbol': self.convert_symbol(e['M'],0),
-            'bids': [],
-            'asks': [],
-            'nonce': e['N'],
-        }    
-        for name,key in zip(['bids','asks'],['Z','S']):
-            try: branch_changes = e[key]
-            except KeyError: continue
-            d[name] = [[x['R'],x['Q']] for x in branch_changes]
-        
-        #self.update_orderbooks([d])
-        self.orderbook_maintainer.send_update(d)
+    def parse_ticker(self, ticker):
+        symbol = self.convert_symbol(self.safe_string(ticker, 'symbol'), 0)
+        map = {
+            'bid': 'bidRate',
+            'ask': 'askRate',
+            'last': 'lastTradeRate'
+        }
+        return self.ticker_entry(symbol=symbol, **self.lazy_parse(ticker, [], map), info=ticker)
     
     
-    async def fetch_order_book(self, symbol, limit=None, params={}):
-        if self.is_active():
-            id = 'fetch_order_book+{}'.format(symbol)
-            return await self.send({'_': 'fetch_order_book', 'symbol': symbol}, True, id=id)
-        else:
-            return await super().fetch_order_book(symbol, limit, params)
-    
-    
-    def on_query_summary_state(self, r):
-        """{
-            'N': 52259, 
-            's': [{
-                    'M': 'BTC-LOOM',
-                    'H': 9.16e-06,
-                    'L': 8.52e-06, 
-                    'V': 908237.64060258, 
-                    'l': 8.78e-06, 
-                    'm': 8.00417016, 
-                    'T': 1560708049863, 
-                    'B': 8.77e-06, 
-                    'A': 8.8e-06, 
-                    'G': 166, 
-                    'g': 584, 
-                    'PD': 9.08e-06, 
-                    'x': 1531853661523}]}"""
-        #print('on_query_summary_state r: {}'.format(r))
-        r2 = r.copy()
-        r2['D'] = r2.pop('s')
-        self.on_summary_delta(r2, activate=False)
-        id = 'fetch_tickers'
-        #print('id: {}, has_waiter: {}'.format(id,self.has_waiter(id)))
-        if self.tp.has_waiter(id):
-            self.tp.forward_to_waiters(id, copy.deepcopy(self.tickers))
-        
-        
-    def on_summary_delta(self, e, activate=True):
-        """{
-            'N': 48394, #Nonce
-            'D': [{
-                    'M': 'USDT-BTT', #MarketName
-                    'H': 0.00134847, #High
-                    'L': 0.0012643, #Low
-                    'V': 164893472.74109152, #baseVolume
-                    'l': 0.00133984, #Last
-                    'm': 210474.16031964, #quoteVolume
-                    'T': 1560688717863, #Time
-                    'B': 0.00133425, #Bid
-                    'A': 0.00133977, #Ask
-                    'G': 110, #OpenBuyOrders
-                    'g': 181, #OpenSellOrders
-                    'PD': 0.00127012, #PrevDay
-                    'x': 1549664941827 #Created
+    def on_orderbook_delta(self, r):
+        """
+         {
+             'marketSymbol': 'BTC-USDT',
+             'depth': 25,
+             'sequence': 1051714,
+             'bidDeltas': [
+                 {
+                     'quantity': '0.00208725',
+                     'rate': '20801.80935212'
                 },
-            ]
-         }"""
-        for x in e['D']:
-            self.update_tickers([{
-                'symbol': self.convert_symbol(x['M'],0),
-                'timestamp': x['T'],
-                'datetime': self.api.iso8601(x['T']),
-                'high':x['H'],
-                'low': x['L'],
-                'bid': x['B'],
-                'bidVolume': None,
-                'ask': x['A'],
-                'askVolume': None,
-                'vwap': x['m'] / x['V'] if None not in (x['m'],x['V']) and x['V'] > 0 else None,
-                'open': None,
-                'close': x['l'],
-                'last': x['l'], 
-                'previousClose': None,
-                'change': None, 
-                'percentage': None, 
-                'average': None,
-                'baseVolume': x['V'],
-                'quoteVolume': x['m'],
-                'info': x,
-                }]
-            )
-        if activate:
-            self.change_subscription_state({'_': 'all_tickers'}, 1)
-            
+                {    
+                    'quantity': '0',
+                    'rate': '20704.39030061'
+                }
+            ], 
+            'askDeltas': []
+        }
+        """
+        symbol = self.convert_symbol(r['marketSymbol'], 0)
+        ob = dict(self.api.parse_order_book(r, None, 'bidDeltas', 'askDeltas', 'rate', 'quantity'),
+                  symbol=symbol,
+                  nonce=self.safe_integer(r, 'sequence'))
+        self.orderbook_maintainer.send_update(ob)
     
-    async def fetch_tickers(self, symbols=None, params={}):
-        if self.is_active():
-            return await self.send({'_': 'fetch_tickers'}, True, id='fetch_tickers')
-        else:
-            return await super().fetch_tickers(symbols, params)
-            
-            
-    def on_order(self, e):
-        tlogger.debug(e)
-        """{
-            'w': '123456ab-7890-cd12-345e-f1234567890a', #AccountUuid
-            'N': 2, #Nonce
-            'TY': 0, #Type
-            'o': {
-                'U': '123456ab-7890-cd12-345e-f1234567890a', #Uuid (also account?)
-                'I': 1234567890, #Id
-                'OU': 'abcdef12-3456-7890-abcd-ef1234567890', #OrderUuid
-                'E': 'BTC-TUSD', #Exchange
-                'OT': 'LIMIT_SELL', #OrderType
-                'Q': 30.0, #Quantity
-                'q': 30.0, #QuantityRemaining
-                'X': 0.000147, #Limit
-                'n': 0.0, #CommissionPaid (precision: 8, in quote)
-                'P': 0.0, #Price (precision: 8)
-                'PU': 0.0, #PricePerUnit
-                'Y': 1553847954906, #Opened (date)
-                'C': None, #Closed (date)
-                'i': True, #IsOpen
-                'CI': False, #CancelInitiated
-                'K': False, #ImmediateOrCancel
-                'k': False, #IsConditional
-                'J': None, #Condition (string)
-                'j': None, #ConditionTarget
-                'u': 1553847954906, #Updated (ms)
-                'PassthroughUuid': None,
-            }
+    
+    def on_ohlcv(self, r):
+        """
+        {
+            'sequence': 27638,
+            'marketSymbol': 'BTC-USDT',
+            'interval': 'MINUTE_1',
+            'delta': {
+                'startsAt': '2020-12-16T18:47:00Z',
+                'open': '20664.57359997',
+                'high': '20664.57359997',
+                'low': '20655.45000016',
+                'close': '20655.45000041',
+                'volume': '0.22724657',
+                'quoteVolume': '4693.88456846'
+            },
+            'candleType': 'TRADE'
+        }
+        """
+        symbol = self.convert_symbol(r['marketSymbol'], 0)
+        timeframe = self.convert_timeframe(r['interval'], 0)
+        ohlcv = self.parse_ohlcv(r['delta'])
+        self.update_ohlcv(
+            [{'symbol': symbol, 'timeframe': timeframe, 'ohlcv': [ohlcv]}], enable_sub=True)
+    
+    
+    def parse_ohlcv(self, ohlcv):
+        return [
+            self.parse8601(self.safe_string(ohlcv, 'startsAt')),
+            self.safe_float(ohlcv, 'open'),
+            self.safe_float(ohlcv, 'high'),
+            self.safe_float(ohlcv, 'low'),
+            self.safe_float(ohlcv, 'close'),
+            self.safe_float(ohlcv, 'volume'),
+        ]
+    
+    
+    def on_trade(self, r):
+        """
+        {
+            'deltas': [
+                {
+                    ...
+                },
+            ],
+            'sequence': 28869,
+            'marketSymbol': 'BTC-USDT'
+        }
+        """
+        symbol = self.convert_symbol(r['marketSymbol'], 0)
+        trades = [self.parse_trade(x, symbol) for x in r['deltas']]
+        self.update_trades([{'symbol': symbol, 'trades': trades}], enable_sub=True)
+    
+    
+    def parse_trade(self, trade, symbol=None):
+        """
+        {
+            'id': 'dd72aa91-a78a-446e-9f2a-4d0545adce50',
+            'marketSymbol': 'USDT-BTC',
+            'executedAt': '2020-12-13T21:01:08.1Z',
+            'quantity': '0.00050000',
+            'rate': '22812.13799998',
+            'orderId': '3d73c265-9868-4b1e-89bd-905ad79b7c1b',
+            'commission': '0.02281213',
+            'isTaker': True
+        }
+        """
+        side = self.safe_string_lower(trade, 'takerSide')
+        timestamp = self.parse8601(self.safe_string(trade, 'executedAt'))
+        amount = self.safe_float(trade, 'quantity')
+        price = self.safe_float(trade, 'rate')
+        cost = None
+        if amount is not None and price is not None:
+            cost = amount * price
+        return self.trade_entry(
+            id=self.safe_string(trade, 'id'),
+            symbol=symbol,
+            timestamp=timestamp,
+            side=side,
+            amount=amount,
+            price=price,
+            cost=cost,
+            info=trade,
+        )
+    
+    
+    def on_order(self, r):
+        """
+        {
+            'accountId': 'b753c7c7-021a-493d-80cf-b1311019d890',
+            'sequence': 18,
+            'delta': {...},
         }"""
-        #Note: when conditional order is placed, the balances aren't being reserved until it is triggered.
+        # Note: when conditional order is placed, the balances aren't being reserved until it is triggered.
         # Nor does the socket send the order until triggered (and then they will be displayed as LIMIT_ORDER).
-        o = e['o']
-        symbol = self.convert_symbol(o['E'],0)
-        id = o['OU']
-        side = 'buy' if 'buy' in o['OT'].lower() else 'sell'
-        amount = o['Q']
-        remaining = o['q']
-        price = o['X']
-        timestamp = o['Y']
-        filled = amount-remaining
-        #precision = self.api.markets[symbol]['precision']['amount']
-        payout = (filled if side == 'buy' else 
-                  #(round down is precise operation, bittrex server doesn't round up)
-                  #fons.math.round.round(self.api.baseToQuote(filled,o['PU']) - o['n'], 8, 'down'))
-                  o['P'] - o['n'])
-                
-                  
-        is_open = o['i']
-        if not is_open:
+        order = self.parse_order(r['delta'])
+        self.add_order_from_dict(order, enable_sub=True)
+    
+    
+    def parse_order(self, order):
+        """
+        CONDITIONAL (TAKE-PROFIT)
+        {
+            'id': '0c8560c1-51ba-4a74-986f-5ff297c4c1fc',
+            'marketSymbol': 'BTC-USDT',
+            'operand': 'GTE',
+            'triggerPrice': '22500.00000000',
+            'orderToCreate': {
+                'marketSymbol': 'BTC-USDT',
+                'direction': 'SELL',
+                'type': 'LIMIT',
+                'quantity': '0.00087310',
+                'limit': '22000.00000000',
+                'timeInForce': 'GOOD_TIL_CANCELLED'
+                // OTHER FIELDS
+                "ceiling": "number (double)",
+                "clientOrderId": "string (uuid)",
+                "useAwards": "boolean"
+            }
+            // OTHER FIELDS
+            "trailingStopPercent": "number (double)",
+            "createdOrderId": "string (uuid)",         // unique ID of the order that was created by this conditional, if there is one
+            "orderToCancel": {                         // order or conditional order to cancel if this conditional order triggers Note that this relationship is reciprocal.
+              "type": "string",
+              "id": "string (uuid)"
+            },
+            "clientConditionalOrderId": "string (uuid)",
+            "status": "string",                        //  OPEN, COMPLETED, CANCELLED, FAILED
+            "orderCreationErrorCode": "string",
+            "createdAt": "string (date-time)",
+            "updatedAt": "string (date-time)",
+            "closedAt": "string (date-time)"
+        }
+        LIMIT
+        {
+            'id': '8bbb3e5a-6b97-4e3f-bd99-3eaaa6d15edd',
+            'marketSymbol': 'BTC-USDT',
+            'direction': 'BUY',                        // BUY, SELL
+            'type': 'LIMIT',
+            'quantity': '0.00050000',
+            'limit': '18500.00000000',
+            'timeInForce': 'GOOD_TIL_CANCELLED',
+            'fillQuantity': '0.00000000',
+            'commission': '0.00000000',
+            'proceeds': '0.00000000',
+            'status': 'OPEN',                         // OPEN, CLOSED
+            'createdAt': '2020-12-13T20:11:15.74Z',
+            'updatedAt': '2020-12-13T20:11:15.74Z'
+            //
+            "clientOrderId": "string (uuid)",         // client-provided id or id of the conditional order that created this order
+        }
+        }"""
+        symbol = self.convert_symbol(order['marketSymbol'], 0)
+        id = self.safe_string(order, 'id')
+        clientOrderId = self.safe_string_2(order, 'clientOrderId', 'clientConditionalOrderId')
+        stop = self.safe_float(order, 'triggerPrice')
+        info = order
+        if 'orderToCreate' in order:
+            order = order['orderToCreate']
+        type = self.api._parse_order_type(self.safe_string(order, 'type'))
+        side = self.safe_string_lower(order, 'direction')
+        amount = self.safe_float(order, 'quantity')
+        filled = self.safe_float(order, 'fillQuantity')
+        price = self.safe_float(order, 'limit')
+        timestamp = self.parse8601(self.safe_string(order, 'createdAt'))
+        remaining = None
+        if amount is not None and filled is not None:
+            remaining = amount - filled
+        quote = symbol.split('/')[1]
+        fee_cost = self.safe_float(order, 'commission')
+        proceeds = self.safe_float(order, 'proceeds')
+        fee = None
+        if fee_cost is not None:
+            fee = {
+                'cost': fee_cost,
+                'currency': quote,
+            }
+        payout = None
+        average = None
+        if proceeds is not None:
+            if fee_cost is not None:
+                payout = filled if side == 'buy' else proceeds - fee_cost
+            if filled is not None and filled > 0:
+                average = proceeds / filled
+        status = self.safe_string_lower(order, 'status')
+        if status is not None and status!='open':
             remaining = 0.0
-        #print('on_order:',id,symbol,side,price,amount,timestamp,remaining,filled,payout)
-        # If already exists then it will update it
-        self.add_order(id=id, symbol=symbol, side=side, price=price, amount=amount,
-                       timestamp=timestamp, remaining=remaining, filled=filled,
-                       payout=payout, params={'info': o}, enable_sub=True)
-        
-        
-    def on_balance(self, e):
-        """{
-            'N': 1, #Nonce
-            'd': {
-                'U': '123456ab-7890-cd12-345e-f1234567890a', #Uuid
-                'W': 123456, #AccountId
-                'c': 'TUSD', #Currency
-                'b': 46.12345678, #Balance
-                'a': 16.12345678, #Available
-                'z': 0.0, #Pending
-                'p': '0x1234567890abcdef1234567890abcdef12345678', #CryptoAddress
-                'r': False, #Requested
-                'u': 1553847954906, #Updated (ms)
-                'h': None, #Autosell
+        return {
+            'id': id,
+            'symbol': symbol,
+            'type': type,
+            'side': side,
+            'price': price,
+            'stop': stop,
+            'amount': amount,
+            'timestamp': timestamp,
+            'remaining': remaining,
+            'filled': filled,
+            'cost': proceeds,
+            'payout': payout,
+            'fee': fee,
+            'average': average,
+            'clientOrderId': clientOrderId,
+            'info': info,
+        }
+    
+    
+    def on_fill(self, r):
+        """
+        {
+            'accountId': 'b753c7c7-021a-493d-80cf-b1311019d890',
+            'sequence': 0,
+            'deltas': [
+                {
+                    ...
+                }
+            ]
+        }
+        """
+        for fill in r['deltas']:
+            parsed = self.parse_fill(fill)
+            self.add_fill_from_dict(parsed, enable_sub=True)
+    
+    
+    def parse_fill(self, fill):
+        """
+        {
+            'id': 'dd72aa91-a78a-446e-9f2a-4d0545adce50',
+            'marketSymbol': 'USDT-BTC',                        // This is backwards
+            'executedAt': '2020-12-13T21:01:08.1Z',
+            'quantity': '0.00050000',
+            'rate': '20912.1548259',
+            'orderId': '3d73c265-9868-4b1e-89bd-905ad79b7c1b',
+            'commission': '0.02091215',
+            'isTaker': True
+        }
+        """
+        map = {
+            'symbol': 'marketSymbol',
+            'timestamp': 'executedAt',
+            'amount': 'quantity',
+            'price': 'rate',
+            'order': 'orderId',
+            'cost': 'commission',
+            'takerOrMaker': 'isTaker',
+        }
+        apply = {
+            'symbol': lambda x: self.convert_symbol('-'.join(x.split('-')[::-1]), 0),
+            'timestamp': self.parse8601,
+            'takerOrMaker': lambda x: None if x is None else ['maker','taker'][x],
+        }
+        return self.trade_entry(**self.lazy_parse(fill, ['id'], map, apply), info=fill)
+    
+    
+    def on_balance(self, r):
+        """
+        {
+            'accountId': 'b753c7c7-021a-493d-80cf-b1311019d890',
+            'sequence': 25, 
+            'delta': {
+                'currencySymbol': 'USDT',
+                'total': '67.42586295',
+                'available': '22.68543127',
+                'updatedAt': '2020-12-13T19:41:02.11Z'
             }
         }"""
-        d = e['d']
-        cy = self.convert_cy(d['c'],0)
-        free = d['a']
-        used = d['b']- free
-        self.update_balances([{'cy': cy, 'free': free, 'used': used, 'info': d}], enable_sub=True)
+        d = r['delta']
+        cy = self.convert_cy(d['currencySymbol'], 0)
+        free = float(d['available'])
+        total = float(d['total'])
+        self.update_balances([{'cy': cy, 'free': free, 'total': total, 'info': d}], enable_sub=True)
     
     
     def encode(self, rq, sub=None):
         channel = rq.channel
-        data = []
+        p = rq.params
+        symbol = p.get('symbol')
+        timeframe = p.get('timeframe')
+        limit = p.get('limit')
         
-        if channel in ('account', 'own_market'):
-            method = 'GetAuthContext'
-        elif channel in ('orderbook','fetch_order_book'): #'market'?
-            #retrieve full ob: 'QueryExchangeState'
-            #deltas:
-            method = {'orderbook': 'SubscribeToExchangeDeltas',
-                      'fetch_order_book': 'queryExchangeState'}[channel]
-            symbol = self.convert_symbol(rq.params['symbol'], 1)
-            data.append(symbol)
-        elif channel in ('all_tickers', 'fetch_tickers'):
-            method = {'all_tickers': 'SubscribeToSummaryDeltas',
-                      'fetch_tickers': 'querySummaryState'}[channel]
-        else:
-            #'Authenticate'
-            method = channel
-            data += [y for x,y in rq.params.items() if x!='_']
+        method = 'Subscribe' if sub else 'UnSubscribe'
+        args = self.fill_in_params(self.channel_ids[channel], symbol, timeframe)
         
-        return ([method] + data, None)
-
-
+        if channel == 'orderbook':
+            if limit is None:
+                limit = self.ob['default_limit']
+            elif limit > max(self.ob['limits']):
+                limit = max(self.ob['limits'])
+            else:
+                limit = self.ob_maintainer.resolve_limit(limit)
+            _symbols = [symbol] if isinstance(symbol, str) else symbol
+            for symbol in _symbols:
+                self.ob_maintainer.set_limit(symbol, limit)
+            args = self.fill_in(args, '<limit>', limit)
+        
+        data = [method, args]
+        
+        return (data, None)
+    
+    
     def sign(self, out=[]):
-        out = out[:]
-        if not len(out): pass
-        elif out[0] == 'GetAuthContext':
-            out += [self.apiKey]
-        elif out[0] == 'Authenticate':
-            sig = sign(self.secret, out[1], 'sha512')
-            out = ['Authenticate', self.apiKey, sig]
+        timestamp = str(self.api.milliseconds())
+        random_content = str(uuid.uuid4())
+        content = timestamp + random_content
+        #signed_content = sign(self.secret, content, 'sha512')
+        signed_content = self.api.hmac(self.api.encode(content), self.api.encode(self.secret), hashlib.sha512)
+        out = ['Authenticate', self.apiKey, timestamp, random_content, signed_content]
         return out
+    
+    
+    async def reauthenticate(self, conn_id):
+        cnx = self.cm.connections[conn_id]
+        await cnx.send(self.sign())
