@@ -6,6 +6,7 @@ import json
 import yaml
 import asyncio
 from copy import deepcopy
+import ccxt.async_support
 import ccxt
 import time
 import datetime
@@ -30,6 +31,8 @@ fnInf.__new__.__defaults__ = (None,)*len(fnInf._fields)
 prInf = namedtuple('prInf','profile exchange type start end file data')
 prInf.__new__.__defaults__ = (None,)*len(prInf._fields)
 
+
+_PRIVATE_METHODS = ('balances','balances-account',)
 
 _METHODS = {
     'markets': ('load_markets',tuple(),{'reload':True},[]),
@@ -112,7 +115,24 @@ def _exchange_and_type_to_str(exchange, type):
         exchange = get_name(exchange0)
     
     return exchange, type
-    
+
+
+def _get_appropriate_api(exchange, type, _async=True, verbose=False):
+    if isinstance(exchange, ccxt.Exchange) and exchange._auth_info.get('info'):
+        is_async = isinstance(exchange, ccxt.async_support.Exchange)
+        if is_async == bool(_async):
+            return exchange
+    exchange0 = exchange
+    exchange, _type = _exchange_and_type_to_str(exchange, type)
+    if _type in _PRIVATE_METHODS:
+        api = get_exchange({'xc': exchange0, 'async': _async, 'id': 'INFO'})
+    else:
+        config = {'exchange': exchange, 'async': _async, 'info': False, 'trade': False}
+        if verbose:
+            logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
+        api = get_exchange(config)
+    return api
+
 
 def _fetch_exchange_specific(exchange, type, param, param_xc, **kw):
     exchange, type = _exchange_and_type_to_str(exchange, type)
@@ -146,9 +166,9 @@ async def load_markets(api, limit=None):
     api.currencies = {}
     markets = currencies = None
     try:
-        #this will call load_markets, which will set both markets and currencies
-        m0 = (await fetch(exchange,'markets',limit,strip=False))[0]
-        #unless it loaded from cache, in which case they will have to be set manually
+        # this will call load_markets, which will set both markets and currencies
+        m0 = (await fetch(api,'markets',limit,strip=False))[0]
+        # unless it loaded from cache, in which case they will have to be set manually
         if not api.markets:
             l1 = limit
             l2 = _resolve_limit(exchange, 'markets', m0.date)
@@ -185,7 +205,7 @@ def sn_load_markets(api, limit=None):
     markets = currencies = None
     try:
         #this will call load_markets, which will set both markets and currencies
-        m0 = sn_fetch(exchange,'markets',limit,strip=False)[0]
+        m0 = sn_fetch(api,'markets',limit,strip=False)[0]
         #unless it loaded from cache, in which case they will have to be set manually
         if not api.markets:
             l1 = limit
@@ -418,14 +438,7 @@ async def update(exchange, type, args=None, kwargs=None, *,
     if args is None: args = tuple()
     if kwargs is None: kwargs = {}
     
-    try: api = get_exchange({'xc': exchange0, 'async': True, 'id': 'INFO'})
-    except ValueError as e:
-        if type in ('balances','balances-account'):
-            raise e
-        config = {'exchange': exchange, 'async': True, 'info': False, 'trade': False}
-        if verbose:
-            logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
-        api = get_exchange(config)
+    api = _get_appropriate_api(exchange0, type, True, verbose)
     
     if blocked != 'ignore':
         wait_for = _is_blocked(exchange, type)
@@ -524,14 +537,7 @@ def sn_update(exchange, type, args=None, kwargs=None, *,
     if args is None: args = tuple()
     if kwargs is None: kwargs = {}
     
-    try: api = get_exchange({'xc': exchange0, 'async': False, 'id': 'INFO'})
-    except ValueError as e:
-        if type in ('balances','balances-account'):
-            raise e
-        config = {'exchange': exchange, 'async': False, 'info': False, 'trade': False}
-        if verbose:
-            logger.debug('Trying to init ccxt-exchange with lowest auth: {}'.format(config))
-        api = get_exchange(config)
+    api = _get_appropriate_api(exchange0, type, False, verbose)
     
     if blocked != 'ignore': 
         wait_for = _is_blocked(exchange, type)

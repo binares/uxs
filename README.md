@@ -12,7 +12,7 @@ Supported exchanges:
 | binance      |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
 | binancefu    |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
 | bitmex       |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
-| bittrex      |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  p   |          |
+| bittrex      |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  +   |          |
 | bw           |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
 | coinbene     |   +    |      +      |     +     |    |   +   |   +    |    p    |   p   |      |          |
 | coindcx      |   p    |      p      |     +     |    |   p   |   +    |    +    |   p   |  +   |          |

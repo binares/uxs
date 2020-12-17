@@ -47,8 +47,8 @@ class ExchangeSocket(WSClient):
     # If True, .setup_test_env(config) will be called on init
     test = False
     
-    api = None # ccxt.Exchange instance
-    snapi = None # ccxt.async_support.Exchange instance
+    api = None # ccxt.async_support.Exchange instance
+    snapi = None # ccxt.Exchange instance
     pro = None # ccxtpro.Exchange instance (if ccxtpro installed and present in its library)
     use_pro = False # TODO
     
@@ -77,7 +77,7 @@ class ExchangeSocket(WSClient):
         'on_creation': 'm$sn_load_markets',
     }
     # If 'is_private' is set to True, .sign() is called on the specific output to server
-    # if 'ubsub' is set to False, .remove_subscription raises ExchangeSocketError on that channel
+    # if 'ubsub_option' is set to False, .remove_subscription raises ExchangeSocketError on that channel
     channels = {
         # Subscriptions
         'account': {
