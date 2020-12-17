@@ -30,7 +30,7 @@ setup(
        'python_dateutil>=2.1',
        'pandas>=0.21',
        'PyYAML>=3.10',
-       'fons>=0.2.1',
+       'fons>=0.3.0',
        'wsclient>=0.3.0',
    ],
 )

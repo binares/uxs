@@ -384,7 +384,15 @@ class ExchangeSocket(WSClient):
          ['fetchMyTrades','fetch_my_trades'],
          ['createOrder','create_order'],
          ['editOrder','edit_order'],
-         ['cancelOrder','cancel_order'],]
+         ['cancelOrder','cancel_order'],] + \
+         [[_, 'api.{}'.format(_)] for _ in
+          ['iso8601', 'parse8601', 'safe_timestamp', 'safe_timestamp_2',
+           'safe_string', 'safe_string_2', 'safe_string_lower',
+           'safe_string_lower_2', 'safe_string_upper', 'safe_string_upper_2', 
+           'safe_integer', 'safe_integer_2', 'safe_integer_product', 'safe_integer_product_2', 
+           'safe_float', 'safe_float_2', 'safe_value', 'safe_value_2', 'safe_either',
+           'ticker_entry', 'ob_entry', 'trade_entry', 'ohlcv_entry', 'order_entry',
+           'balance_entry', 'position_entry', 'lazy_parse']]
     
     __extend_attrs__ = [
         'fetch_limits',
