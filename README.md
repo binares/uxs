@@ -53,7 +53,7 @@ asyncio.get_event_loop().run_forever()
 
 All exchange classes inherit from `uxs.ExchangeSocket`. Note that `uxs.ExchangeSocket` itself *isn't* a subclass of `ccxt.Exchange`, i.e. `uxs.binance` **!**=~ `ccxt.async_support.binance`. Its corresponding (asynchronous) ccxt Exchange instance is accessible under `.api`: `uxs.binance.api` =~ `ccxt.async_support.binance`. The `.api` object's class is a wrapped one through, with some extra attributes added for caching data, rounding up/down, calculating payout and altering the markets data (e.g. for personalized fees).
 
-`ExchangeSocket` does borrow *some* `ccxt.async_support.Exchange` methods: `create_order`, `edit_order`, `cancel_order` will normally evoke the same method of ccxt class, unless the exchange supports socket trading (hitbtc). And `fetch_ticker`, `fetch_tickers`, `fetch_order_book`, `fetch_ohlcv`, `fetch_trades`, `fetch_balance`, `fetch_open_orders`, which may in some cases be evoked through socket (bittrex).
+`ExchangeSocket` does borrow *some* `ccxt.async_support.Exchange` methods: `create_order`, `edit_order`, `cancel_order` will normally evoke the same method of ccxt class, unless the exchange supports socket trading (hitbtc). And `fetch_ticker`, `fetch_tickers`, `fetch_order_book`, `fetch_ohlcv`, `fetch_trades`, `fetch_balance`, `fetch_open_orders`, which may in some cases be evoked through socket.
 
 The included examples show how to wait for updates, use callbacks, trade, cache fetch results and store tokens in a file / password encrypted file.
 
@@ -96,9 +96,9 @@ xs.unsubscribe_to({'_': channel, **params})
 
 # Subscription object
 
-s = xs.get_subscription({'_': channel, **params})
+s = xs.get_subscription({'_': channel, **params}) # for example {'_': 'orderbook', 'symbol': 'BTC/USDT'}
 # or
-s = xs.get_subscription((channel, *params))
+s = xs.get_subscription((channel, *params)) # for example ('orderbook', 'BTC/USDT')
 
 s.state # 0=inactive, 1=active
 
@@ -137,14 +137,22 @@ An order also contains 'payout' keyword, which is the current received amount in
 
 The structures are updated on spot. Bids/asks are inserted directly into the existing list, dict values are updated but the dict objects' id never changes. That includes all sub-level dicts (orders, fills, ...), and even the 'info' dicts (but not the other dicts like 'fee': {'cost': .. , 'currency': ..}). So for any time spanning operation (await create_order()), or if you're accessing the data from another thread, there is a real possibility that the dict has been updated in the meanwhile. To ensure that you'll still have access to the old values, make a (deep)copy of the structure before. Also avoid looping over a structure while for example creating an order (in the loop), as the dict/list size might change, and python throws an error (in dict case).
 
+```
+# Do NOT do this:
+for o in xs.open_orders.values():
+	await xs.cancel_order(o['id'], o['symbol'])
+
+# Instead:
+for o in list(xs.open_orders.values()):
+	await xs.cancel_order(o['id'], o['symbol'])
+```
+
 Note that once a subscription feed is lost/unsubbed, the associated *real-time* data is automatically deleted. This it to prevent the user using outdated data, and by default includes these channels: *all_tickers*, *ticker*, *orderbook*. E.g. once ('orderbook', 'ETH/BTC') is lost, `xs.orderbooks['ETH/BTC']` is deleted. Account relevant data is not deleted, as you might want to cancel the orders / close the positions.
 
 To change it initiate an exchange like this:
 ```
-# all channels
-uxs.binance({'channel_defaults': {'delete_data_on_unsub': False}})`
 # specific channel
-uxs.binance({'channels': {'account': {'delete_data_on_unsub': True}}})
+uxs.binance({'channels': {'orderbook': {'delete_data_on_unsub': False}}})
 ```
 
 ## Wait on stream event
