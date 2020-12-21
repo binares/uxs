@@ -13,6 +13,10 @@ class southxchange(ExchangeSocket):
             'lower': { 'symbol': False },
         }
     }
+    connection_defaults = {
+        'rate_limit': (1, 0.12),
+    }
+    max_subscriptions_per_connection = 45
     has = {
         'orderbook': True,
         'trades': {
