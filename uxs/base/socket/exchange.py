@@ -513,6 +513,7 @@ class ExchangeSocket(WSClient):
         self._last_fetches = defaultdict(float)
         self._last_markets_loaded_ts = 0
         self._cancel_scheduled = set()
+        self._futures = {}
     
     
     def _init_events(self):
@@ -740,7 +741,10 @@ class ExchangeSocket(WSClient):
         # (e.g. when a subscription is created the first time),
         # which would result in double fetch
         self.sn_load_markets()
-        asyncio.ensure_future(self.poll_loop())
+        for method in ['poll_loop', 'fetch_data_loop']:
+            f = self._futures.get(method)
+            if f is None or f.done():
+                self._futures[method] = asyncio.ensure_future(getattr(self, method)())
     
     
     def notify_unknown(self, r, max_chars=500, logger=logger2):
@@ -1845,6 +1849,16 @@ class ExchangeSocket(WSClient):
             symbol = s.id_tuple[1]
             maintainer = getattr(self, s.channel+'_maintainer')
             maintainer.is_synced[symbol] = False
+    
+    
+    async def fetch_data_loop(self):
+        """
+        Some subscriptions don't receive immediate update, especially own_market 
+        (user creates no new orders / fills) and illiquid markets feeds.
+        Instead fetch the data after X seconds if no update has been received."""
+        def get_non_emulated_subs():
+            return [s for s in self.subscriptions if not self.has_got(s.channel, 'emulated') or
+                    not self._is_poll(self.has[s.channel]['emulated'])]
     
     
     @staticmethod

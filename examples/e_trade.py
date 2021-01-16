@@ -18,24 +18,26 @@ async def main():
     xs.subscribe_to_account()
     xs.start()
 
-    my_initial_btc_balance = xs.balances['BTC/USDT']['total']
+    my_initial_btc_balance = xs.balances['BTC']['total']
     
     while True:
         await xs.wait_on('orderbook','BTC/USDT')
-        if do_i_wanna_place_the_order():        
+        # Wait till BTC/USDT price has fallen below 7210, then place the limit order
+        if do_i_wanna_place_the_order():
             r = await xs.create_order('BTC/USDT', 'limit', 'buy', 0.001, 7200)
             break
     
     # Wait until the order is filled
+    # (technically it could also be canceled, remaining=0 just signifies that the order is closed)
     while xs.orders[r['id']]['remaining'] > 0:
         await xs.wait_on('order',r['id'])
     
-    print('Order filled')
+    print('Order filled') 
     
     # Wait until the BTC balance has been accounted for
     while True:
         await xs.wait_on('balance','BTC')
-        new_btc_balance = xs.balances['BTC/USDT']['total']
+        new_btc_balance = xs.balances['BTC']['total']
         delta = new_btc_balance - my_initial_btc_balance
         if delta >= 0.001:
             print('YEAY! I have received {} BTC!'.format(delta))

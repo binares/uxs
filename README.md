@@ -32,7 +32,7 @@ Note that there aren't separate subscription channels for *balance*, *order*, *f
 *w* - emulated via streaming (l3 -> orderbook, l3 -> trades)\
 *o* - must be subscribed to `own_market`
 
-Test environments are currently offered for: BinanceFu, BitMEX, KrakenFu and Kucoin (Kraken also offers some sort of non-sandboxed test env). For using them add `{'test': True}` to the config, and make sure you have created a sandbox account.
+Test environments are currently offered for: binancefu, bitmex, krakenfu and kucoin (kraken also offers some sort of non-sandboxed test env). For using them add `{'test': True}` to the config, and make sure you have created a sandbox account.
 
 Simple usage:
 
@@ -53,7 +53,7 @@ asyncio.get_event_loop().run_forever()
 
 All exchange classes inherit from `uxs.ExchangeSocket`. Note that `uxs.ExchangeSocket` itself *isn't* a subclass of `ccxt.Exchange`, i.e. `uxs.binance` **!**=~ `ccxt.async_support.binance`. Its corresponding (asynchronous) ccxt Exchange instance is accessible under `.api`: `uxs.binance.api` =~ `ccxt.async_support.binance`. The `.api` object's class is a wrapped one through, with some extra attributes added for caching data, rounding up/down, calculating payout and altering the markets data (e.g. for personalized fees).
 
-`ExchangeSocket` does borrow *some* `ccxt.async_support.Exchange` methods: `create_order`, `edit_order`, `cancel_order` will normally evoke the same method of ccxt class, unless the exchange supports socket trading (hitbtc). And `fetch_ticker`, `fetch_tickers`, `fetch_order_book`, `fetch_ohlcv`, `fetch_trades`, `fetch_balance`, `fetch_open_orders`, which may in some cases be evoked through socket.
+`ExchangeSocket` does borrow *some* `ccxt.async_support.Exchange` methods: `create_order`, `edit_order`, `cancel_order` will normally evoke the same method of ccxt class, unless the exchange supports websocket trading (hitbtc). And `fetch_ticker`, `fetch_tickers`, `fetch_order_book`, `fetch_ohlcv`, `fetch_trades`, `fetch_balance`, `fetch_order`, `fetch_orders`, `fetch_open_orders`, `fetch_closed_orders`, which may in some cases be evoked through websocket.
 
 The included examples show how to wait for updates, use callbacks, trade, cache fetch results and store tokens in a file / password encrypted file.
 
@@ -140,11 +140,11 @@ The structures are updated on spot. Bids/asks are inserted directly into the exi
 ```
 # Do NOT do this:
 for o in xs.open_orders.values():
-	await xs.cancel_order(o['id'], o['symbol'])
+    await xs.cancel_order(o['id'], o['symbol'])
 
 # Instead:
 for o in list(xs.open_orders.values()):
-	await xs.cancel_order(o['id'], o['symbol'])
+    await xs.cancel_order(o['id'], o['symbol'])
 ```
 
 Note that once a subscription feed is lost/unsubbed, the associated *real-time* data is automatically deleted. This it to prevent the user using outdated data, and by default includes these channels: *all_tickers*, *ticker*, *orderbook*. E.g. once ('orderbook', 'ETH/BTC') is lost, `xs.orderbooks['ETH/BTC']` is deleted. Account relevant data is not deleted, as you might want to cancel the orders / close the positions.
@@ -175,7 +175,13 @@ xs.create_order automatically rounds the price down for buy orders, and up for s
 
 ## Logging
 
-Initialize with `verbose` value 0.5 (create/edit/cancel order), 1 (0.5 + connection, subscription, send, fetch/polling events), 2 (0.5 + 1 + ping + some inner mechanisms) or 3 (0.5 + 1 + 2 + recv events) depending on how detailed log you want. Unexpected errors (not connectivity related) are logged in any case.
+Initialize with `verbose` value
+- 0.5 - create/edit/cancel order
+- 1 - connection, subscription, send, fetch/polling events + above
+- 2 - ping + some inner mechanisms + above
+- 3 - recv events + above
+
+depending on how detailed log you want. Unexpected errors (not connectivity related) are logged in any case.
 
 ```
 uxs.binance({'verbose': 1})
