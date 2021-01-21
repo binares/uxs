@@ -73,6 +73,7 @@ class Desk:
         self.arb_enabled = {'long': False, 'short': False}
         self.arb_diffs = defaultdict(lambda: dict.fromkeys(['long','short'], (None, False)))
         self.amount_ranges = defaultdict(lambda: dict.fromkeys(['min','max'], (None, None)))
+        self.amount_multipliers = defaultdict(lambda: 1)
         self.order_deviation = '0.2%'
         # In minutes
         self.automate_value = {'min': 0, 'max': 5}
@@ -392,10 +393,14 @@ class Gui:
         arb_trader_frame = tk.Frame(root)
         create_order_frame =  tk.Frame(root)
         amount_frame = tk.Frame(root)
+        amount_multipier_frame = tk.Frame(root)
         automate_frame = tk.Frame(root)
-        left_to_right = ['long','short','enable_long_arb','long_arb_diff',
-                         'enable_short_arb','short_arb_diff',
-                         'automate','automate_value','amount_min','amount_max',]
+        left_to_right = ['long', 'short',
+                         'enable_long_arb', 'long_arb_diff',
+                         'enable_short_arb', 'short_arb_diff',
+                         'amount_2x', 'amount_3x', 'amount_4x',
+                         'amount_min', 'amount_max',
+                         'automate', 'automate_value',]
         sides = {x: {'side': tk.LEFT, 'anchor': tk.W} for x in left_to_right}
         index_text = self.get_index_text()
         self.objects = OrderedDict([
@@ -408,23 +413,27 @@ class Gui:
             ['long', tk.Button(create_order_frame, text='LONG', command=self.desk.buy, fg='green')],
             ['short', tk.Button(create_order_frame, text='SHORT', command=self.desk.sell, fg='red')],
             ['create_order_frame', create_order_frame],
+            ['balances', tk.Label(root, text='---')],
             ['enable_long_arb', tk.Button(arb_trader_frame, text='L', command=lambda: self.switch_arb('long'))],
             ['long_arb_diff', tk.Entry(arb_trader_frame, textvariable=self._long_arb_diff, width=7)],
             ['enable_short_arb', tk.Button(arb_trader_frame, text='S', command=lambda: self.switch_arb('short'))],
             ['short_arb_diff', tk.Entry(arb_trader_frame, textvariable=self._short_arb_diff, width=7)],
             ['arb_trader_frame', arb_trader_frame],
-            ['balances', tk.Label(root, text='---')],
-            ['automate_frame', automate_frame],
+            ['order_deviation', tk.OptionMenu(root, self._order_deviation, *['0%','0.2%','0.5%','1%','2%','market'])],
             ['automate', tk.Button(automate_frame, text='AUTO: off', command=self.desk.automate)],
             ['automate_value', tk.Entry(automate_frame, textvariable=self._automate_value, width=7)],
-            ['order_deviation', tk.OptionMenu(root, self._order_deviation, *['0%','0.2%','0.5%','1%','2%','market'])],
-            ['amount_frame', amount_frame],
+            ['automate_frame', automate_frame],
             ['amount_min', tk.Entry(amount_frame, textvariable=self._amount_min, width=10)],
             ['amount_max', tk.Entry(amount_frame, textvariable=self._amount_max, width=10)],
-            ['random', tk.Button(root, text='RANDOM', command=self.desk.random)],
+            ['amount_frame', amount_frame],
             ['enter', tk.Button(root, text='ENTER', command=self.enter)],
+            ['random', tk.Button(root, text='RANDOM', command=self.desk.random)],
+            ['amount_2x', tk.Button(amount_multipier_frame, text='2x', command=lambda: self.switch_amount_mp(2))],
+            ['amount_3x', tk.Button(amount_multipier_frame, text='3x', command=lambda: self.switch_amount_mp(3))],
+            ['amount_4x', tk.Button(amount_multipier_frame, text='4x', command=lambda: self.switch_amount_mp(4))],
+            ['amount_multiplier_frame', amount_multipier_frame],
         ])
-        _map = {
+        optional = {
             'amount_min': 'amount_range',
             'automate_frame': 'automate',
             'random': 'random', 
@@ -442,12 +451,14 @@ class Gui:
             'order_deviation': (1, 2),
             'automate_frame': (2, 2),
             'amount_frame': (3, 2),
-            'random': (0, 3),
-            'enter': (3, 3),
+            'enter': (0, 3),
+            'random': (2, 3),
+            'amount_multiplier_frame': (3, 3),
         }
         add = pos * 4
         for name, obj in self.objects.items():
-            if name not in _map or self.desk.include[_map[name]]:
+            optional_ref = optional.get(name)
+            if not optional_ref or self.desk.include[optional_ref]:
                 if name in coords:
                     i, j = coords[name]
                     kw = {'pady': (10, 0)} if pos and not i%4 else {}
@@ -504,8 +515,9 @@ class Gui:
             self.update_balances({})
             self.switch_arb('long', False)
             self.switch_arb('short', False)
-            self._display_range()
+            self._display_amount_range()
             self._display_arb_diffs()
+            self.switch_amount_mp(None)
         else:
             self._check_range_changes()
             self._check_arb_diff_changes()
@@ -518,7 +530,7 @@ class Gui:
             self.root.after(recursive, self.refresh, recursive)
     
     
-    def _display_range(self):
+    def _display_amount_range(self):
         for x in ('min','max'):
             value, cy = self.desk.amount_ranges[self.desk.cur_symbol][x]
             if value is None:
@@ -554,7 +566,7 @@ class Gui:
     
     
     def reset(self):
-        self._display_range()
+        self._display_amount_range()
         self._display_arb_diffs()
     
     
@@ -562,7 +574,7 @@ class Gui:
         ok, values = self._check_range_changes(True)
         if ok:
             self.desk.amount_ranges[self.desk.cur_symbol].update(values)
-            self._display_range()
+            self._display_amount_range()
         
         ok, values = self._check_arb_diff_changes(True)
         if ok:
@@ -743,6 +755,18 @@ class Gui:
         self.config('enable_{}_arb'.format(longshort), bg=color)
     
     
+    def switch_amount_mp(self, mp=None):
+        current_mp = self.desk.amount_multipliers[self.desk.cur_symbol]
+        if mp is None:
+            mp = current_mp
+        elif current_mp == mp:
+            mp = 1
+        self.desk.amount_multipliers[self.desk.cur_symbol] = mp
+        for button_mp in range(2, 5):
+            color = 'green' if button_mp==mp else self.orig_button_color
+            self.config('amount_{}x'.format(button_mp), bg=color)
+    
+    
     def automate(self):
         if not self.desk.auto_on:
             self.config('automate', text='AUTO: on', bg='green')
@@ -920,13 +944,13 @@ class Trader:
         return _min + max(0, random.random() * (_max - _min))
     
     
-    def calc_amount(self, symbol, side, price, user_limits):
+    def calc_amount(self, symbol, side, price, user_limits, multiplier=1):
         market = self.xs.markets[symbol]
         base, quote = market['base'], market['quote']
         b_quote = self.xs.balances['free'].get(quote)
         b_base = self.xs.balances['free'].get(base)
-        _min = user_limits['min']
-        _max = user_limits['max']
+        _min = user_limits['min'] * multiplier
+        _max = user_limits['max'] * multiplier
         lotSize = self.xs.markets[symbol]['lotSize']
         type = self.xs.markets[symbol].get('type')
         
@@ -993,7 +1017,8 @@ class Trader:
         limits = self.adjust_user_limits(symbol, self.desk.amount_ranges[symbol])
         if not self.desk.include['amount_range']:
             limits['min'] = limits['max']
-        amount = self.calc_amount(symbol, side, price, limits)
+        multiplier = self.desk.amount_multipliers[symbol]
+        amount = self.calc_amount(symbol, side, price, limits, multiplier)
         
         r = None
         if amount is not None and self.verify_amount(symbol, side, amount, price):
