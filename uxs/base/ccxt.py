@@ -1,5 +1,6 @@
 import ccxt
 import ccxt.async_support
+import ccxt_unmerged # initalize the new exchanges
 import os
 import json
 import time
@@ -58,6 +59,8 @@ _ccxtpro_cls_wrapped = {}
 _exchange_instances = {}
 _exchange_instances_async = {}
 _ccxtpro_instances = {}
+
+ccxt_unmerged.warn_duplicated()
 
 
 class ccxtWrapper:
