@@ -5,6 +5,14 @@ This free to use python library is ccxt based. I use it for personal trading and
 
 **DISCLAIMER: Use it at your own risk! I take no responsibility for any losses occurred!**
 
+Installation (python 3.5.3+ required):
+
+`pip install --upgrade uxs`
+
+Latest development version:
+
+`pip install git+https://github.com/binares/uxs.git`
+
 Supported exchanges:
 
 |              | ticker | all_tickers | orderbook | l3 | ohlcv | trades | balance | order | fill | position |
