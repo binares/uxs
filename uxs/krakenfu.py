@@ -839,7 +839,7 @@ class krakenfu(ExchangeSocket):
         """
         challenge_h = self.api.hash(challenge.encode(), 'sha256', 'binary') # 1
         secret_b64 = base64.b64decode(self.secret) # 2
-        sig = self.api.hmac(challenge_h, secret_b64, hashlib.sha512, 'base64').decode() #3-4
+        sig = self.api.hmac(challenge_h, secret_b64, hashlib.sha512, 'base64') #3-4
         
         return sig
 
