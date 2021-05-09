@@ -11,7 +11,7 @@ if 'uxs._data' not in packages:
 
 setup(
    name='uxs',
-   version='0.5.1',
+   version='0.6.0',
    description='A unified crypto exchange websocket',
    long_description=README,
    long_description_content_type='text/markdown',
