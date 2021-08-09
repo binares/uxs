@@ -26,8 +26,8 @@ setup(
    install_requires=[
        'aiohttp>=3.0',
        'aiohttp_socks>=0.2',
-       'ccxt>=1.51.20',
-       'ccxt-unmerged>=2.0',
+       'ccxt>=1.54.61',
+       'ccxt-unmerged>=2.1',
        'python_dateutil>=2.1',
        'pandas>=0.21',
        'PyYAML>=3.10',

@@ -276,8 +276,8 @@ class ccxtWrapper:
             which = next((x for x in linearities if market.get(x)), None)
             if which is None:
                 which = self._get_pnl_function(market)
-            if which is None and type=='spot':
-                which = 'linear'
+            #if which is None and type=='spot':    # ccxt binance spot API will break if 'linear' is set to True
+            #    which = 'linear'
             if which is not None:
                 market.update({x: (which==x) for x in linearities})
             else:
