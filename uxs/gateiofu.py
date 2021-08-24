@@ -88,12 +88,11 @@ class gateiofu(ExchangeSocket):
         is_snap = r['event']=='all'
         timestamp = r['time'] * 1000
         if is_snap:
-            parsed = {'symbol': self.convert_symbol(rr['contract'], 0)}
-            parsed.update(
-                self.api.parse_order_book(rr, timestamp, price_key='p', amount_key='s'))
+            symbol = self.convert_symbol(rr['contract'], 0)
+            ob = self.api.parse_order_book(rr, symbol, timestamp, price_key='p', amount_key='s')
             # The snapshot doesn't have a nonce yet, cache it until the arrival of first update
             #self._cached_snapshots[parsed['symbol']] = (parsed, time.time())
-            self.ob_maintainer.send_orderbook(parsed)
+            self.ob_maintainer.send_orderbook(ob)
         else:
             parsed_updates = []
             for update in rr:

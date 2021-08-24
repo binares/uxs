@@ -240,8 +240,7 @@ class coinbene(ExchangeSocket):
         is_snap = r['action'] == 'insert'
         raw_ob = r['data'][0]
         ob = {
-            **self.api.parse_order_book(raw_ob, raw_ob['timestamp']),
-            'symbol': symbol,
+            **self.api.parse_order_book(raw_ob, symbol, raw_ob['timestamp']),
             'nonce': raw_ob['version'],
         }
         if is_snap:

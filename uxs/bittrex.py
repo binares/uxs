@@ -242,8 +242,7 @@ class bittrex(ExchangeSocket):
         }
         """
         symbol = self.convert_symbol(r['marketSymbol'], 0)
-        ob = dict(self.api.parse_order_book(r, None, 'bidDeltas', 'askDeltas', 'rate', 'quantity'),
-                  symbol=symbol,
+        ob = dict(self.api.parse_order_book(r, symbol, None, 'bidDeltas', 'askDeltas', 'rate', 'quantity'),
                   nonce=self.safe_integer(r, 'sequence'))
         self.orderbook_maintainer.send_update(ob)
     

@@ -298,7 +298,7 @@ class krakenfu(ExchangeSocket):
         }
         is_snapshot = (r['feed'] == 'book_snapshot')
         if is_snapshot:
-            ob.update(self.api.parse_order_book(r, price_key='price', amount_key='qty'))
+            ob.update(self.api.parse_order_book(r, ob['symbol'], price_key='price', amount_key='qty'))
             method = 'send_orderbook'
         else:
             side = 'bids' if r['side']=='buy' else 'asks'

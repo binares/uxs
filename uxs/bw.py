@@ -115,7 +115,7 @@ class bw(ExchangeSocket):
         symbol = self.convert_symbol(ss[1], 0)
         timestamp = self.api.safe_timestamp(ss, 3)
         bids_asks = {**ss[4], **ss[5]}
-        return dict(symbol=symbol, **self.api.parse_order_book(bids_asks, timestamp))
+        return self.api.parse_order_book(bids_asks, symbol, timestamp)
     
     
     def parse_ob_update(self, u):
