@@ -5,6 +5,7 @@ import json
 import asyncio
 import time
 import datetime
+
 dt = datetime.datetime
 td = datetime.timedelta
 
@@ -14,184 +15,271 @@ from uxs.fintls.utils import resolve_times
 from fons.time import ctime_ms
 from fons.crypto import sign
 import fons.log
-logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
+
+logger, logger2, tlogger, tloggers, tlogger0 = fons.log.get_standard_5(__name__)
 
 
-class bitmex(ExchangeSocket): 
-    exchange = 'bitmex'
+class bitmex(ExchangeSocket):
+    exchange = "bitmex"
     url_components = {
-        'ws': 'wss://www.bitmex.com/realtime',
-        'test': 'wss://testnet.bitmex.com/realtime',
+        "ws": "wss://www.bitmex.com/realtime",
+        "test": "wss://testnet.bitmex.com/realtime",
     }
     auth_defaults = {
-        'takes_input': False,
-        'each_time': False,
-        'send_separately': True,
+        "takes_input": False,
+        "each_time": False,
+        "send_separately": True,
     }
     channel_defaults = {
-        'unsub_option': True,
+        "unsub_option": True,
     }
     channels = {
-        'account': {
-            'auth': {'apply_to_packs': [0]},
+        "account": {
+            "auth": {"apply_to_packs": [0]},
         },
-        'own_market': {
-            'auth': {'apply_to_packs': [0]},
-            'merge_option': True,
+        "own_market": {
+            "auth": {"apply_to_packs": [0]},
+            "merge_option": True,
         },
-        'orderbook': {
-            'merge_option': True,
-        }
+        "orderbook": {
+            "merge_option": True,
+        },
     }
     has = {
-        'ticker': False,
-        'all_tickers': {
-            'bid': True, 'bidVolume': False, 'ask': True, 'askVolume': False, 'last': True,
-            'high': True, 'low': True, 'open': False, 'close': True, 'previousClose': False,
-            'change': True, 'percentage': True, 'average': False, 'vwap': True,
-            'baseVolume': True, 'quoteVolume': True, 'active': True},
-        'orderbook': True,
-        'trades': False, # TODO
-        'account': {'balance': True, 'position': True},
-        'own_market': {'order': True, 'fill': True},
-        'fetch_tickers': True,
-        'fetch_ticker': {
-            'ask': True, 'askVolume': False, 'average': True, 'baseVolume': True, 'bid': True, 'bidVolume': False,
-            'change': True, 'close': True, 'datetime': True, 'high': True, 'last': True, 'low': True, 'open': True,
-            'percentage': True, 'previousClose': False, 'quoteVolume': True, 'symbol': True, 'timestamp': True,
-            'vwap': True},
-        'fetch_ohlcv': {'timestamp': True, 'open': True, 'high': True, 'low': True, 'close': True, 'volume': True},
-        'fetch_order_book': {'asks': True, 'bids': True, 'datetime': False, 'nonce': False, 'timestamp': False},
-        'fetch_trades': {
-            'amount': True, 'cost': False, 'datetime': True, 'fee': False, 'id': True, 'order': False,
-            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': False, 'timestamp': True, 'type': False},
-        'fetch_balance': {'free': True, 'used': True, 'total': True},
-        'fetch_my_trades': {
-            'amount': True, 'cost': True, 'datetime': True, 'fee': True, 'id': True, 'order': True,
-            'price': True, 'side': True, 'symbol': True, 'takerOrMaker': True, 'timestamp': True, 'type': True},
-        'fetch_order': {
-            'amount': True, 'average': True, 'clientOrderId': True, 'cost': True, 'datetime': True, 'fee': False,
-            'filled': True, 'id': True, 'lastTradeTimestamp': True, 'price': True, 'remaining': True, 'side': True,
-            'status': True, 'symbol': True, 'timestamp': True, 'trades': False, 'type': True},
-        'fetch_orders': {'symbolRequired': False},
-        'fetch_open_orders': {'symbolRequired': False},
-        'fetch_closed_orders': {'symbolRequired': False},
-        'create_order': True,
-        'edit_order': True,
+        "ticker": False,
+        "all_tickers": {
+            "bid": True,
+            "bidVolume": False,
+            "ask": True,
+            "askVolume": False,
+            "last": True,
+            "high": True,
+            "low": True,
+            "open": False,
+            "close": True,
+            "previousClose": False,
+            "change": True,
+            "percentage": True,
+            "average": False,
+            "vwap": True,
+            "baseVolume": True,
+            "quoteVolume": True,
+            "active": True,
+        },
+        "orderbook": True,
+        "trades": False,  # TODO
+        "account": {"balance": True, "position": True},
+        "own_market": {"order": True, "fill": True},
+        "fetch_tickers": True,
+        "fetch_ticker": {
+            "ask": True,
+            "askVolume": False,
+            "average": True,
+            "baseVolume": True,
+            "bid": True,
+            "bidVolume": False,
+            "change": True,
+            "close": True,
+            "datetime": True,
+            "high": True,
+            "last": True,
+            "low": True,
+            "open": True,
+            "percentage": True,
+            "previousClose": False,
+            "quoteVolume": True,
+            "symbol": True,
+            "timestamp": True,
+            "vwap": True,
+        },
+        "fetch_ohlcv": {
+            "timestamp": True,
+            "open": True,
+            "high": True,
+            "low": True,
+            "close": True,
+            "volume": True,
+        },
+        "fetch_order_book": {
+            "asks": True,
+            "bids": True,
+            "datetime": False,
+            "nonce": False,
+            "timestamp": False,
+        },
+        "fetch_trades": {
+            "amount": True,
+            "cost": False,
+            "datetime": True,
+            "fee": False,
+            "id": True,
+            "order": False,
+            "price": True,
+            "side": True,
+            "symbol": True,
+            "takerOrMaker": False,
+            "timestamp": True,
+            "type": False,
+        },
+        "fetch_balance": {"free": True, "used": True, "total": True},
+        "fetch_my_trades": {
+            "amount": True,
+            "cost": True,
+            "datetime": True,
+            "fee": True,
+            "id": True,
+            "order": True,
+            "price": True,
+            "side": True,
+            "symbol": True,
+            "takerOrMaker": True,
+            "timestamp": True,
+            "type": True,
+        },
+        "fetch_order": {
+            "amount": True,
+            "average": True,
+            "clientOrderId": True,
+            "cost": True,
+            "datetime": True,
+            "fee": False,
+            "filled": True,
+            "id": True,
+            "lastTradeTimestamp": True,
+            "price": True,
+            "remaining": True,
+            "side": True,
+            "status": True,
+            "symbol": True,
+            "timestamp": True,
+            "trades": False,
+            "type": True,
+        },
+        "fetch_orders": {"symbolRequired": False},
+        "fetch_open_orders": {"symbolRequired": False},
+        "fetch_closed_orders": {"symbolRequired": False},
+        "create_order": True,
+        "edit_order": True,
     }
-    has['fetch_tickers'] = has['fetch_ticker'].copy()
-    has['fetch_orders'].update(has['fetch_order'])
-    has['fetch_open_orders'].update(has['fetch_order'])
-    has['fetch_closed_orders'].update(has['fetch_order'])
-    has['create_order'] = has['fetch_order'].copy()
-    has['edit_order'] = has['fetch_order'].copy()
+    has["fetch_tickers"] = has["fetch_ticker"].copy()
+    has["fetch_orders"].update(has["fetch_order"])
+    has["fetch_open_orders"].update(has["fetch_order"])
+    has["fetch_closed_orders"].update(has["fetch_order"])
+    has["create_order"] = has["fetch_order"].copy()
+    has["edit_order"] = has["fetch_order"].copy()
     connection_defaults = {
-        'rate_limit': (1, 2),
+        "rate_limit": (1, 2),
         #'ping': 'm$ping',
-        'ping_interval': 0.5,
+        "ping_interval": 0.5,
         #'ping_as_message': True,
-        'ping_after': 5,
-        'ping_timeout': 5,
+        "ping_after": 5,
+        "ping_timeout": 5,
         #'recv_timeout': 10,
     }
-    max_subscriptions_per_connection = 10 # the usual is 20, but `own_market` and `account` have 2 substreams
+    max_subscriptions_per_connection = (
+        10  # the usual is 20, but `own_market` and `account` have 2 substreams
+    )
     # subscription_push_rate_limit: 0.12
     ob = {
-        'force_create': None,
-        'cache_size': 1000,
-        'limits': [10, 25],
-        'uses_nonce': False,
-        'receives_snapshot': True,
-        'hold_times': {
-            'orderBookL2_25': 0.05,
-            #this is the lowest "exact" asyncio.sleep time on Windows
-            'orderBookL2': 0.016,
+        "force_create": None,
+        "cache_size": 1000,
+        "limits": [10, 25],
+        "uses_nonce": False,
+        "receives_snapshot": True,
+        "hold_times": {
+            "orderBookL2_25": 0.05,
+            # this is the lowest "exact" asyncio.sleep time on Windows
+            "orderBookL2": 0.016,
         },
     }
     order = {
-        'update_filled_on_fill': False,
-        'update_payout_on_fill': False,
-        'update_remaining_on_fill': False,
+        "update_filled_on_fill": False,
+        "update_payout_on_fill": False,
+        "update_remaining_on_fill": False,
     }
     channel_ids = {
         # This can be overriden to include 'transact' and 'wallet' in the subscription
-        'account': ['margin','position'], #'transact','wallet'
-        'own_market': ['execution:<symbol>','order:<symbol>'],
+        "account": ["margin", "position"],  #'transact','wallet'
+        "own_market": ["execution:<symbol>", "order:<symbol>"],
         #'ticker': ['instrument:{symbol}'],
-        'all_tickers': ['instrument'],
-        'orderbook': ['orderBookL2:<symbol>'],
-        'trades': ['trades:<symbol>'],
+        "all_tickers": ["instrument"],
+        "orderbook": ["orderBookL2:<symbol>"],
+        "trades": ["trades:<symbol>"],
     }
     symbol = {
-        'quote_ids': ['USD','BTC','ETH','ADA','BCH','XRP','TRX'],
-        'sep': '',
+        "quote_ids": ["USD", "BTC", "ETH", "ADA", "BCH", "XRP", "TRX"],
+        "sep": "",
     }
-    _id_prices = defaultdict(lambda: {'start': None,
-                                      'multiplier': None,
-                                      'per_tick': None,
-                                      'cache': []})
-    
+    _id_prices = defaultdict(
+        lambda: {"start": None, "multiplier": None, "per_tick": None, "cache": []}
+    )
+
     __extend_attrs__ = []
-    __deepcopy_on_init__ = ['_id_prices']
-    
-    
+    __deepcopy_on_init__ = ["_id_prices"]
+
     def handle(self, response):
         message = response.data
-        
-        #logger.debug(json.dumps(message))
+
+        # logger.debug(json.dumps(message))
         if not isinstance(message, dict):
             print(message)
             return
 
-        table = message['table'] if 'table' in message else None
-        action = message['action'] if 'action' in message else None
+        table = message["table"] if "table" in message else None
+        action = message["action"] if "action" in message else None
 
-        if 'subscribe' in message:
-            if message['success']:
-                split = message['subscribe'].split(':')
-                _channel, _symbol = (split[0], None) if len(split)<2 else split
-                if _channel in ('position', 'margin', 'execution', 'order'):
+        if "subscribe" in message:
+            if message["success"]:
+                split = message["subscribe"].split(":")
+                _channel, _symbol = (split[0], None) if len(split) < 2 else split
+                if _channel in ("position", "margin", "execution", "order"):
+
                     async def change_state():
-                        if _channel in ('position', 'margin'):
-                            s = {'_': 'account'}
+                        if _channel in ("position", "margin"):
+                            s = {"_": "account"}
                         else:
-                            s = {'_': 'own_market', 'symbol': self.convert_symbol(_symbol, 0)}
+                            s = {
+                                "_": "own_market",
+                                "symbol": self.convert_symbol(_symbol, 0),
+                            }
                         await asyncio.sleep(1)
                         if self.is_subscribed_to(s):
                             self.change_subscription_state(s, 1, True)
+
                     asyncio.ensure_future(change_state())
-                self.log("subscribed to %s." % message['subscribe'])
+                self.log("subscribed to %s." % message["subscribe"])
             else:
-                self.log_error("Unable to subscribe to %s. Error: \"%s\" Please check and restart." %
-                               (message['request']['args'][0], message['error']))
-        elif 'status' in message:
-            if message['status'] == 400:
-                self.log_error(message['error'])
-            if message['status'] == 401:
+                self.log_error(
+                    'Unable to subscribe to %s. Error: "%s" Please check and restart.'
+                    % (message["request"]["args"][0], message["error"])
+                )
+        elif "status" in message:
+            if message["status"] == 400:
+                self.log_error(message["error"])
+            if message["status"] == 401:
                 self.log_error("API Key incorrect, please check and restart.")
         elif action:
-            if table == 'order':
+            if table == "order":
                 self.on_order(message)
-            elif table == 'position':
+            elif table == "position":
                 self.on_position(message)
-            elif table == 'margin':
+            elif table == "margin":
                 self.on_margin(message)
-            elif table == 'execution':
+            elif table == "execution":
                 self.on_fill(message)
-            elif table == 'instrument':
+            elif table == "instrument":
                 self.on_ticker(message)
-            elif table in ('orderBookL2', 'orderBookL2_25'):
+            elif table in ("orderBookL2", "orderBookL2_25"):
                 self.on_orderbookL2(message)
-            elif table == 'orderBook10':
+            elif table == "orderBook10":
                 self.on_orderbook10(message)
-            elif table == 'transact':
+            elif table == "transact":
                 self.on_transact(message)
-            elif table == 'wallet':
+            elif table == "wallet":
                 self.on_wallet(message)
             else:
                 self.notify_unknown(message)
-    
-    
+
     def on_ticker(self, message):
         """{
         'table': 'instrument',
@@ -217,57 +305,59 @@ class bitmex(ExchangeSocket):
             'bidPrice': 7337, 'midPrice': 7337.25, 'askPrice': 7337.5, 'impactBidPrice': 7336.7572, 'impactMidPrice': 7337.25, 'impactAskPrice': 7337.5,
             'hasLiquidity': True, 'openInterest': 691746804, 'openValue': 9425050204500, 'fairMethod': 'FundingRate', 'fairBasisRate': 0.1095,
             'fairBasis': 0.69, 'fairPrice': 7339.33, 'markMethod': 'FairPrice', 'markPrice': 7339.33, 'indicativeTaxRate': 0,
-            'indicativeSettlePrice': 7338.64, 'optionUnderlyingPrice': None, 'settledPrice': None, 'timestamp': '2019-12-10T12:30:16.440Z'}, ...]}"""
-        action = message['action']
-        
-        apply = {
-            'symbol': functools.partial(self.convert_symbol, direction=0)}
-        
+            'indicativeSettlePrice': 7338.64, 'optionUnderlyingPrice': None, 'settledPrice': None, 'timestamp': '2019-12-10T12:30:16.440Z'}, ...]}
+        """
+        action = message["action"]
+
+        apply = {"symbol": functools.partial(self.convert_symbol, direction=0)}
+
         map = {
-               'symbol': 'symbol',
-               'vwap': 'vwap',
-               'datetime': 'timestamp',
-               'bid': 'bidPrice',
-               'ask': 'askPrice',
-               'last': 'lastPrice',
-               'open': 'prevPrice24h',
-               'high': 'highPrice',
-               'low': 'lowPrice',
-               #'close': 'lastPrice',
-               'baseVolume': 'homeNotional24h',
-               'quoteVolume': 'foreignNotional24h',
-               'fairPrice': 'fairPrice',
-               'markPrice': 'markPrice',
-               'markMethod': 'markMethod',
-               'referenceSymbol': 'referenceSymbol',
-               'fundingTimestamp': 'fundingTimestamp',
-               'fundingInterval': 'fundingInterval'}
-        
+            "symbol": "symbol",
+            "vwap": "vwap",
+            "datetime": "timestamp",
+            "bid": "bidPrice",
+            "ask": "askPrice",
+            "last": "lastPrice",
+            "open": "prevPrice24h",
+            "high": "highPrice",
+            "low": "lowPrice",
+            #'close': 'lastPrice',
+            "baseVolume": "homeNotional24h",
+            "quoteVolume": "foreignNotional24h",
+            "fairPrice": "fairPrice",
+            "markPrice": "markPrice",
+            "markMethod": "markMethod",
+            "referenceSymbol": "referenceSymbol",
+            "fundingTimestamp": "fundingTimestamp",
+            "fundingInterval": "fundingInterval",
+        }
+
         _null = lambda x: x
-        
+
         def parse(x):
             new = {}
-            for param,key in map.items():
+            for param, key in map.items():
                 f = apply.get(param, _null)
                 if key in x:
                     new[param] = f(x[key])
-            new['info'] = x
+            new["info"] = x
             entry = self.api.ticker_entry(**new)
-            if action != 'partial':
-                #to avoid overwriting old entries with None
-                entry = {p:v for p,v in entry.items() if v is not None or map.get(p) in x}
+            if action != "partial":
+                # to avoid overwriting old entries with None
+                entry = {
+                    p: v for p, v in entry.items() if v is not None or map.get(p) in x
+                }
             return new
-                  
-        data = []  
-        
-        for x in message['data']:
+
+        data = []
+
+        for x in message["data"]:
             data.append(parse(x))
-        
-        _action = 'update' if action != 'partial' else 'replace'
-        
-        self.update_tickers(data, action=_action, enable_sub='all_tickers')
-        
-            
+
+        _action = "update" if action != "partial" else "replace"
+
+        self.update_tickers(data, action=_action, enable_sub="all_tickers")
+
     def on_orderbookL2(self, message):
         """
         > {"op": "subscribe", "args": ["orderBookL2_25:XBTUSD"]}
@@ -310,58 +400,57 @@ class bitmex(ExchangeSocket):
             ]
         }
         """
-        
+
         # There are four possible actions from the WS:
         # 'partial' - full table image
         # 'insert'  - new row
         # 'update'  - update row
         # 'delete'  - delete row
-        
+
         # Since 'delete' actions are sent in separate payloads
         # there are moments of crossing (buy level <-> sell level)
         # where the crossed levels are empty (when in fact they (probably) aren't)
         # The solution is to cache the update and prevent it from being pushed for
         # a short amount of time
-        
-        table = message['table']
-        action = message['action']
-        
-        hold_time = self.ob['hold_times'][table]
+
+        table = message["table"]
+        action = message["action"]
+
+        hold_time = self.ob["hold_times"][table]
         _default = lambda price, size: [price, size]
         _delete = lambda price, size: [price, 0]
-        op = _default if action != 'delete' else _delete
+        op = _default if action != "delete" else _delete
         updates = {}
-        
-        for x in message['data']:
-            symbol = self.convert_symbol(x['symbol'], 0)
-            side = 'bids' if x['side'] == 'Buy' else 'asks'
-            price = self._ob_price_from_id(symbol, x['id'], x.get('price'))
+
+        for x in message["data"]:
+            symbol = self.convert_symbol(x["symbol"], 0)
+            side = "bids" if x["side"] == "Buy" else "asks"
+            price = self._ob_price_from_id(symbol, x["id"], x.get("price"))
             if price is not None:
-                item = op(price, x.get('size'))
+                item = op(price, x.get("size"))
                 if symbol not in updates:
                     updates[symbol] = self.api.ob_entry(symbol, timestamp=ctime_ms())
                 updates[symbol][side].append(item)
-        
-        for symbol,ob in updates.items():
-            if action == 'partial':
-                ob['bids'].sort(key=lambda x: x[0], reverse=True)
-                ob['asks'].sort(key=lambda x: x[0])
+
+        for symbol, ob in updates.items():
+            if action == "partial":
+                ob["bids"].sort(key=lambda x: x[0], reverse=True)
+                ob["asks"].sort(key=lambda x: x[0])
                 self.ob_maintainer.send_orderbook(ob)
             else:
                 force_push = False
-                if action == 'delete':
+                if action == "delete":
                     # hold for 16/50 ms
                     # this seems to be enough for the next 'insert' action to be received
-                    ob['__hold__'] = hold_time
-                elif action == 'insert' and table == 'orderBookL2':
-                    #orderBookL2 seems to send the associated inserts right after delete,
-                    #while orderBookL2_25 may first send inserts related to fringe changes
-                    #(it always shows 25 items)
+                    ob["__hold__"] = hold_time
+                elif action == "insert" and table == "orderBookL2":
+                    # orderBookL2 seems to send the associated inserts right after delete,
+                    # while orderBookL2_25 may first send inserts related to fringe changes
+                    # (it always shows 25 items)
                     force_push = True
                 self.ob_maintainer.send_update(ob, force_push)
-                
-                
-    def on_orderbook10(self, message):      
+
+    def on_orderbook10(self, message):
         """
         {
             'table': 'orderBook10',
@@ -389,19 +478,23 @@ class bitmex(ExchangeSocket):
             ]
         }
         """
-        
+
         # Action can be either 'partial' or 'update'
-        
+
         updates = {}
-        
-        for x in message['data']:
-            symbol = self.convert_symbol(x['symbol'], 0)
-            updates[symbol] = self.api.ob_entry(symbol, bids=x.get('bids'), asks=x.get('asks'), datetime=x.get('timestamp'))
-                
-        for symbol,ob in updates.items():
+
+        for x in message["data"]:
+            symbol = self.convert_symbol(x["symbol"], 0)
+            updates[symbol] = self.api.ob_entry(
+                symbol,
+                bids=x.get("bids"),
+                asks=x.get("asks"),
+                datetime=x.get("timestamp"),
+            )
+
+        for symbol, ob in updates.items():
             self.ob_maintainer.send_orderbook(ob)
-    
-    
+
     def on_order(self, message):
         """
         #STOP ORDER:
@@ -440,7 +533,7 @@ class bitmex(ExchangeSocket):
                    'text': 'Submitted via API.',
                    'transactTime': '2019-11-25T18:20:48.149Z',
                    'timestamp': '2019-11-25T18:20:48.149Z'}]}
-                   
+
         {'table': 'order',
          'action': 'update',
          'data': [{'orderID': 'c4bf0e2c-e6af-5c2b-9e62-73ca8300e02e',
@@ -451,7 +544,7 @@ class bitmex(ExchangeSocket):
                    'clOrdID': '',
                    'account': 123456,
                    'symbol': 'ETHUSD'}]}
-        
+
         #LIMIT ORDER:
         #1
         {'table': 'order', 'action': 'insert',
@@ -463,7 +556,7 @@ class bitmex(ExchangeSocket):
                   'leavesQty': 8, 'simpleCumQty': None, 'cumQty': 0, 'avgPx': None, 'multiLegReportingType': 'SingleSecurity',
                   'text': 'Submission from www.bitmex.com', 'transactTime': '2019-11-21T15:21:53.006Z',
                   'timestamp': '2019-11-26T00:26:57.245Z'}]}
-        
+
         #8
         {'table': 'order',
          'action': 'update',
@@ -480,7 +573,7 @@ class bitmex(ExchangeSocket):
                    'simpleLeavesQty': None, 'leavesQty': None, 'simpleCumQty': None, 'cumQty': 0, 'avgPx': None,
                    'multiLegReportingType': 'SingleSecurity', 'text': 'Position Close from www.bitmex.com',
                    'transactTime': '2019-11-21T15:24:17.091Z', 'timestamp': '2019-11-21T15:24:17.091Z'}]}
-        #11                                                         
+        #11
         {'table': 'order', 'action': 'update',
          'data': [{'orderID': '66ab03de-fc2a-a990-4ab7-4bd1c00353ab', 'side': 'Sell', 'orderQty': 8, 'price': 145,
                    'workingIndicator': True, 'leavesQty': 8, 'clOrdID': '', 'account': 123456, 'symbol': 'ETHUSD',
@@ -491,51 +584,60 @@ class bitmex(ExchangeSocket):
                    'leavesQty': 0, 'cumQty': 8, 'avgPx': 145, 'clOrdID': '', 'account': 123456, 'symbol': 'ETHUSD',
                    'timestamp': '2019-11-21T15:24:17.091Z'}]}
         """
-                   
-        action = message['action']
-        for d in message['data']:
-            symbol = self.convert_symbol(d['symbol'], 0)
-            id = d['orderID']
-            datetime = d['timestamp']
+
+        action = message["action"]
+        for d in message["data"]:
+            symbol = self.convert_symbol(d["symbol"], 0)
+            id = d["orderID"]
+            datetime = d["timestamp"]
             timestamp = self.api.parse8601(datetime)
-            #For stop order the price is None
-            price = d.get('price')
-            average = d.get('avgPx')
-            #types: #Limit, Stop (market), Market, ...
-            type = d['ordType'].lower() if 'ordType' in d else None 
-            amount = d.get('orderQty')
-            side = d['side'].lower() if 'side' in d else None
-            remaining = d.get('leavesQty')
-            filled = d.get('cumQty')
-            stop = d.get('stopPx')
+            # For stop order the price is None
+            price = d.get("price")
+            average = d.get("avgPx")
+            # types: #Limit, Stop (market), Market, ...
+            type = d["ordType"].lower() if "ordType" in d else None
+            amount = d.get("orderQty")
+            side = d["side"].lower() if "side" in d else None
+            remaining = d.get("leavesQty")
+            filled = d.get("cumQty")
+            stop = d.get("stopPx")
             extra = {}
             exists = id in self.orders
-            is_create_action = action in ('insert','partial')
-            #('partial' sends open orders upon subscription)
+            is_create_action = action in ("insert", "partial")
+            # ('partial' sends open orders upon subscription)
             if is_create_action and not exists:
-                self.add_order(id=id, symbol=symbol, side=side, amount=amount,
-                               price=price, timestamp=timestamp,
-                               remaining=remaining, filled=filled, type=type,
-                               stop=stop, datetime=datetime, average=average,
-                               params=extra)
-            elif is_create_action and exists or action == 'update':
+                self.add_order(
+                    id=id,
+                    symbol=symbol,
+                    side=side,
+                    amount=amount,
+                    price=price,
+                    timestamp=timestamp,
+                    remaining=remaining,
+                    filled=filled,
+                    type=type,
+                    stop=stop,
+                    datetime=datetime,
+                    average=average,
+                    params=extra,
+                )
+            elif is_create_action and exists or action == "update":
                 if amount is not None:
-                    extra['amount'] = amount
-                if 'price' in d:
-                    extra['price'] = price
-                if 'stopPx' in d:
-                    extra['stop'] = stop
+                    extra["amount"] = amount
+                if "price" in d:
+                    extra["price"] = price
+                if "stopPx" in d:
+                    extra["stop"] = stop
                 if type is not None:
-                    extra['type'] = type
+                    extra["type"] = type
                 if side is not None:
-                    extra['side'] = side
+                    extra["side"] = side
                 self.update_order(id, remaining, filled, average=average, params=extra)
-            #elif action == 'delete':
+            # elif action == 'delete':
             #    self.update_order(id, 0, filled) #?
             else:
                 self.log_error("Unknown order action: '{}'; item: {}".format(action, d))
-            
-            
+
     def on_fill(self, message):
         """
         #5
@@ -588,7 +690,7 @@ class bitmex(ExchangeSocket):
                    'foreignNotional': None,
                    'transactTime': '2019-11-21T15:22:09.810Z',
                    'timestamp': '2019-11-21T15:22:09.810Z'}]}
-        
+
         #7
         {'table': 'execution',
         'action': 'insert',
@@ -628,42 +730,41 @@ class bitmex(ExchangeSocket):
                    'exDestination': 'XBME', 'ordStatus': 'Filled', 'triggered': '', 'workingIndicator': False, 'ordRejReason': '',
                    'simpleLeavesQty': None, 'leavesQty': 0, 'simpleCumQty': None, 'cumQty': 8, 'avgPx': 145, 'commission': 0.00075,
                    'tradePublishIndicator': 'PublishTrade', 'multiLegReportingType': 'SingleSecurity',
-                   'text': 'Position Close from www.bitmex.com', 'trdMatchID': '3972ebc0-b24e-5683-1bd3-dae1955df36a', 
+                   'text': 'Position Close from www.bitmex.com', 'trdMatchID': '3972ebc0-b24e-5683-1bd3-dae1955df36a',
                    'execCost': -116000, 'execComm': 87, 'homeNotional': -0.05684240443370755, 'foreignNotional': 8.242148642887594,
                    'transactTime': '2019-11-21T15:24:17.091Z', 'timestamp': '2019-11-21T15:24:17.091Z'}]}
         """
         map = {
-            'id': 'trdMatchID',
-            'order': 'orderId',
-            'symbol': 'symbol',
-            'side': 'side',
-            'price': 'price',
-            'amount': 'lastQty',
-            'datetime': 'timestamp',
+            "id": "trdMatchID",
+            "order": "orderId",
+            "symbol": "symbol",
+            "side": "side",
+            "price": "price",
+            "amount": "lastQty",
+            "datetime": "timestamp",
         }
-        
-        for d in message['data']:
-            if d['execType'] != 'Trade':
+
+        for d in message["data"]:
+            if d["execType"] != "Trade":
                 continue
-            
-            #mapped = {x: d[map[x]] for x in map if map[x] in d}
-            #mapped['symbol'] = self.convert_symbol(mapped['symbol'], 0)
-            #fill = dict(**mapped, info=d)
+
+            # mapped = {x: d[map[x]] for x in map if map[x] in d}
+            # mapped['symbol'] = self.convert_symbol(mapped['symbol'], 0)
+            # fill = dict(**mapped, info=d)
             fill = self.api.parse_trade(d)
-            
+
             self.add_fill_from_dict(fill)
-    
-    
+
     def on_position(self, message):
-        #https://www.bitmex.com/api/explorer/#!/Position/Position_get
+        # https://www.bitmex.com/api/explorer/#!/Position/Position_get
         """
         These are sent on 10-25 sec interval, and right after orders are created/executed
         #3
-        {'table': 'position', 'action': 'update', 
+        {'table': 'position', 'action': 'update',
          'data': [{'account': 123456, 'symbol': 'ETHUSD', 'currency': 'XBt', 'openOrderBuyQty': 8, 'openOrderBuyCost': 116640,
                    'grossOpenCost': 116640, 'markPrice': 145.88, 'riskValue': 116640, 'initMargin': 39085,
                    'timestamp': '2019-11-21T15:21:53.006Z', 'currentQty': 0, 'liquidationPrice': None}]}
-        
+
         #6 - position updates
         ...
         #9 - position and margin updates (after order "filled" #8)
@@ -691,37 +792,38 @@ class bitmex(ExchangeSocket):
                    'breakEvenPrice': None, 'marginCallPrice': None, 'liquidationPrice': None, 'bankruptPrice': None,
                    'timestamp': '2019-11-21T15:24:17.092Z','lastPrice': None, 'lastValue': 0}]}
         """
-        map = {'price': 'avgEntryPrice',
-               'amount': 'currentQty',
-               'leverage': 'leverage',
-               'liq_price': 'liquidationPrice'}
+        map = {
+            "price": "avgEntryPrice",
+            "amount": "currentQty",
+            "leverage": "leverage",
+            "liq_price": "liquidationPrice",
+        }
         data = []
-        
-        for d in message['data']:
-            symbol = self.convert_symbol(d['symbol'], 0)
-            datetime, timestamp = resolve_times(d['timestamp'])
-            #info = {x: d.get(x) for x in ['realisedPnl','unrealisedPnl','avgCostPrice','avgEntryPrice','currentQty',
+
+        for d in message["data"]:
+            symbol = self.convert_symbol(d["symbol"], 0)
+            datetime, timestamp = resolve_times(d["timestamp"])
+            # info = {x: d.get(x) for x in ['realisedPnl','unrealisedPnl','avgCostPrice','avgEntryPrice','currentQty',
             #                              'breakEvenPrice','marginCallPrice','liquidationPrice','bankruptPrice',
             #                              'isOpen', ] if x in d}
             mapped = {x: d[map[x]] for x in map if map[x] in d}
-            
-            e = dict({'symbol': symbol,
-                      'timestamp': timestamp,
-                      'datetime': datetime},
-                     **mapped,
-                     info=d)
+
+            e = dict(
+                {"symbol": symbol, "timestamp": timestamp, "datetime": datetime},
+                **mapped,
+                info=d
+            )
             data.append(e)
-        
+
         self.update_positions(data)
-    
-    
+
     def on_margin(self, r):
         """
         #4
-        {'table': 'margin', 'action': 'update', 
+        {'table': 'margin', 'action': 'update',
          'data': [{'account': 123456, 'currency': 'XBt', 'grossOpenCost': 116640, 'riskValue': 116640, 'initMargin': 39085,
                    'marginUsedPcnt': 0.9858, 'excessMargin': 563, 'availableMargin': 563, 'withdrawableMargin': 563,
-                   'timestamp': '2019-11-21T15:21:53.006Z'}]}   
+                   'timestamp': '2019-11-21T15:21:53.006Z'}]}
         {'table': 'margin', 'action': 'update',
          'data': [{'account': 123456, 'currency': 'XBt', 'grossComm': -531, 'grossOpenCost': 0, 'grossExecCost': 116640,
                    'grossMarkValue': 116616, 'riskValue': 116616, 'initMargin': 0, 'maintMargin': 38973, 'realisedPnl': -65949,
@@ -737,145 +839,141 @@ class bitmex(ExchangeSocket):
         """
         to_btc = lambda x: x * 10**-8
         map = {
-            'free': 'availableMargin',
-            'total': 'marginBalance',
+            "free": "availableMargin",
+            "total": "marginBalance",
         }
         data = []
-        
-        for d in r['data']:
+
+        for d in r["data"]:
             # Are there any other currencies?
-            if d['currency'] != 'XBt':
-                self.log_error('received unexpected margin currency: {}'.format(d['currency']))
+            if d["currency"] != "XBt":
+                self.log_error(
+                    "received unexpected margin currency: {}".format(d["currency"])
+                )
                 continue
-            
+
             mapped = {k: to_btc(d[map[k]]) for k in map if map[k] in d}
-            
-            b_dict = dict(cy='BTC', **mapped, info=d)
-            
+
+            b_dict = dict(cy="BTC", **mapped, info=d)
+
             data.append(b_dict)
-        
+
         self.update_balances(data)
-    
-    
+
     def on_transact(self, message):
         logger.debug(message)
-    
-    
+
     def on_wallet(self, message):
         logger.debug(message)
-    
-    
+
     def _ob_price_from_id(self, symbol, id, price=None):
         id_prices = self._id_prices[symbol]
-        start = id_prices['start']
-        per_tick = id_prices['per_tick']
-        multiplier = id_prices['multiplier']
-        cache = id_prices['cache']
-       
+        start = id_prices["start"]
+        per_tick = id_prices["per_tick"]
+        multiplier = id_prices["multiplier"]
+        cache = id_prices["cache"]
+
         if start is None:
-            if price is not None and not any(x[0]==id for x in cache):
+            if price is not None and not any(x[0] == id for x in cache):
                 cache.append([id, price])
             if len(cache) >= 2:
                 cache.sort(key=lambda x: x[1])
-                id_0,price_0 = cache[0]
-                id_1,price_1 = cache[1]
-                tick_size = self.api.markets[symbol]['precision']['price']
-                ticks_count = (price_1-price_0)/tick_size
+                id_0, price_0 = cache[0]
+                id_1, price_1 = cache[1]
+                tick_size = self.api.markets[symbol]["precision"]["price"]
+                ticks_count = (price_1 - price_0) / tick_size
                 id_diff = id_0 - id_1
                 per_tick = id_diff / ticks_count
-                id_prices['per_tick'] = per_tick
-                multiplier = 1/per_tick*tick_size
-                id_prices['multiplier'] = multiplier
+                id_prices["per_tick"] = per_tick
+                multiplier = 1 / per_tick * tick_size
+                id_prices["multiplier"] = multiplier
                 start = round(id_0 + price_0 / multiplier)
-                id_prices['start'] = start
-                #print('start: {} per_tick: {} mp: {} cache: {}'.format(start, per_tick, multiplier, cache))
-                
+                id_prices["start"] = start
+                # print('start: {} per_tick: {} mp: {} cache: {}'.format(start, per_tick, multiplier, cache))
+
         if price is None and start is not None:
             price = (start - id) * multiplier
-            price = self.api.round_price(symbol, price, method='round')
-            #print('id: {} inferred price: {}'.format(id, price))
-            
+            price = self.api.round_price(symbol, price, method="round")
+            # print('id: {} inferred price: {}'.format(id, price))
+
         return price
-    
-    
+
     def encode(self, rq, sub=None):
         """
-            "announcement",        // Site announcements
-            "chat",                // Trollbox chat
-            "connected",           // Statistics of connected users/bots
-            "funding",             // Updates of swap funding rates. Sent every funding interval (usually 8hrs)
-            "instrument",          // Instrument updates including turnover and bid/ask
-            "insurance",           // Daily Insurance Fund updates
-            "liquidation",         // Liquidation orders as they're entered into the book
-            "orderBookL2_25",      // Top 25 levels of level 2 order book
-            "orderBookL2",         // Full level 2 order book
-            "orderBook10",         // Top 10 levels using traditional full book push
-            "publicNotifications", // System-wide notifications (used for short-lived messages)
-            "quote",               // Top level of the book
-            "quoteBin1m",          // 1-minute quote bins
-            "quoteBin5m",          // 5-minute quote bins
-            "quoteBin1h",          // 1-hour quote bins
-            "quoteBin1d",          // 1-day quote bins
-            "settlement",          // Settlements
-            "trade",               // Live trades
-            "tradeBin1m",          // 1-minute trade bins
-            "tradeBin5m",          // 5-minute trade bins
-            "tradeBin1h",          // 1-hour trade bins
-            "tradeBin1d",          // 1-day trade bins
-            
-            "execution",   // Individual executions; can be multiple per order
-            "order",       // Live updates on your orders
-            "margin",      // Updates on your current account balance and margin requirements
-            "position",    // Updates on your positions
-            "privateNotifications", // Individual notifications - currently not used
-            "transact"     // Deposit/Withdrawal updates
-            "wallet"       // Bitcoin address balance data, including total deposits & withdrawals
+        "announcement",        // Site announcements
+        "chat",                // Trollbox chat
+        "connected",           // Statistics of connected users/bots
+        "funding",             // Updates of swap funding rates. Sent every funding interval (usually 8hrs)
+        "instrument",          // Instrument updates including turnover and bid/ask
+        "insurance",           // Daily Insurance Fund updates
+        "liquidation",         // Liquidation orders as they're entered into the book
+        "orderBookL2_25",      // Top 25 levels of level 2 order book
+        "orderBookL2",         // Full level 2 order book
+        "orderBook10",         // Top 10 levels using traditional full book push
+        "publicNotifications", // System-wide notifications (used for short-lived messages)
+        "quote",               // Top level of the book
+        "quoteBin1m",          // 1-minute quote bins
+        "quoteBin5m",          // 5-minute quote bins
+        "quoteBin1h",          // 1-hour quote bins
+        "quoteBin1d",          // 1-day quote bins
+        "settlement",          // Settlements
+        "trade",               // Live trades
+        "tradeBin1m",          // 1-minute trade bins
+        "tradeBin5m",          // 5-minute trade bins
+        "tradeBin1h",          // 1-hour trade bins
+        "tradeBin1d",          // 1-day trade bins
+
+        "execution",   // Individual executions; can be multiple per order
+        "order",       // Live updates on your orders
+        "margin",      // Updates on your current account balance and margin requirements
+        "position",    // Updates on your positions
+        "privateNotifications", // Individual notifications - currently not used
+        "transact"     // Deposit/Withdrawal updates
+        "wallet"       // Bitcoin address balance data, including total deposits & withdrawals
         """
         channel = rq.channel
         params = rq.params
-        
+
         if sub:
-            op = 'subscribe'
+            op = "subscribe"
         elif sub is False:
-            op = 'unsubscribe'
-        
-        limit = params.get('limit')
-        throttled = params.get('throttled')
+            op = "unsubscribe"
+
+        limit = params.get("limit")
+        throttled = params.get("throttled")
         if throttled is None:
             throttled = True
-        
+
         if limit is None or limit > 25:
-            orderbook = ['orderBookL2:<symbol>']
+            orderbook = ["orderBookL2:<symbol>"]
             limit = None
         elif limit <= 10 and throttled:
-            orderbook = ['orderBook10:<symbol>']
+            orderbook = ["orderBook10:<symbol>"]
             limit = 10
         elif limit <= 25:
-            orderbook = ['orderBookL2_25:<symbol>']
+            orderbook = ["orderBookL2_25:<symbol>"]
             limit = 25
-        
-        if channel == 'orderbook':
-            self.ob_maintainer.set_limit(params['symbol'], limit)
-        
-        channel_ids = self.channel_ids[channel] if channel != 'orderbook' else orderbook
-        args = self.fill_in_params(channel_ids, params.get('symbol'))
-        #print(op,args)
-        
-        return {'op': op, 'args': args}
-    
-    
+
+        if channel == "orderbook":
+            self.ob_maintainer.set_limit(params["symbol"], limit)
+
+        channel_ids = self.channel_ids[channel] if channel != "orderbook" else orderbook
+        args = self.fill_in_params(channel_ids, params.get("symbol"))
+        # print(op,args)
+
+        return {"op": op, "args": args}
+
     def sign(self, out=None):
-        #signature is hex(HMAC_SHA256(secret, 'GET/realtime' + expires))
-        #expires must be a number, not a string.
-        #{"op": "authKeyExpires", "args": ["<APIKey>", <expires>, "<signature>"]}
+        # signature is hex(HMAC_SHA256(secret, 'GET/realtime' + expires))
+        # expires must be a number, not a string.
+        # {"op": "authKeyExpires", "args": ["<APIKey>", <expires>, "<signature>"]}
         expires = int(time.time()) + 5
-        signature = sign(self.secret, 'GET/realtime' + str(expires))
+        signature = sign(self.secret, "GET/realtime" + str(expires))
         return {
-            'op': 'authKeyExpires',
-            'args': [self.apiKey, expires, signature],
+            "op": "authKeyExpires",
+            "args": [self.apiKey, expires, signature],
         }
-    
-    
+
     """def ping(self):
         #This is an unrecognized request, but at least it receives response
         #that tells us that the connection is still up
@@ -890,22 +988,22 @@ class bitmex(ExchangeSocket):
 # and the data, if present, must be JSON without whitespace between keys.
 def bitmex_signature(apiSecret, verb, url, nonce, postdict=None):
     """Given an API Secret key and data, create a BitMEX-compatible signature."""
-    data = ''
+    data = ""
     if postdict:
         # separators remove spaces from json
         # BitMEX expects signatures from JSON built without spaces
-        data = json.dumps(postdict, separators=(',', ':'))
+        data = json.dumps(postdict, separators=(",", ":"))
     parsedURL = urllib.parse.urlparse(url)
     path = parsedURL.path
     if parsedURL.query:
-        path = path + '?' + parsedURL.query
+        path = path + "?" + parsedURL.query
     # print("Computing HMAC: %s" % verb + path + str(nonce) + data)
     message = verb + path + str(nonce) + data
     print("Signing: %s" % str(message))
-    
+
     signature = sign(apiSecret, message)
     print("Signature: %s" % signature)
-    
+
     return signature
 
 

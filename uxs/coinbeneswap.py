@@ -2,14 +2,14 @@ from uxs.coinbene import coinbene
 
 import fons.log
 
-logger,logger2,tlogger,tloggers,tlogger0 = fons.log.get_standard_5(__name__)
+logger, logger2, tlogger, tloggers, tlogger0 = fons.log.get_standard_5(__name__)
 
 
 class coinbeneswap(coinbene):
-    exchange = 'coinbeneswap'
+    exchange = "coinbeneswap"
     has = {
-        'ticker': {'bidVolume': True, 'askVolume': True},
-        'account': {'position': True},
+        "ticker": {"bidVolume": True, "askVolume": True},
+        "account": {"position": True},
         #'fetch_tickers': {
         #    'ask': True, 'askVolume': False, 'average': True, 'baseVolume': False, 'bid': True, 'bidVolume': False,
         #    'change': True, 'close': True, 'datetime': False, 'high': True, 'last': True, 'low': True, 'open': True,
@@ -29,30 +29,30 @@ class coinbeneswap(coinbene):
         #'fetch_open_orders': {'symbolRequired': False},
         #'fetch_closed_orders': {'symbolRequired': False},
     }
-    has['all_tickers'] = has['ticker'].copy()
+    has["all_tickers"] = has["ticker"].copy()
     channel_ids = {
-        'orderbook': 'btc/orderBook.<symbol>.<limit>',
-        'ohlcv': 'btc/kline.<symbol>.<timeframe>',
-        'trades': 'btc/tradeList.<symbol>',
-        'ticker': 'btc/ticker.<symbol>',
-        'all_tickers': 'btc/ticker.all',
-        'account': ['btc/user.account', 'btc/user.order', 'btc/user.position'],
+        "orderbook": "btc/orderBook.<symbol>.<limit>",
+        "ohlcv": "btc/kline.<symbol>.<timeframe>",
+        "trades": "btc/tradeList.<symbol>",
+        "ticker": "btc/ticker.<symbol>",
+        "all_tickers": "btc/ticker.all",
+        "account": ["btc/user.account", "btc/user.order", "btc/user.position"],
     }
-    
+
     def parse_ticker(self, r):
-        """ 
+        """
         {
           "symbol": "BTCUSDT",
-          "lastPrice": "8548.0", 
-          "markPrice": "8548.0", 
-          "bestAskPrice": "8601.0", 
+          "lastPrice": "8548.0",
+          "markPrice": "8548.0",
+          "bestAskPrice": "8601.0",
           "bestBidPrice": "8600.0",
-          "bestAskVolume": "1222", 
+          "bestAskVolume": "1222",
           "bestBidVolume": "56505",
-          "high24h": "8600.0000", 
+          "high24h": "8600.0000",
           "low24h": "242.4500",
           "open24h": "8203.5500",
-          "volume24h": "4994", 
+          "volume24h": "4994",
           "timestamp": 1584412736365
           "fundingRate": "0.000100",
           "openInterest": "",
@@ -60,23 +60,22 @@ class coinbeneswap(coinbene):
         }
         """
         map = {
-            'last': 'lastPrice',
-            'high': 'high24h',
-            'low': 'low24h',
-            'open': 'open24h',
-            'quoteVolume': 'volume24h',
-            'bid': 'bestBidPrice',
-            'bidVolume': 'bestBidVolume',
-            'ask': 'bestAskPrice',
-            'askVolume': 'bestAskVolume'
+            "last": "lastPrice",
+            "high": "high24h",
+            "low": "low24h",
+            "open": "open24h",
+            "quoteVolume": "volume24h",
+            "bid": "bestBidPrice",
+            "bidVolume": "bestBidVolume",
+            "ask": "bestAskPrice",
+            "askVolume": "bestAskVolume",
         }
-        apply = {'symbol': lambda x: self.convert_symbol(x, 0)}
-        
+        apply = {"symbol": lambda x: self.convert_symbol(x, 0)}
+
         return self.api.ticker_entry(
-            **self.api.lazy_parse(r, ['symbol','timestamp'], map, apply),
-            info = r)
-    
-    
+            **self.api.lazy_parse(r, ["symbol", "timestamp"], map, apply), info=r
+        )
+
     def parse_ohlcv(self, r):
         """
         {
@@ -89,4 +88,4 @@ class coinbeneswap(coinbene):
           "t": 1578278880
         }
         """
-        return [r['t']*1000, r['o'], r['h'], r['l'], r['c'], r['v']]
+        return [r["t"] * 1000, r["o"], r["h"], r["l"], r["c"], r["v"]]

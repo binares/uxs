@@ -21,16 +21,16 @@ from .poloniex import poloniex
 from .southxchange import southxchange
 
 __all__ = [
-    'binancefu',
-    'bitmex',
-    'bittrex',
-    'btsefu',
-    'bw',
-    'coinbene',
-    'dragonex',
-    'hitbtc',
-    'krakenfu',
-    'luno',
-    'poloniex',
-    'southxchange',
+    "binancefu",
+    "bitmex",
+    "bittrex",
+    "btsefu",
+    "bw",
+    "coinbene",
+    "dragonex",
+    "hitbtc",
+    "krakenfu",
+    "luno",
+    "poloniex",
+    "southxchange",
 ]

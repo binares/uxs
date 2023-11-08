@@ -8,5 +8,7 @@ from . import shapes
 from . import utils
 
 from .utils import (
-    resolve_times, parse_timeframe, resolve_ohlcv_times,
+    resolve_times,
+    parse_timeframe,
+    resolve_ohlcv_times,
 )

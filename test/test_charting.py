@@ -1,6 +1,16 @@
-from uxs.fintls.charting import Point, Vector, Trendline, LogTrendline, is_near, is_above, is_below, calc_intersection
+from uxs.fintls.charting import (
+    Point,
+    Vector,
+    Trendline,
+    LogTrendline,
+    is_near,
+    is_above,
+    is_below,
+    calc_intersection,
+)
 from fons.time import timestamp_ms
 import datetime
+
 dt = datetime.datetime
 td = datetime.timedelta
 
@@ -8,7 +18,7 @@ P0 = Point(dt(2000, 1, 1), 1000)
 P1 = Point(dt(2000, 1, 2), 1240)
 V = P1 - P0
 L = Trendline(P0, P1)
-P2 = Point(P1.x, P1.y+20)
+P2 = Point(P1.x, P1.y + 20)
 
 
 def test_vector_ops():
@@ -17,21 +27,21 @@ def test_vector_ops():
 
 
 def test_points_add_subtraction():
-    assert V == Vector(86400*1000, 240)
+    assert V == Vector(86400 * 1000, 240)
     assert P0 + V == P1
 
 
 def test_trendline():
     L2 = Trendline(P0, 10)
-    #print(L, L2)
-    assert L == L2 # delta_y of 10 / 1H
+    # print(L, L2)
+    assert L == L2  # delta_y of 10 / 1H
 
 
 def test_trendline_ops():
     assert L + 2 == Trendline(L.slope, L.b + 2)
     assert L - 2 == Trendline(L.slope, L.b - 2)
-    assert L * 2 == Trendline(L.slope*2, L.b*2)
-    assert L / 2 == Trendline(L.slope/2, L.b/2)
+    assert L * 2 == Trendline(L.slope * 2, L.b * 2)
+    assert L / 2 == Trendline(L.slope / 2, L.b / 2)
 
 
 def test_trendline_calc_y():
@@ -46,7 +56,6 @@ def test_calc_distance():
     assert L - P2 == Vector(0, -20)
 
 
-
 lP0 = Point(dt(2000, 1, 1), 10)
 lP1 = Point(dt(2000, 1, 1, 1), 100)
 lL = LogTrendline(lP0, lP1)
@@ -54,7 +63,7 @@ lP2 = Point(lP1.x, lP1.y + 20)
 
 
 def test_log_trendline():
-    assert round(lL.slope, 6) == 1 # 1 exponent per hour
+    assert round(lL.slope, 6) == 1  # 1 exponent per hour
 
 
 def test_calc_log_y():
@@ -71,6 +80,7 @@ def test_calc_log_distance():
 
 oP2 = P1 + Vector(0, -20)
 
+
 def test_is_near():
     assert is_near(P2, L, 21, False) == True
     assert is_near(P2, L, 19, False) == False
@@ -78,9 +88,9 @@ def test_is_near():
     assert is_near(P2, L, 20, False, include=True) == True
     assert is_near(oP2, L, 21, False) == True
     assert is_near(oP2, L, 19, False) == False
-    ratio = (20 / P1.y)
-    assert is_near(P2, L, ratio+0.01) == True
-    assert is_near(P2, L, ratio-0.01) == False
+    ratio = 20 / P1.y
+    assert is_near(P2, L, ratio + 0.01) == True
+    assert is_near(P2, L, ratio - 0.01) == False
 
 
 def test_is_above():

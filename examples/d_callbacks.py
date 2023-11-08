@@ -3,6 +3,7 @@ import asyncio
 
 xs = None
 
+
 def ticker_update_callback(update):
     # The update is always formatted as follows:
     #   {
@@ -29,35 +30,38 @@ def ob_update_callback(update):
 
 
 async def test_callback(cb, channel, symbol):
-    xs.subscribe_to({'_': channel, 'symbol': symbol})
-    
-    await xs.wait_till_subscription_active((channel,symbol))
+    xs.subscribe_to({"_": channel, "symbol": symbol})
+
+    await xs.wait_till_subscription_active((channel, symbol))
     print("'{} {}' activated".format(channel, symbol))
-    
+
     xs.add_callback(cb, channel, symbol)
-    
+
     await asyncio.sleep(5)
-    
+
     xs.remove_callback(cb, channel, symbol)
-    xs.unsubscribe_to({'_': channel, 'symbol': symbol})
+    xs.unsubscribe_to({"_": channel, "symbol": symbol})
 
 
 async def main():
     global xs
-    xs = uxs.get_streamer('kucoin')#, {'connection_defaults': {'handle': {lambda x: print(x)}}})
-    
+    xs = uxs.get_streamer(
+        "kucoin"
+    )  # , {'connection_defaults': {'handle': {lambda x: print(x)}}})
+
     xs.start()
-    
+
     # TICKER
-    #await test_callback(ticker_update_callback, 'ticker', 'BTC/USDT')
-    
+    # await test_callback(ticker_update_callback, 'ticker', 'BTC/USDT')
+
     # ORDERBOOK
-    await test_callback(ob_update_callback, 'orderbook', 'XRP/BTC')
-    
+    await test_callback(ob_update_callback, "orderbook", "XRP/BTC")
+
     await xs.stop()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from fons.log import quick_logging
+
     quick_logging()
     asyncio.get_event_loop().run_until_complete(main())
