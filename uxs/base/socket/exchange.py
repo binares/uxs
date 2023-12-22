@@ -35,7 +35,7 @@ from wsclient import WSClient
 from wsclient.sub import Subscription
 
 import fons.log
-from fons.aio import call_via_loop
+from fons.aio import call_via_loop, FonsEvent
 from fons.dict_ops import deep_update, deep_get
 from fons.errors import QuitException
 from fons.func import get_arg_count
@@ -611,7 +611,7 @@ class ExchangeSocket(WSClient):
         ]
         # query_names = ['fetch_order_book','fetch_ticker','fetch_tickers','fetch_balance']
         self.events = defaultdict(
-            lambda: defaultdict(lambda: asyncio.Event(loop=self.loop))
+            lambda: defaultdict(lambda: FonsEvent(loop=self.loop))
         )
         for n in names:
             self.events[n][-1]
@@ -668,12 +668,12 @@ class ExchangeSocket(WSClient):
         for market in markets:
             for x in ["ticker", "orderbook", "trades", "ohlcv", "l3", "position"]:
                 if market not in self.events[x]:
-                    self.events[x][market] = asyncio.Event(loop=self.loop)
+                    self.events[x][market] = FonsEvent(loop=self.loop)
 
         for cy in currencies:
             for x in ["balance"]:
                 if cy not in self.events[x]:
-                    self.events[x][cy] = asyncio.Event(loop=self.loop)
+                    self.events[x][cy] = FonsEvent(loop=self.loop)
 
     def _init_has(self):
         def to_camelcase(x):
@@ -3627,10 +3627,16 @@ class ExchangeSocket(WSClient):
     def currency_id(self, commonCode):
         # This can be wildly inaccurate when the currencies haven't been initated yet.
         # ccxt doesn't actually use this function in any of its exchanges
-        return self.api.currency_id(commonCode)
+        # return self.api.currency_id(commonCode) #deprecated
+        if commonCode in self.api.currencies:
+            return self.api.currencies[commonCode]["id"]
+        else:
+            return {code: _id for _id, code in self.api.commonCurrencies.items()}[
+                commonCode
+            ]
 
     def symbol_by_id(self, symbol_id):
-        return self.api.markets_by_id[symbol_id]["symbol"]
+        return self.api.markets_by_id[symbol_id][0]["symbol"]
 
     def id_by_symbol(self, symbol):
         return self.api.markets[symbol]["id"]

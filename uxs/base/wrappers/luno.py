@@ -26,7 +26,7 @@ class luno:
             # symbol, taker, maker = r
             symbol = r["Market"].values[0]
             if self.markets_by_id and symbol in self.markets_by_id:
-                symbol = self.markets_by_id[symbol]["symbol"]
+                symbol = self.markets_by_id[symbol][0]["symbol"]
             maker = r[slice(None), "Maker Fee"].values[0]
             taker = r[slice(None), "Taker Fee"].values[0]
             fees[symbol] = {

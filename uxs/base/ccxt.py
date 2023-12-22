@@ -302,10 +302,12 @@ class ccxtWrapper:
         for market in self.markets.values():
             market["lotSize"] = self._get_lot_size(market)
 
-    def _set_market_types(self):
-        if self.markets is None:
+    def _set_market_types(self, markets=None):
+        markets = markets or self.markets
+        if markets is None:
             return
-        for market in self.markets.values():
+        markets = list(markets.values()) if isinstance(markets, dict) else markets
+        for market in markets:
             type = market.get("type")
             if type == "perpetual":
                 type = "swap"
@@ -332,6 +334,9 @@ class ccxtWrapper:
     def set_markets(self, markets, currencies=None):
         import uxs.base.poll as poll
 
+        self._set_market_types(
+            markets
+        )  # otherwise super().set_markets() throws KeyError on missing "spot" key
         super().set_markets(markets, currencies)
         if self.markets is None or not self._wrapper_initiated:
             return None

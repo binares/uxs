@@ -45,7 +45,7 @@ def exec_step_by_base_volume(
             cumother += price * remainder
         while cumvol < step:
             try:
-                price, vol = next(it)
+                price, vol = next(it)[:2]
             except StopIteration as e:
                 if stop == "raise":
                     raise e
@@ -85,7 +85,7 @@ def exec_step_by_quote_volume(
             cumother += remainder / price
         while cumvol < step:
             try:
-                price, vol = next(it)
+                price, vol = next(it)[:2]
             except StopIteration as e:
                 if stop == "raise":
                     raise e
@@ -207,7 +207,7 @@ def get_to_matching_price(
         remainder = (None, 0)
     while True:
         try:
-            _p, _v = next(it)
+            _p, _v = next(it)[:2]
         except StopIteration:
             break
         else:
@@ -237,14 +237,17 @@ def get_to_matching_price(
     }
 
 
-def parse_item(x, price_key=0, amount_key=1):
-    return [float(x[price_key]), float(x[amount_key])]
+def parse_item(x, price_key=0, amount_key=1, count_or_id_key=None):
+    item = [float(x[price_key]), float(x[amount_key])]
+    if count_or_id_key is not None:
+        item.append(int(x[count_or_id_key]))
+    return item
 
 
-def parse_branch(branch, price_key=0, amount_key=1):
+def parse_branch(branch, price_key=0, amount_key=1, count_or_id_key=None):
     if branch is None:
         return []
-    return [parse_item(x, price_key, amount_key) for x in branch]
+    return [parse_item(x, price_key, amount_key, count_or_id_key) for x in branch]
 
 
 def sort_branch(branch, side="bids"):
@@ -252,16 +255,24 @@ def sort_branch(branch, side="bids"):
 
 
 def create_orderbook(
-    data, add_time=False, bids_key="bids", asks_key="asks", price_key=0, amount_key=1
+    data,
+    add_time=False,
+    bids_key="bids",
+    asks_key="asks",
+    price_key=0,
+    amount_key=1,
+    count_or_id_key=2,
 ):
     datetime, timestamp = resolve_times(data, add_time)
     return {
         "symbol": data["symbol"],
         "bids": sort_branch(
-            parse_branch(data.get(bids_key), price_key, amount_key), "bids"
+            parse_branch(data.get(bids_key), price_key, amount_key, count_or_id_key),
+            "bids",
         ),
         "asks": sort_branch(
-            parse_branch(data.get(asks_key), price_key, amount_key), "asks"
+            parse_branch(data.get(asks_key), price_key, amount_key, count_or_id_key),
+            "asks",
         ),
         "timestamp": timestamp,
         "datetime": datetime,
@@ -269,15 +280,16 @@ def create_orderbook(
     }
 
 
-def update_branch(item, branch, side="bids", is_delta=False, round_to=None):
+def update_branch(item, branch, side="bids", is_delta=False, round_to=None, **keys):
     """:param round_to: adding deltas is imprecise, new amount is rounded"""
-    rate, amount = new_item = parse_item(item)
+    new_item = parse_item(item, **keys)
+    rate, amount = new_item[:2]
     if not rate:
         return (0.0, 0.0, 0.0)
     op = rate.__le__ if side in ("ask", "asks") else rate.__ge__
     empty_place = (-1, [rate, 0.0])
     loc, ob_item = next(((i, x) for i, x in enumerate(branch) if op(x[0])), empty_place)
-    prev_rate, prev_amount = ob_item
+    prev_rate, prev_amount = ob_item[:2]
     new_amount = amount
     if loc != -1:
         if prev_rate == rate:  # prices are equal -> item is swapped out / removed
@@ -285,7 +297,7 @@ def update_branch(item, branch, side="bids", is_delta=False, round_to=None):
                 new_amount = max(0.0, prev_amount + amount)
                 if round_to is not None:
                     new_amount = round(new_amount, round_to)
-                new_item = [rate, new_amount]
+                new_item = [rate, new_amount, *new_item[2:]]
             if new_amount:
                 branch[loc] = new_item
             else:
@@ -323,9 +335,9 @@ def infer_side(ob, price):
 def get_bidask(ob, as_dict=False):
     bid = ask = bidVolume = askVolume = None
     if ob["bids"]:
-        bid, bidVolume = ob["bids"][0]
+        bid, bidVolume = ob["bids"][0][:2]
     if ob["asks"]:
-        ask, askVolume = ob["asks"][0]
+        ask, askVolume = ob["asks"][0][:2]
 
     if not as_dict:
         return bid, ask
