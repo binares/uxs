@@ -1,4 +1,12 @@
+from __future__ import annotations  # `tuple` etc for py 3.7 and 3.8
+from typing import Union, Tuple, List, Set, Dict, Any, Optional, Iterable, Callable
+
+import itertools
 from collections import defaultdict
+import time
+import logging
+from ccxt.base.types import Market, Ticker  # , Currency
+
 from .basics import (
     get_conversion_op,
     as_source,
@@ -11,17 +19,10 @@ from .basics import (
     get_target_cy,
     create_cy_graph,
 )
-from .ob import (
-    get_to_matching_volume,
-    get_to_matching_price,
-    get_stop_condition,
-    exec_step,
-    select_next_step,
-    select_prev_step,
-    calc_vwap,
-)
 
 from fons.iter import unique, flatten
+
+sh_logger = logging.getLogger("uxs.shapes")
 
 
 class Line:
@@ -37,6 +38,7 @@ class Line:
         "xcsyms",
         "cpaths",
         "cys_map",
+        "paths",
     )
 
     def __init__(self, xc_symbol_pairs, start_direction=None, cys_map={}):
@@ -400,285 +402,239 @@ class CPath(Path):
         return self.line
 
 
-def _markets_from_tickers(tickers):
-    return {
-        s: {"base": s.split("/")[0], "quote": s.split("/")[1]}
-        for s in tickers
-        if len(s.split("/")) == 2
-    }
+MarketsCollection = Dict[str, Dict[str, Market]]
+TickersCollection = Dict[str, Dict[str, Ticker]]
+# XCSymbol = Tuple[str, str]
+# XCSymbolDirection = Tuple[str, str, int]
+XCSymbolBaseQuote = Tuple[str, str, str, str]
+CurrencyGraph = Dict[
+    str, Set[str]
+]  # currenty -> all of its paired currencies (in any market of any exchange)
+
+XCSymbols_By_SymbolID = Dict[
+    Tuple[str, str], Set[XCSymbolBaseQuote]
+]  # Each symbol by its sorted((base, quote)) -> [(xc, symbol, base, quote), ...] of all exchanges
+Shapes_By_N = Dict[int, List[Shape]]
 
 
-def _filter_markets(markets_coll, tickers_coll={}):
-    xc_list = unique(list(markets_coll.keys()) + list(tickers_coll.keys()), astype=list)
-    markets_coll2 = {}
+class Helpers:
+    @staticmethod
+    def _markets_from_tickers(tickers) -> dict[str, dict[str, str]]:
+        return {
+            s: {"base": s.split("/")[0], "quote": s.split("/")[1]}
+            for s in tickers
+            if len(s.split("/")) == 2
+        }
 
-    for xc in xc_list:
-        tmarkets = (
-            _markets_from_tickers(tickers_coll[xc]) if xc in tickers_coll else None
+    @staticmethod
+    def add_markets_from_tickers(markets_coll, tickers_coll={}):
+        xc_list = unique(
+            list(markets_coll.keys()) + list(tickers_coll.keys()), astype=list
         )
+        markets_coll_new = {}
+
+        for xc in xc_list:
+            markets_of_an_xc_from_its_tickers = (
+                Helpers._markets_from_tickers(tickers_coll[xc])
+                if xc in tickers_coll
+                else None
+            )
+
+            if xc in markets_coll:
+                markets = markets_coll[xc]
+                if markets_of_an_xc_from_its_tickers is not None:
+                    markets = {
+                        s: y
+                        for s, y in markets.items()
+                        if s in markets_of_an_xc_from_its_tickers
+                    }
+                markets_coll_new[xc] = markets
+
+            elif markets_of_an_xc_from_its_tickers is not None:
+                markets_coll_new[xc] = markets_of_an_xc_from_its_tickers
+
+        return markets_coll_new
+
+    @staticmethod
+    def _extract_currencies(
+        symbol: str, xc: str, markets_coll: MarketsCollection
+    ) -> tuple[Union[str, None], Union[str, None]]:
+        base = quote = None
+        both_defined = False
 
         if xc in markets_coll:
-            markets = markets_coll[xc]
-            if tmarkets is not None:
-                markets = {s: y for s, y in markets.items() if s in tmarkets}
-            markets_coll2[xc] = markets
+            if symbol in markets_coll[xc]:
+                x = markets_coll[xc][symbol]
+                if isinstance(x, dict):
+                    both_defined = "base" in x and "quote" in x
+                    base = x.get("base")
+                    quote = x.get("quote")
 
-        elif tmarkets is not None:
-            markets_coll2[xc] = tmarkets
+        if not both_defined:
+            try:
+                base, quote = symbol.split("/")
+            except ValueError:
+                pass
 
-    return markets_coll2
+        if None not in (base, quote):
+            return base, quote
+        else:
+            return None, None
 
+    @staticmethod
+    def flatten_symbols(
+        markets_coll: MarketsCollection,
+    ) -> List[Tuple[string, string, string, string]]:
+        xsymbols = []
+        for xc, markets in markets_coll.items():
+            for symbol in markets:
+                base, quote = Helpers._extract_currencies(symbol, xc, markets_coll)
+                if base is not None and quote is not None:
+                    t = (xc, symbol, base, quote)
+                else:
+                    t = (xc, symbol, None, None)
+                xsymbols.append(t)
 
-def _flatten_symbols(markets_coll):
-    xsymbols = []
-    for xc, markets in markets_coll.items():
-        for symbol in markets:
-            base, quote = _extract_cys(symbol, xc, markets_coll)
-            if base is not None and quote is not None:
-                t = (xc, symbol, base, quote)
-            else:
-                t = (xc, symbol, None, None)
-            xsymbols.append(t)
-
-    return xsymbols
-
-
-class _symbol_rank:
-    __slots__ = ("symbol", "base", "quote", "bases")
-
-    def __init__(self, symbol, base, quote, quote_base_map):
-        self.symbol = symbol
-        self.base = base
-        self.quote = quote
-
-        self.bases = quote_base_map
-
-    def is_quote(self, cy):
-        return bool(self.bases[cy])
-
-    def __lt__(self, other):
-        q, b, oq, ob, bases = self.quote, self.base, other.quote, other.base, self.bases
-
-        if None in (q, b):
-            return True
-        elif None in (oq, ob):
-            return False
-
-        isq, oisq = self.is_quote(b), self.is_quote(ob)
-        if isq != oisq:
-            return oisq
-
-        A0 = b in bases[ob]
-        A1 = ob in bases[b]
-        if A0 != A1:
-            return A0
-
-        B0 = q in bases[ob]
-        B1 = oq in bases[b]
-        if B0 != B1:
-            return B0
-
-        C0 = q in bases[oq]
-        C1 = oq in bases[q]
-        if C0 != C1:
-            return C0
-
-        D0 = b in bases[oq]
-        D1 = ob in bases[q]
-        if D0 != D1:
-            return D0
-
-        """s0 = A0 + B0 + C0 + D0
-        s1 = A1 + B1 + C1 + D1
-        
-        return s0 >= s1"""
-
-        return True
+        return xsymbols
 
 
-def _create_quote_base_map(xsymbols, markets_coll={}):
-    bases = defaultdict(set)
+def _create_currency_graph(
+    markets_coll: MarketsCollection,
+) -> Tuple[CurrencyGraph, XCSymbols_By_SymbolID]:
+    """returns:
+    {
+        currency: [paired_currency_1 (any market of any exchange), paired_currency_2, ...],
+    }
+    """
+    XCSymbolBaseQuote_list = Helpers.flatten_symbols(markets_coll)
+    currency_graph = defaultdict(set)
+    xcsymbols_by_symbol_id = defaultdict(set)
+    for xc, symbol, base, quote in XCSymbolBaseQuote_list:
+        if base is not None or quote is not None:
+            currency_graph[base].add(quote)
+            currency_graph[quote].add(base)
+            xcsymbols_by_symbol_id[tuple(sorted((base, quote)))].add(
+                (xc, symbol, base, quote)
+            )
 
-    for xc, symbol, base, quote in xsymbols:
-        bases[quote].add(base)
-
-    return bases
-
-
-def _extract_cys(symbol, xc, markets_coll):
-    base = quote = None
-    both_defined = False
-
-    if xc in markets_coll:
-        if symbol in markets_coll[xc]:
-            x = markets_coll[xc][symbol]
-            if isinstance(x, dict):
-                both_defined = "base" in x and "quote" in x
-                base = x.get("base")
-                quote = x.get("quote")
-
-    if not both_defined:
-        try:
-            base, quote = symbol.split("/")
-        except ValueError:
-            pass
-
-    if None not in (base, quote):
-        return base, quote
-    else:
-        return None, None
-
-
-def _sort_xsymbols(xsymbols, quote_base_map=None, reverse=False, markets_coll={}):
-    if quote_base_map is None:
-        quote_base_map = _create_quote_base_map(xsymbols, markets_coll)
-
-    srs = [
-        _symbol_rank(s, base, quote, quote_base_map) for xc, s, base, quote in xsymbols
-    ]
-    srs.sort(reverse=reverse)
-    # [base-only-cys -> hybrids -> quote-only-cys]
-
-    return list(unique(x.symbol for x in srs))
-
-
-def create_symbol_graph(markets_coll):
-    xsymbols = _flatten_symbols(markets_coll)
-    symbol_list = _sort_xsymbols(xsymbols, reverse=True)
-    # print(symbol_list)
-    xsymbols.sort(key=lambda x: symbol_list.index(x[1]))
-    graph = {}
-
-    for i, xcsym in enumerate(xsymbols):
-        xc, sym, base, quote = xcsym
-        cys = (base, quote)
-        graph[(xc, sym)] = add_to = []
-
-        if base is None:
-            continue
-
-        for xcsym2 in xsymbols[i + 1 :]:
-            xc2, sym2, base2, quote2 = xcsym2
-            cys2 = (base2, quote2)
-
-            if base2 is None:
-                continue
-
-            for j, _cy in enumerate(cys):
-                # _cy in source_cy in sym2, and target_cy in sym1
-                try:
-                    pos2 = cys2.index(_cy)
-                except ValueError:
-                    continue
-                d = int(not j)
-                # (exchange, symbol, direction)
-                add_to.append((xc2, sym2, d))
-
-    return graph
-
-
-def _filter_shapes(shapes):
-    return unique(
-        shapes, key=lambda shape: tuple(sorted(x[:2] for x in shape)), astype=list
-    )
+    return currency_graph, xcsymbols_by_symbol_id
 
 
 def get_shapes(
-    n, markets_coll, tickers_coll={}, limit_xcs=None, as_tuples=False, compact=None
-):
-    """Returns all n-combinations of (xc,cy) pairs
-    :param n: int or range
-    markets_coll: {xc: markets, ...}
-    tickers_coll: {xc: tickers, ...}
-    limit_xcs: <int> - maximum number of different exchanges in a shape"""
-
-    is_int = isinstance(n, int)
+    n: Union[int, List[int]],
+    markets_coll: MarketsCollection,
+    tickers_coll: TickersCollection = {},
+    max_unique_exchanges: int = None,
+) -> Shapes_By_N:
     n_values = (n,) if isinstance(n, int) else tuple(n)
     max_n = max(n_values)
 
     if min(n_values) < 2:
         raise ValueError("`n` must be >= 2; got: {}".format(n))
 
-    markets_coll = _filter_markets(markets_coll, tickers_coll)
-    symbol_graph = create_symbol_graph(markets_coll)
+    markets_coll = Helpers.add_markets_from_tickers(markets_coll, tickers_coll)
+    currency_graph, xcsymbols_by_symbol_id = _create_currency_graph(markets_coll)
 
-    n_shapes = {i: [] for i in n_values}
+    # 1. Find the circular currency trails
+    #  - starting point == any other starting point
+    #  - forward == backward
+    # (i.e. there'll be no duplicates in starting point/polarity sense)
+    _seen_currency_shapes = set()
+    n_shapes_of_currencies: Dict[Set[Tuple[str, ...]]] = {i: set() for i in n_values}
 
-    def _reverse_trail(t):
-        return (t[0],) + (t[-1:0:-1])
+    def rec_cy_trail(trail: Tuple[str]):
+        last_cy = trail[-1]
 
-    def _is_circular(trail):
-        first_xc, first_sym, first_d = trail[0]
-        last_xc, last_sym, last_d = trail[-1]
-        f_cys = _extract_cys(first_sym, first_xc, markets_coll)
-        l_cys = _extract_cys(last_sym, last_xc, markets_coll)
-        return get_target_cy(l_cys, last_d) == get_source_cy(f_cys, first_d)
+        n = len(trail)
+        is_length_included = n in n_values
+        is_length_unsaturated = n < max_n
 
-    _exceeds_xcs_limit = (
-        (lambda *a: False)
-        if limit_xcs is None
-        else (lambda xcs, xc_count, cy_xc: xc_count >= limit_xcs and cy_xc not in xcs)
-    )
-
-    def rec(trail):
-        trail_0 = trail
-        xc, sym, d = trail[-1]
-        cys = _extract_cys(sym, xc, markets_coll)
-        tcy = get_target_cy(cys, d)
-
-        xcs = set(x[0] for x in trail_0)
-        xc_count = len(xcs)
-
-        n = len(trail) + 1
-        is_included = n in n_values
-        do_continue = n < max_n
-
-        for xc2, sym2, _d in symbol_graph[(xc, sym)]:
-            if _d != d or _exceeds_xcs_limit(xcs, xc_count, xc2):
+        for next_cy in currency_graph[last_cy]:
+            if next_cy in trail[1:]:
                 continue
 
-            cys2 = _extract_cys(sym2, xc2, markets_coll)
-            d2 = int(cys2.index(tcy))
-            trail = trail_0 + ((xc2, sym2, d2),)
+            is_circular = next_cy == trail[0]
 
-            if is_included and _is_circular(trail):
-                # currently the trail is middle/(highest_)quote -> base/quote -> base/middle
-                # reverse the trail for it to be middle/quote -> base/middle -> base/quote
-                trail_r = _reverse_trail(trail)
-                n_shapes[n].append(trail_r)
+            if is_length_included and is_circular:
+                # We don't append the new_cy (as it's equal to the first one)
+                alphabetical_loc = trail.index(sorted(trail)[0])
+                trail_forwards = trail[alphabetical_loc:] + trail[:alphabetical_loc]
+                trail_backwards = (trail_forwards[0],) + trail_forwards[-1:0:-1]
+                if (
+                    trail_forwards not in _seen_currency_shapes
+                    and trail_backwards not in _seen_currency_shapes
+                ):
+                    _seen_currency_shapes.add(trail_forwards)
+                    _seen_currency_shapes.add(trail_backwards)
+                    n_shapes_of_currencies[n].add(trail_forwards)
 
-            if do_continue:
-                rec(trail)
+            if is_length_unsaturated and not is_circular:
+                rec_cy_trail(trail + (next_cy,))
 
-    for xc, sym in symbol_graph:
-        rec(((xc, sym, 0),))
+    _started = time.time()
+    for cy in currency_graph:
+        rec_cy_trail((cy,))
 
-    def _create_cys_map(t):
-        cys_map = {}
-        for xc, sym, d in t:
-            mdict = markets_coll[xc][sym]
-            cys_map[(xc, sym)] = (mdict["base"], mdict["quote"])
-        return cys_map
+    sh_logger.debug(
+        f"Finding {sum(len(x) for x in n_shapes_of_currencies.values())} currency shapes took {time.time()-_started:.2f} seconds"
+    )
+    # print(n_shapes_of_currencies[2])
+    """are_unique = all(
+        t[::-1] not in n_shapes_of_currencies[2] for t in n_shapes_of_currencies[2]
+    )
+    print(f"Are unique: {are_unique}")
+    print(len(n_shapes_of_currencies[2]))"""
 
-    # n_shapes = _filter_shapes(n_shapes)
-    if not as_tuples:
-        n_shapes = {
-            _n: [Shape(t, cys_map=_create_cys_map(t)) for t in items]
-            for _n, items in n_shapes.items()
-        }
+    # 2. Match the currency paths to (exchange, symbol) paths
 
-    if compact is None:
-        compact = is_int
+    def find_symbol_paths_for_cy_trail(cy_trail: Tuple[str]):
+        xcsymbols_lists: List[List[XCSymbolBaseQuote]] = []
+        for i in range(len(cy_trail)):
+            cy = cy_trail[i]
+            next_cy = cy_trail[(i + 1) % len(cy_trail)]
+            symbol_id = tuple(sorted((cy, next_cy)))
+            corresponding_xcsymbols = xcsymbols_by_symbol_id[symbol_id]
+            xcsymbols_lists.append(corresponding_xcsymbols)
 
-    if compact:
-        n_shapes = list(flatten(n_shapes.values(), exclude_types=(tuple,)))
+        shape_tuples: List[Tuple[Tuple[XCSymbol], Dict[XCSymbol, Tuple[str, str]]]] = []
+        if len(cy_trail) == 2:
+            # Both xcsymbols lists have the same (exchanges, symbol) pairs; use only one list
+            xcsymbols_combinations = itertools.combinations(xcsymbols_lists[0], 2)
+        else:
+            # No repeating (exchange, symbol) between any of the lists
+            xcsymbols_combinations = itertools.product(*xcsymbols_lists)
 
-    return n_shapes
+        # Make all combinations of xcsymbols
+        for xcsymbols_combination in xcsymbols_combinations:
+            num_exchanges = len(set(_[0] for _ in xcsymbols_combination))
+            if num_exchanges > max_unique_exchanges:
+                continue
+            # Create the symbol path
+            xc_symbol_pairs = ()
+            cys_map = {}
+            for i in range(len(cy_trail)):
+                xc, symbol, base, quote = xcsymbols_combination[i]
+                xc_symbol_pairs += ((xc, symbol),)
+                cys_map[(xc, symbol)] = (base, quote)
+            # Create the shape
+            shape_tuples.append((xc_symbol_pairs, cys_map))
 
+        return shape_tuples
 
-if __name__ == "__main__":
-    shapes = get_shapes(2, {"a": {"A/B": {}}, "b": {"A/B": {}}}, as_tuples=False)
-    for s in shapes:
-        print("{}".format("-".join(s.cys)), s.symbols, s.directions, s.exchanges)
-        for c in s.paths:
-            print("::{}".format("-".join(c.cys)), c.symbols, c.directions, c.exchanges)
+    shape_tuples = []
+
+    _started = time.time()
+    for n in n_shapes_of_currencies:
+        for cy_trail in n_shapes_of_currencies[n]:
+            shape_tuples += find_symbol_paths_for_cy_trail(cy_trail)
+    sh_logger.debug(
+        f"Finding {len(shape_tuples)} shapes took {time.time()-_started:.2f} seconds"
+    )
+
+    _started = time.time()
+    shapes = [Shape(xcsyms, cys_map=cys_map) for xcsyms, cys_map in shape_tuples]
+    sh_logger.debug(
+        f"Initiating {len(shapes)} shapes took {time.time()-_started:.2f} seconds"
+    )
+
+    return shapes
