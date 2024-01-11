@@ -142,22 +142,25 @@ class ccxtWrapper:
         self._wrapper_initiated = True
 
         currencies = markets = None
+        which_logger = logger2 if self.verbose else tlogger
 
         if load_cached_markets is not False:
             try:
                 currencies = poll.load(xc, "currencies", load_cached_markets, 1)[0].data
+                tlogger.debug("{} - loaded cached currencies".format(xc))
             except (IndexError, json.JSONDecodeError) as e:
-                if self.verbose:
-                    logger.debug(
-                        "{} - could not (init)load cached currencies.".format(xc)
-                    )
+                which_logger.debug(
+                    "{} - could not (init)load cached currencies".format(xc)
+                )
 
         if load_cached_markets is not False:
             try:
                 markets = poll.load(xc, "markets", load_cached_markets, 1)[0].data
+                tlogger.debug("{} - loaded cached markets".format(xc))
             except (IndexError, json.JSONDecodeError) as e:
-                if self.verbose:
-                    logger.debug("{} - could not (init)load cached markets.".format(xc))
+                which_logger.debug(
+                    "{} - could not (init)load cached markets".format(xc)
+                )
 
         if markets:
             self.set_markets(markets, currencies)

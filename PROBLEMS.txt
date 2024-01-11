@@ -1,0 +1,14 @@
+Broken exchanges:
+ - krakenfu
+   - publicGetTickers
+   - ... ?
+ - poloniex
+ - gateiofu
+ - coindcx
+
+Delisted from ccxt:
+ - bw
+ - southxchange
+
+
+

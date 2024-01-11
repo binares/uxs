@@ -15,6 +15,7 @@ test_dir = os.path.join(APPDATA_DIR, "test")
 
 
 # Execute this once per module
+#  (isn't executed automatically! but can be called once per every module)
 # Fixtures defined in conftest.py can be accessed in any test function
 # without importing (if it is included as an argument of the function)
 @pytest.fixture(scope="module")

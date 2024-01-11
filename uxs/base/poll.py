@@ -238,6 +238,7 @@ def sn_load_markets(api, limit=None):
     try:
         # this will call load_markets, which will set both markets and currencies
         m0 = sn_fetch(api, "markets", limit, strip=False)[0]
+        # print("m0", m0)
         # unless it loaded from cache, in which case they will have to be set manually
         if not api.markets:
             l1 = limit
@@ -446,12 +447,13 @@ async def fetch(
     :type limit: dt or timedelta-like (timedelta, seconds, freqstr)
     :param limit: max age of the cached data. If None then default cache_expiry
                 of exchange and type is used. -1 (< 0) for no age limit.
-    :param file: allow reading from cache files (unexpired)
+    :param file: allow reading from cache files (unexpired), if cache is not enabled, this is ignored
     :param globals: allow retrieving from global cache (unexpired)
     :param empty_update: if no unexpired cache was found, force fetch new data (update())
     """
     type = _resolve_type(type)
 
+    # By default no caching is enabled (not for markets, tickers, ...), so no cache is retrieved nor saved
     if not is_caching_enabled(exchange, type):
         l = await update(
             exchange,
@@ -520,12 +522,13 @@ def sn_fetch(
     :type limit: dt or timedelta-like (timedelta, seconds, freqstr)
     :param limit: max age of the cached data. If None then default cache_expiry
                 of exchange and type is used. -1 (< 0) for no age limit.
-    :param file: allow reading from cache files (unexpired)
+    :param file: allow reading from cache files (unexpired); if cache is not enabled, this is ignored
     :param globals: allow retrieving from global cache (unexpired)
     :param empty_update: if no unexpired cache was found, force fetch new data (update())
     """
     type = _resolve_type(type)
 
+    # By default no caching is enabled (not for markets, tickers, ...), so no cache is retrieved nor saved
     if not is_caching_enabled(exchange, type):
         l = sn_update(
             exchange,

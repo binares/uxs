@@ -1,4 +1,4 @@
-__version__ = "0.6.1"
+__version__ = "0.7.0"
 __author__ = "binares"
 
 import os
@@ -128,6 +128,16 @@ def get_streamer(exchange, config={}):
 # For backwards compatibility
 get_socket_cls = get_streamer_cls
 get_socket = get_streamer
+
+
+def lazy_customize(enable_caching_for=["markets", "currencies", "tickers"]):
+    """
+    Enable caching - these types will be cached after each fetch;
+      and markets/currencies are loaded from cache (discarded and fetched again if age > 30 minutes)
+    """
+    for item in enable_caching_for:
+        set_enable_caching({item: True}, make_permanent=True)
+
 
 """
 Tokens can be stored in a yaml file with the following format:
