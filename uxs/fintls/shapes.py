@@ -19,6 +19,7 @@ from .basics import (
     get_target_cy,
     create_cy_graph,
 )
+from . import shapes_cython
 
 from fons.iter import unique, flatten
 
@@ -52,7 +53,7 @@ class Line:
         exchanges = tuple(x[0] for x in xc_symbol_pairs)
         symbols = tuple(x[1] for x in xc_symbol_pairs)
 
-        cys, cy_sides = self._init_cys(n, xc_symbol_pairs, cys_map, start_direction)
+        cys, cy_sides = Line._init_cys(n, xc_symbol_pairs, cys_map, start_direction)
         directions = tuple(int(not cy_sides[i]) for i in range(n))
 
         self.n = n
@@ -69,6 +70,14 @@ class Line:
 
     @staticmethod
     def _init_cys(n, xc_symbol_pairs, cys_map={}, start_direction=None):
+        """
+        # Speedup was like 20%
+        if start_direction is None:
+            start_direction = -1
+        if not isinstance(cys_map, dict):
+            cys_map = dict(cys_map)
+        return shapes_cython._init_cys(n, xc_symbol_pairs, cys_map, start_direction)
+        """
         if not isinstance(cys_map, dict):
             cys_map = dict(cys_map)
         cys = []
@@ -517,7 +526,7 @@ def _create_currency_graph(
                 (xc, symbol, base, quote)
             )
 
-    return currency_graph, xcsymbols_by_symbol_id
+    return dict(currency_graph), xcsymbols_by_symbol_id
 
 
 def get_shapes(
@@ -525,6 +534,7 @@ def get_shapes(
     markets_coll: MarketsCollection,
     tickers_coll: TickersCollection = {},
     max_unique_exchanges: int = None,
+    use_cython: bool = True,
 ) -> Shapes_By_N:
     n_values = (n,) if isinstance(n, int) else tuple(n)
     max_n = max(n_values)
@@ -572,8 +582,13 @@ def get_shapes(
                 rec_cy_trail(trail + (next_cy,))
 
     _started = time.time()
-    for cy in currency_graph:
-        rec_cy_trail((cy,))
+    if not use_cython:
+        for cy in currency_graph:
+            rec_cy_trail((cy,))
+    else:
+        n_shapes_of_currencies = shapes_cython.create_shapes_of_currencies(
+            n_values, currency_graph
+        )
 
     sh_logger.debug(
         f"Finding {sum(len(x) for x in n_shapes_of_currencies.values())} currency shapes took {time.time()-_started:.2f} seconds"
@@ -607,7 +622,7 @@ def get_shapes(
         # Make all combinations of xcsymbols
         for xcsymbols_combination in xcsymbols_combinations:
             num_exchanges = len(set(_[0] for _ in xcsymbols_combination))
-            if num_exchanges > max_unique_exchanges:
+            if max_unique_exchanges and num_exchanges > max_unique_exchanges:
                 continue
             # Create the symbol path
             xc_symbol_pairs = ()
@@ -630,6 +645,8 @@ def get_shapes(
     sh_logger.debug(
         f"Finding {len(shape_tuples)} shapes took {time.time()-_started:.2f} seconds"
     )
+
+    # return shape_tuples
 
     _started = time.time()
     shapes = [Shape(xcsyms, cys_map=cys_map) for xcsyms, cys_map in shape_tuples]
