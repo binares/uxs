@@ -10,7 +10,6 @@ directs the endpoints to Binance Futures (instead of the default one, Binance "s
 from .binancefu import binancefu
 from .bitmex import bitmex
 from .btsefu import btsefu
-from .bw import bw
 from .coinbene import coinbene
 from .dragonex import dragonex
 from .hitbtc import hitbtc
@@ -23,7 +22,6 @@ __all__ = [
     "binancefu",
     "bitmex",
     "btsefu",
-    "bw",
     "coinbene",
     "dragonex",
     "hitbtc",

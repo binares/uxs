@@ -61,11 +61,6 @@ python -m uxs.test_xc luno ob=ETH/BTC u r d
 python -m uxs.test_xc luno trades=ETH/BTC d verbose
 python -m uxs.test_xc luno order
 python -m uxs.test_xc luno order+XRP/BTC,limit,buy,0.002,9200 d
-python -m uxs.test_xc bw ob=BTC/USDT u r d
-python -m uxs.test_xc bw trades=BTC/USDT u r d
-python -m uxs.test_xc bw ohlcv=BTC/USDT
-python -m uxs.test_xc bw tickers
-python -m uxs.test_xc bw ticker=BTC/USDT
 python -m uxs.test_xc coinbene ticker=BTC/USDT
 python -m uxs.test_xc coinbene ob=BTC/USDT
 python -m uxs.test_xc coinbene ohlcv=BTC/USDT
