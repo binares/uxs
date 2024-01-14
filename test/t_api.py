@@ -126,9 +126,9 @@ def test_exchange_init():
 
 
 async def async_main():
-    api = get_exchange({"exchange": "bittrex", "kwargs": {"load_cached_markets": -1}})
+    api = get_exchange({"exchange": "binance", "kwargs": {"load_cached_markets": -1}})
     test_update_markets(api)
-    market = "DGB/USD"
+    market = "ETH/USDT"
     cys = market.split("/")
     market_btc = "{}/BTC".format(cys[0])
     api.tickers = (await poll.get(api, "tickers", None))[0].data
@@ -140,7 +140,7 @@ async def async_main():
     print(
         api.tickers[market_btc]["last"],
         api.tickers[market]["last"],
-        api.tickers["BTC/USD"]["last"],
+        api.tickers["BTC/USDT"]["last"],
     )
 
     buy_price = api.round_price(market, cur_price / 2, "buy")

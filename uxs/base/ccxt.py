@@ -941,7 +941,7 @@ class ccxtWrapper:
         inf = self.markets[symbol]
         min_v = inf["limits"]["amount"]["min"]
         max_v = inf["limits"]["amount"]["max"]
-        # Some may raise KeyError (e.g. poloniex on cost[max]. bittrex on cost)
+        # Some may raise KeyError (e.g. poloniex on cost[max])
         min_qv_items = [(inf["limits"].get("cost", {}).get("min"), price, False)]
         max_qv_items = [(inf["limits"].get("cost", {}).get("max"), price, False)]
         min_xv = inf["limits"].get("cost_in_x", {}).get("min")
@@ -2014,16 +2014,14 @@ async def close_all_exchanges():
 # do you get x_amount*(1-fee) or x_amount?
 # binance: x_amount*(1-fee)
 # poloniex: x_amount*(1-fee)
-# bittrex: x_amount
 # hitbtc: x_amount
 # kucoin: x_amount
-# formula1: x_amount/price/(1+fee) [bittrex,hitbtc,kucoin]
+# formula1: x_amount/price/(1+fee) [hitbtc,kucoin]
 # formula2: x_amount/price*(1-fee) [binance,poloniex]
 
 # If your balance is x_amount, can you sell x_amount?
 # binance: true
 # poloniex: true
-# bittrex: true
 # hitbtc: true
 # kucoin: true
 # formula: x_amount*price*(1-fee)

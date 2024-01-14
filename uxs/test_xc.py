@@ -28,7 +28,7 @@ import warnings
 import sys
 import yaml
 
-DEFAULT_EXCHANGE = "bittrex"
+DEFAULT_EXCHANGE = "binance"
 DEFAULT_DISPLAY = ["ob"]
 
 import uxs

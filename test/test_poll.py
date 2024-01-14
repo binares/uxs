@@ -9,7 +9,7 @@ from uxs.base.poll import save, create_new, load, clear_cache
 test_dir, settings_test_path = _init()
 
 
-EXCHANGES = ["binance", "bittrex", "kucoin"]
+EXCHANGES = ["binance", "okx", "kucoin"]
 TYPES = ["orderbook", "tickers"]
 
 DATA = [

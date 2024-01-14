@@ -10,7 +10,7 @@ All caching works through uxs.poll
 async def main():
     # fetches ticker no more older than 1H. If not found in the cache
     # then fetches via ccxt, and caches the result.
-    ticker = await fetch("bittrex", ("ticker", "BTC/USDT"), 3600)
+    ticker = await fetch("binance", ("ticker", "BTC/USDT"), 3600)
 
     markets = await fetch("poloniex", "markets", 1800)
 

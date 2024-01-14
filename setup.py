@@ -9,7 +9,7 @@ README = (HERE / "README.md").read_text()
 with open(HERE / "requirements.txt", encoding="utf-8") as f:
     requirements = f.read().split("\n")
 
-packages = find_packages(exclude=["examples", "gen", "test"])
+packages = find_packages(exclude=["delisted", "examples", "gen", "test"])
 
 if "uxs._data" not in packages:
     packages.append("uxs._data")
