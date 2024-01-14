@@ -48,7 +48,6 @@ from uxs.krakenfu import krakenfu
 from uxs.kucoin import kucoin
 from uxs.luno import luno
 from uxs.poloniex import poloniex
-from uxs.southxchange import southxchange
 
 
 def list_streaming_exchanges():

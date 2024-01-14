@@ -29,7 +29,6 @@ Supported exchanges:
 | kucoin       |   +    |      +      |     +     |    |   p   |   +    |    +    |   o   |  o   |          |
 | luno         |   p    |      p      |     w     | +  |   p   |   w    |    p    |   o   |  o   |          |
 | poloniex     |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
-| southxchange |   p    |      p      |     +     |    |   p   |   +    |    p    |   p   |      |          |
 
 Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. However some exchanges like bitmex require you to subscribe to each market directly for order and fill updates: `xs.subscribe_to_own_market(symbol)` (but you'll still want to also subscribe to *account*, as it contains balance and position updates). 
 
