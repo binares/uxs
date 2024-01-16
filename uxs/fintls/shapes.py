@@ -29,88 +29,90 @@ sh_logger = logging.getLogger("uxs.shapes")
 class Line:
     """
     n=2 memory stats:
-     - total size: 1.6 kB
-     - added 6 paths: 6x 2.7kB = 16.2kB
+     - total size: 0.9 kB
+     - added 2 paths: 2x 0.6kB = 1.2kB
     """
 
     # Linear path of symbols
     __slots__ = (
         "n",
-        "exchanges",
-        "symbols",
         "cys",
         "cy_sides",
         "directions",
-        "xccys",
-        "xcsyms",
-        # "cpaths",
-        "cys_map",
+        "xc_symbol_base_quotes",
         "paths",
     )
 
     def __init__(
         self,
-        xc_symbol_pairs: Union[Tuple[XCSymbol, ...], Tuple[XCSymbolBaseQuote, ...]],
+        xc_symbol_base_quotes: Tuple[XCSymbolBaseQuote, ...],
         start_direction=None,
-        cys_map: Dict[XCSymbol, Tuple[str, str]] = {},
     ):
         """Symbol path must be linear
         If `start_direction` is not given, it is determined automatically,
          and may be unexpected if cys_in_symbol_0==cys_in_symbol_1 (or n==2 for circular)
         """
-        if not cys_map and xc_symbol_pairs and len(xc_symbol_pairs[0]) >= 4:
-            cys_map = {(x[0], x[1]): (x[2], x[3]) for x in xc_symbol_pairs}
+        n = len(xc_symbol_base_quotes)
 
-        xc_symbol_pairs = tuple(tuple(x[:2]) for x in xc_symbol_pairs)
-        n = len(xc_symbol_pairs)
-        exchanges = tuple(x[0] for x in xc_symbol_pairs)
-        symbols = tuple(x[1] for x in xc_symbol_pairs)
-
-        cys, cy_sides = Line._init_cys(n, xc_symbol_pairs, cys_map, start_direction)
+        cys, cy_sides = Line._init_cys(n, xc_symbol_base_quotes, start_direction)
         directions = tuple(int(not cy_sides[i]) for i in range(n))
 
         self.n = n
-        self.exchanges = exchanges
-        self.symbols = symbols
         self.directions = directions
         self.cys = tuple(cys)
         self.cy_sides = tuple(cy_sides)
-        self.xccys = tuple(zip(exchanges + (None,), cys))
-        self.xcsyms = xc_symbol_pairs
-        self.cys_map = tuple(cys_map.items())
-
+        self.xc_symbol_base_quotes = tuple(xc_symbol_base_quotes)
         self.create_paths()
 
+    @property
+    def exchanges(self):
+        return tuple(x[0] for x in self.xcsyms)
+
+    @property
+    def symbols(self):
+        return tuple(x[1] for x in self.xcsyms)
+
+    @property
+    def xcsyms(self):
+        return tuple(x[:2] for x in self.xc_symbol_base_quotes)
+
+    @property
+    def xccys(self):
+        return tuple(zip(self.exchanges + (None,), self.cys))
+
+    # self.create_paths()
+
     @staticmethod
-    def _init_cys(n, xc_symbol_pairs, cys_map={}, start_direction=None):
+    def _init_cys(n, xc_symbol_base_quotes, start_direction=None):
         """
         # Speedup was like 20%
         if start_direction is None:
             start_direction = -1
-        if not isinstance(cys_map, dict):
-            cys_map = dict(cys_map)
         return shapes_cython._init_cys(n, xc_symbol_pairs, cys_map, start_direction)
         """
-        if not isinstance(cys_map, dict):
-            cys_map = dict(cys_map)
         cys = []
         cy_sides = []
-        split = [
-            s.split("/") if (xc, s) not in cys_map else cys_map[(xc, s)]
-            for xc, s in xc_symbol_pairs
+        base_quote_pairs = [
+            (base, quote) for _, _, base, quote in xc_symbol_base_quotes
         ]
         if start_direction is not None:
             start_direction = as_direction(start_direction)
 
         try:
             for i in range(0, n):
-                prev, cur, nxt = split[(i - 1) % n], split[i], split[(i + 1) % n]
+                prev, cur, nxt = (
+                    base_quote_pairs[(i - 1) % n],
+                    base_quote_pairs[i],
+                    base_quote_pairs[(i + 1) % n],
+                )
                 if not i and start_direction is not None:
-                    cy, cy_side = split[i][start_direction], int(not start_direction)
+                    cy, cy_side = base_quote_pairs[i][start_direction], int(
+                        not start_direction
+                    )
                 elif not i:
                     cy, cy_side = next(
                         ((cy, j) for j, cy in enumerate(cur[::-1]) if cy not in nxt),
-                        (split[0][1], 0),
+                        (base_quote_pairs[0][1], 0),
                     )
                 else:
                     cy, cy_side = next(
@@ -123,12 +125,12 @@ class Line:
         except StopIteration:
             raise ValueError(
                 "Symbol path isn't linear at [{}:{}]: {}".format(
-                    i - 1, i, xc_symbol_pairs
+                    i - 1, i, xc_symbol_base_quotes
                 )
             )
 
         final_cy_side = int(not (cy_sides[-1]))
-        final_cy = split[-1][not final_cy_side]
+        final_cy = base_quote_pairs[-1][not final_cy_side]
 
         cys += [final_cy]
         cy_sides += [final_cy_side]
@@ -136,6 +138,7 @@ class Line:
         return cys, cy_sides
 
     def create_paths(self):
+        """Create only 2 paths in opposite directions, not from every starting point"""
         self.paths = []
 
         start_from = (0, self.n - 1)
@@ -268,8 +271,8 @@ class Line:
 class Shape(Line):
     # Circular path of symbols without starting point
 
-    def __init__(self, xc_symbol_pairs, start_direction=None, cys_map={}):
-        super().__init__(xc_symbol_pairs, start_direction, cys_map)
+    def __init__(self, xc_symbol_base_quotes, start_direction=None):
+        super().__init__(xc_symbol_base_quotes, start_direction)
 
         if self.cys[0] != self.cys[-1]:
             raise ValueError("Line isn't circular: {}".format(self.symbols))
@@ -314,19 +317,9 @@ class Path:
         "line",
         "start",
         "polarity",
-        "n",
         "indexes",
-        "exchanges",
-        "symbols",
-        "directions",
-        "xccys",
-        "xcsyms",
-        "entities",
         "cys",
         "cy_sides",
-        "conv_pairs",
-        "id",
-        "id2",
     )
 
     index = Line.index
@@ -347,34 +340,66 @@ class Path:
         self.line = line
         self.start = start
         self.polarity = polarity
-        self.n = line.n
         self.indexes = tuple((start + polarity * j) % line.n for j in range(line.n))
 
-        def _get_direction(i):
-            d = line.directions[i]
-            return d if polarity == 1 else int(not d)
-
-        self.exchanges = tuple(line.exchanges[i] for i in self.indexes)
-        self.symbols = tuple(line.symbol(i) for i in self.indexes)
-        self.directions = tuple(_get_direction(i) for i in self.indexes)
-        self.xcsyms = tuple(zip(self.exchanges, self.symbols))
+        xc_symbol_base_quotes = tuple(
+            line.xc_symbol_base_quotes[i] for i in self.indexes
+        )
 
         cys, cy_sides = Line._init_cys(
-            line.n, self.xcsyms, line.cys_map, self.directions[0]
+            line.n, xc_symbol_base_quotes, self.directions[0]
         )
 
         self.cys = tuple(cys)
         self.cy_sides = tuple(cy_sides)
-        self.xccys = tuple(zip(self.exchanges + (None,), self.cys))
-        self.entities = tuple(zip(self.exchanges, self.symbols, self.directions))
 
-        self.conv_pairs = tuple((self.cys[j], self.cys[j + 1]) for j in range(self.n))
+    @property
+    def n(self):
+        return self.line.n
 
+    @property
+    def exchanges(self):
+        return tuple(self.line.exchanges[i] for i in self.indexes)
+
+    @property
+    def symbols(self):
+        return tuple(self.line.symbol(i) for i in self.indexes)
+
+    @property
+    def directions(self):
+        return tuple(self._get_direction(i) for i in self.indexes)
+
+    def _get_direction(self, i):
+        d = self.line.directions[i]
+        return d if self.polarity == 1 else int(not d)
+
+    @property
+    def xcsyms(self):
+        return tuple(zip(self.exchanges, self.symbols))
+
+    @property
+    def xccys(self):
+        return tuple(zip(self.exchanges + (None,), self.cys))
+
+    @property
+    def entities(self):
+        return tuple(zip(self.exchanges, self.symbols, self.directions))
+
+    @property
+    def conv_pairs(self):
+        return tuple((self.cys[j], self.cys[j + 1]) for j in range(self.n))
+
+    @property
+    def id(self):
         _format_xc = lambda xc: xc[:3] if xc is not None else "*"
-        self.id = "-".join(
+        return "-".join(
             "[{xc}]{cy}".format(xc=_format_xc(xc), cy=cy) for xc, cy in self.xccys
         )
-        self.id2 = "-".join(
+
+    @property
+    def id2(self):
+        _format_xc = lambda xc: xc[:3] if xc is not None else "*"
+        return "-".join(
             "[{xc}]{s}:{d}".format(xc=xc, s=s, d=d) for xc, s, d in self.entities
         )
 

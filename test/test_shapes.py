@@ -112,7 +112,9 @@ def test_get_shapes():
 
 
 def test_memalloc():
-    shape = Shape((("binance", "BTC/USDT"), ("kucoin", "BTC/USDT")))
+    shape = Shape(
+        (("binance", "BTC/USDT", "BTC", "USDT"), ("kucoin", "BTC/USDT", "BTC", "USDT"))
+    )
     print(sys.getsizeof(shape))
     print(dir(shape))
     for obj in (shape, shape.paths[0]):
