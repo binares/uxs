@@ -27,6 +27,12 @@ sh_logger = logging.getLogger("uxs.shapes")
 
 
 class Line:
+    """
+    n=2 memory stats:
+     - total size: 1.6 kB
+     - added 6 paths: 6x 2.7kB = 16.2kB
+    """
+
     # Linear path of symbols
     __slots__ = (
         "n",
@@ -37,16 +43,23 @@ class Line:
         "directions",
         "xccys",
         "xcsyms",
-        "cpaths",
+        # "cpaths",
         "cys_map",
         "paths",
     )
 
-    def __init__(self, xc_symbol_pairs, start_direction=None, cys_map={}):
+    def __init__(
+        self,
+        xc_symbol_pairs: Union[Tuple[XCSymbol, ...], Tuple[XCSymbolBaseQuote, ...]],
+        start_direction=None,
+        cys_map: Dict[XCSymbol, Tuple[str, str]] = {},
+    ):
         """Symbol path must be linear
         If `start_direction` is not given, it is determined automatically,
          and may be unexpected if cys_in_symbol_0==cys_in_symbol_1 (or n==2 for circular)
         """
+        if not cys_map and xc_symbol_pairs and len(xc_symbol_pairs[0]) >= 4:
+            cys_map = {(x[0], x[1]): (x[2], x[3]) for x in xc_symbol_pairs}
 
         xc_symbol_pairs = tuple(tuple(x[:2]) for x in xc_symbol_pairs)
         n = len(xc_symbol_pairs)
@@ -413,7 +426,7 @@ class CPath(Path):
 
 MarketsCollection = Dict[str, Dict[str, Market]]
 TickersCollection = Dict[str, Dict[str, Ticker]]
-# XCSymbol = Tuple[str, str]
+XCSymbol = Tuple[str, str]
 # XCSymbolDirection = Tuple[str, str, int]
 XCSymbolBaseQuote = Tuple[str, str, str, str]
 CurrencyGraph = Dict[
@@ -423,6 +436,7 @@ CurrencyGraph = Dict[
 XCSymbols_By_SymbolID = Dict[
     Tuple[str, str], Set[XCSymbolBaseQuote]
 ]  # Each symbol by its sorted((base, quote)) -> [(xc, symbol, base, quote), ...] of all exchanges
+# ShapeTuple = Tuple[Tuple[XCSymbol], Dict[XCSymbol, Tuple[str, str]]]
 Shapes_By_N = Dict[int, List[Shape]]
 
 
@@ -529,13 +543,13 @@ def _create_currency_graph(
     return dict(currency_graph), xcsymbols_by_symbol_id
 
 
-def get_shapes(
+def get_shape_tuples(
     n: Union[int, List[int]],
     markets_coll: MarketsCollection,
     tickers_coll: TickersCollection = {},
     max_unique_exchanges: int = None,
     use_cython: bool = True,
-) -> Shapes_By_N:
+) -> List[Tuple[XCSymbolBaseQuote, ...]]:
     n_values = (n,) if isinstance(n, int) else tuple(n)
     max_n = max(n_values)
 
@@ -611,7 +625,6 @@ def get_shapes(
             corresponding_xcsymbols = xcsymbols_by_symbol_id[symbol_id]
             xcsymbols_lists.append(corresponding_xcsymbols)
 
-        shape_tuples: List[Tuple[Tuple[XCSymbol], Dict[XCSymbol, Tuple[str, str]]]] = []
         if len(cy_trail) == 2:
             # Both xcsymbols lists have the same (exchanges, symbol) pairs; use only one list
             xcsymbols_combinations = itertools.combinations(xcsymbols_lists[0], 2)
@@ -619,39 +632,50 @@ def get_shapes(
             # No repeating (exchange, symbol) between any of the lists
             xcsymbols_combinations = itertools.product(*xcsymbols_lists)
 
-        # Make all combinations of xcsymbols
-        for xcsymbols_combination in xcsymbols_combinations:
-            num_exchanges = len(set(_[0] for _ in xcsymbols_combination))
-            if max_unique_exchanges and num_exchanges > max_unique_exchanges:
-                continue
-            # Create the symbol path
-            xc_symbol_pairs = ()
-            cys_map = {}
-            for i in range(len(cy_trail)):
-                xc, symbol, base, quote = xcsymbols_combination[i]
-                xc_symbol_pairs += ((xc, symbol),)
-                cys_map[(xc, symbol)] = (base, quote)
-            # Create the shape
-            shape_tuples.append((xc_symbol_pairs, cys_map))
+        if max_unique_exchanges:
+            xcsymbols_combinations = [
+                x
+                for x in xcsymbols_combinations
+                if len(set(_[0] for _ in x)) <= max_unique_exchanges
+            ]
+        else:
+            xcsymbols_combinations = list(xcsymbols_combinations)
 
-        return shape_tuples
+        return xcsymbols_combinations
 
-    shape_tuples = []
+    xcsymbols_combinations = []
 
     _started = time.time()
-    for n in n_shapes_of_currencies:
-        for cy_trail in n_shapes_of_currencies[n]:
-            shape_tuples += find_symbol_paths_for_cy_trail(cy_trail)
+    for _n in n_shapes_of_currencies:
+        for cy_trail in n_shapes_of_currencies[_n]:
+            xcsymbols_combinations += find_symbol_paths_for_cy_trail(cy_trail)
     sh_logger.debug(
-        f"Finding {len(shape_tuples)} shapes took {time.time()-_started:.2f} seconds"
+        f"Finding {len(xcsymbols_combinations)} xcsymbol combinations (shape tuples) took {time.time()-_started:.2f} seconds"
     )
 
-    # return shape_tuples
+    return xcsymbols_combinations
 
+
+def _initiate_shapes(shape_tuple: List[Tuple[XCSymbolBaseQuote, ...]]) -> List[Shape]:
     _started = time.time()
-    shapes = [Shape(xcsyms, cys_map=cys_map) for xcsyms, cys_map in shape_tuples]
+    shapes = [Shape(st) for st in shape_tuple]
+
     sh_logger.debug(
         f"Initiating {len(shapes)} shapes took {time.time()-_started:.2f} seconds"
     )
 
     return shapes
+
+
+def get_shapes(
+    n: Union[int, List[int]],
+    markets_coll: MarketsCollection,
+    tickers_coll: TickersCollection = {},
+    max_unique_exchanges: int = None,
+    use_cython: bool = True,
+):
+    """Returns a list of Shape objects."""
+    shape_tuples = get_shape_tuples(
+        n, markets_coll, tickers_coll, max_unique_exchanges, use_cython
+    )
+    return _initiate_shapes(shape_tuples)

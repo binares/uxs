@@ -1,7 +1,9 @@
 import uxs
 from uxs.fintls import shapes_old, shapes
+from uxs.fintls.shapes import Shape
 from fons.log import quick_logging
 import itertools
+import sys
 import time
 import logging
 
@@ -19,15 +21,15 @@ EXCHANGES = ["okx", "binance", "kucoin"]
 
 shapes (new):
 Finding 9063 currency shapes took 4.04 seconds
-Finding 20999 shapes took 0.06 seconds
+Finding 20999 shapes took 0.06 seconds  [1,324,715: 13.41 seconds]
 Initiating 20999 shapes took 3.21 seconds
 
-Fetching 20999 (1059, 19940) shapes for module uxs.fintls.shapes took 9.75 seconds
-
 shapes (w/ cython):
-Finding 9063 currency shapes took 1.91 seconds # Cython
+Finding 9063 currency shapes took 1.91 seconds # Cython  [31,351: 32.90 seconds]
 Initiating 20999 shapes took 2.64 seconds  # shapes_cython._init_cys()
 
+shapes (new):
+Fetching 20999 (1059, 19940) shapes for module uxs.fintls.shapes took 9.75 seconds
 shapes (old):
 Fetching 17448 (1059, 16389) shapes for module uxs.fintls.shapes_old took 64.93 seconds
 """
@@ -107,3 +109,64 @@ def test_get_shapes():
             )
         )"""
         # print(retrieved_shapes)
+
+
+def test_memalloc():
+    shape = Shape((("binance", "BTC/USDT"), ("kucoin", "BTC/USDT")))
+    print(sys.getsizeof(shape))
+    print(dir(shape))
+    for obj in (shape, shape.paths[0]):
+        print("--------\n{}\n--------".format(obj.__class__.__name__))
+        attrs = obj.__class__.__slots__
+        totsize = 0
+        for attr in attrs:
+            size = get_total_size(getattr(obj, attr))
+            print("{}: {}".format(attr, size))
+            totsize += size
+        print("Total size: {}".format(totsize))
+
+    print("------------------")
+    print(sys.getsizeof(Shape.get_path), sys.getsizeof(shape.get_path))
+    totsize = sum(
+        get_total_size(getattr(shape, attr))
+        for attr in dir(shape)
+        if hasattr(shape, attr)
+    )
+    print("Total size: {}".format(totsize))
+
+
+def get_total_size(o, handlers={}, verbose=False):
+    """Returns the approximate memory footprint an object and all of its contents.
+    Automatically finds the contents of the following builtin containers and their subclasses: tuple, list, deque, dict, set and frozenset.
+    To find other objects, add handlers to iterate over their contents:
+        handlers = {SomeContainerClass: iter,
+                    OtherContainerClass: OtherContainerClass.get_elements}
+    """
+    import collections
+
+    dict_handler = lambda d: itertools.chain.from_iterable(d.items())
+    all_handlers = {
+        tuple: iter,
+        list: iter,
+        collections.deque: iter,
+        dict: dict_handler,
+        set: iter,
+        frozenset: iter,
+    }
+    all_handlers.update(handlers)  # user-defined handlers take precedence
+    seen = set()  # track which object id's have already been seen
+    default_size = sys.getsizeof(0)  # estimate sizeof object without __sizeof__
+
+    def sizeof(o):
+        if id(o) in seen:  # do not double count the same object
+            return 0
+        seen.add(id(o))
+        s = sys.getsizeof(o, default_size)
+
+        for typ, handler in all_handlers.items():
+            if isinstance(o, typ):
+                s += sum(map(sizeof, handler(o)))
+                break
+        return s
+
+    return sizeof(o)
