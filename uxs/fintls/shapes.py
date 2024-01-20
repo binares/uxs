@@ -7,18 +7,8 @@ import time
 import logging
 from ccxt.base.types import Market, Ticker  # , Currency
 
-from .basics import (
-    get_conversion_op,
-    as_source,
-    as_target,
-    as_direction,
-    as_ob_side,
-    as_ob_fill_side,
-    convert_quotation,
-    get_source_cy,
-    get_target_cy,
-    create_cy_graph,
-)
+from .basics import as_direction
+
 from . import shapes_cython
 
 from fons.iter import unique, flatten
@@ -572,7 +562,7 @@ def get_shape_tuples(
     n: Union[int, List[int]],
     markets_coll: MarketsCollection,
     tickers_coll: TickersCollection = {},
-    max_unique_exchanges: int = None,
+    max_unique_exchanges: int | None = None,
     use_cython: bool = True,
 ) -> List[Tuple[XCSymbolBaseQuote, ...]]:
     n_values = (n,) if isinstance(n, int) else tuple(n)
@@ -696,7 +686,7 @@ def get_shapes(
     n: Union[int, List[int]],
     markets_coll: MarketsCollection,
     tickers_coll: TickersCollection = {},
-    max_unique_exchanges: int = None,
+    max_unique_exchanges: int | None = None,
     use_cython: bool = True,
 ):
     """Returns a list of Shape objects."""

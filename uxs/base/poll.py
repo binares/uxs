@@ -17,6 +17,7 @@ td = datetime.timedelta
 
 from .ccxt import get_exchange, get_name
 from ._settings import get_setting, get_cache_dir
+from .types import fnInf, prInf
 
 from fons.dict_ops import deep_get
 from fons.io import DateTimeEncoder, SafeFileLock, wait_filelock
@@ -32,13 +33,6 @@ from fons.time import (
 import fons.log
 
 logger, logger2, tlogger, tloggers, tlogger0 = fons.log.get_standard_5(__name__)
-
-
-fnInf = namedtuple("fnInf", "exchange type date file data")
-fnInf.__new__.__defaults__ = (None,) * len(fnInf._fields)
-
-prInf = namedtuple("prInf", "profile exchange type start end file data")
-prInf.__new__.__defaults__ = (None,) * len(prInf._fields)
 
 
 _PRIVATE_METHODS = (

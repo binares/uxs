@@ -1800,6 +1800,9 @@ class asyncCCXTWrapper(ccxtWrapper):
 class _ccxtWrapper(ccxtWrapper, ccxt.Exchange):
     """A dummy class for pretty :rtype: specification"""
 
+class _asyncCcxtWrapper(asyncCCXTWrapper, ccxt.async_support.Exchange):
+    """A dummy class for pretty :rtype: specification"""
+
 
 # _ccxtWrapper.
 def get_name(xc):

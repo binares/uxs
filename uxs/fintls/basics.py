@@ -1,3 +1,6 @@
+from __future__ import annotations
+from typing import Union, Literal, Callable
+
 from fons.math.graph import find_all_paths
 
 # DIRECTION_1 = ('buy','base','to-base','quote-to-base','bid','bids','is-bid','into-ask','into-asks','from-quote','from-quote-to-base')
@@ -8,8 +11,37 @@ from fons.math.graph import find_all_paths
 
 # QUOTATION : 'quote' (0), 'base' (1)
 
+DirectionInput = Union[
+    int,
+    str,
+    Literal[
+        "buy",
+        "base",
+        "to-base",
+        "quote-to-base",
+        "bid",
+        "bids",
+        "is-bid",
+        "into-ask",
+        "into-asks",
+        "from-quote",
+        "from-quote-to-base",
+        "sell",
+        "quote",
+        "to-quote",
+        "base-to-quote",
+        "ask",
+        "asks",
+        "is-ask",
+        "into-bid",
+        "into-bids",
+        "from-base",
+        "from-base-to-quote",
+    ],
+]
 
-def as_direction(direction, inverse=False):
+
+def as_direction(direction: DirectionInput, inverse: bool = False) -> Literal[0, 1]:
     """`direction` - direction of the conversion
     - quote to base = 1 = "buy" = "base" = "into-asks"
     - base to quote = 0 = "sell" = "quote" = "into-bids"""
@@ -51,7 +83,7 @@ def as_direction(direction, inverse=False):
         raise TypeError(type(direction))
     if inverse:
         i = not i
-    return int(i)
+    return int(i)  # type: ignore
 
 
 def as_source(direction, as_string=True):
@@ -177,7 +209,9 @@ def as_ob_fill_side(direction, as_string=True, inverse=False):
     return i
 
 
-def get_crossed_condition(side, closed=True, inverse=False):
+def get_crossed_condition(
+    side, closed=True, inverse=False
+) -> Callable[[float, float], bool]:
     """For *outwards* crossing. Set inverse to True for inwards crossing."""
     if closed:
         _ops = [lambda x, y: x < y, lambda x, y: x > y]

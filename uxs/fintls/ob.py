@@ -1,6 +1,17 @@
+from __future__ import annotations
+from typing import (
+    Tuple,
+    List,
+    Union,
+    Iterator,
+    Iterable,
+    Literal,
+    overload,
+)  # , Annotated  # Python 3.9
 import itertools
 import pandas as pd
 import ccxt
+from ccxt.base.types import OrderBook as CCXTOrderBook, Num
 import datetime
 
 dt = datetime.datetime
@@ -16,6 +27,30 @@ from .utils import resolve_times
 
 ISOFORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
+IntNA = Union[int, None]
+FloatNA = Union[float, None]
+
+OrderBookSide = Literal["bids", "asks"]
+OrderBookItem = Union[Tuple[float, float], Tuple[float, float, int]]
+# OrderBookItem = Annotated[
+#    List[float], 3
+# ]  # Better use 'tuple' type and `type: ignore` comments than uniformly-typed `list`
+#    # with non-enforced length
+OrderBookIterator = Iterator[OrderBookItem]
+OrderBookBranch = List[OrderBookItem]
+
+
+class OrderBook(CCXTOrderBook):
+    bids: OrderBookBranch  # type: ignore
+    asks: OrderBookBranch  # type: ignore
+
+
+class _OrderBook(OrderBook):
+    symbol: str
+
+
+Remainder = Union[float, OrderBookItem]
+
 
 def get_stop_condition(side, closed=True, inverse=False):
     """Returns the stop condition operation if book is iterated from start
@@ -29,11 +64,17 @@ def is_ob_crossed(price, other, side, closed=True, inverse=False):
 
 
 def exec_step_by_base_volume(
-    it, step, price=None, remainder=0, cumother=0, stop="raise", i=None
+    it: OrderBookIterator,
+    step: float,
+    price: FloatNA = None,
+    remainder: Remainder = 0,
+    cumother: FloatNA = 0,
+    stop="raise",
+    i=None,
 ):
     """Set `cumother` to None to exclude from calculation"""
     # To allow the remainder from `get_to_matching_price` to be used in this function
-    if hasattr(remainder, "__iter__"):
+    if isinstance(remainder, Iterable):
         if remainder[0] is not None:
             it = itertools.chain([remainder], it)
         remainder = 0
@@ -42,6 +83,10 @@ def exec_step_by_base_volume(
     _i = 0
     if cumvol < step:
         if remainder and calc_co:
+            if not price:
+                raise ValueError(
+                    "`price` must be provided if `cumother` is not None and `remainder` is specified"
+                )
             cumother += price * remainder
         while cumvol < step:
             try:
@@ -61,6 +106,8 @@ def exec_step_by_base_volume(
                 else:
                     cumother += price * (step - (cumvol - vol))
     elif calc_co:
+        if not price:
+            raise ValueError("`price` must be provided if `cumother` is not None")
         cumother += price * step
     remainder = cumvol - step
     if i is not None:
@@ -69,11 +116,19 @@ def exec_step_by_base_volume(
 
 
 def exec_step_by_quote_volume(
-    it, step, price=None, remainder=0, cumother=0, stop="raise", i=None
+    it: OrderBookIterator,
+    step: float,
+    price: FloatNA = None,
+    remainder: Remainder = 0,
+    cumother: FloatNA = 0,
+    stop="raise",
+    i=None,
 ):
-    """Set `cumother` to None to exclude from calculation"""
+    """
+    param cumother: set to None to exclude from calculation
+    """
     # To allow the remainder from `get_to_matching_price` to be used in this function
-    if hasattr(remainder, "__iter__"):
+    if isinstance(remainder, Iterable):
         if remainder[0] is not None:
             it = itertools.chain([remainder], it)
         remainder = 0
@@ -82,6 +137,10 @@ def exec_step_by_quote_volume(
     _i = 0
     if cumvol < step:
         if remainder and calc_co:
+            if not price:
+                raise ValueError(
+                    "`price` must be provided if `cumother` is not None and `remainder` is specified"
+                )
             cumother += remainder / price
         while cumvol < step:
             try:
@@ -102,6 +161,8 @@ def exec_step_by_quote_volume(
                 else:
                     cumother += (step - (cumvol - qvol)) / price
     elif calc_co:
+        if not price:
+            raise ValueError("`price` must be provided if `cumother` is not None")
         cumother += step / price
     remainder = cumvol - step
     if i is not None:
@@ -110,7 +171,14 @@ def exec_step_by_quote_volume(
 
 
 def exec_step(
-    it, step, price=None, remainder=0, cumother=0, stop="raise", i=None, unit="base"
+    it: OrderBookIterator,
+    step: float,
+    price: FloatNA = None,
+    remainder: Remainder = 0,
+    cumother: FloatNA = 0,
+    stop="raise",
+    i=None,
+    unit="base",
 ):
     unit = quotation_as_string(unit)
     if unit == "base":
@@ -162,7 +230,13 @@ def calc_vwap(step, cumother, unit="base"):
 
 
 def get_to_matching_volume(
-    ob_branch, volume, price=None, remainder=0, cumother=0, i=0, unit="base"
+    ob_branch: OrderBookBranch,
+    volume: float,
+    price: FloatNA = None,
+    remainder: Remainder = 0,
+    cumother: FloatNA = 0,
+    i=0,
+    unit="base",
 ):
     item = exec_step(
         iter(ob_branch),
@@ -176,7 +250,7 @@ def get_to_matching_volume(
     )
     price, remainder, cumother = item[:3]
     try:
-        i = item[3]
+        i = item[3]  # type: ignore
     except IndexError:
         pass
 
@@ -195,7 +269,13 @@ def get_to_matching_volume(
 
 
 def get_to_matching_price(
-    ob_branch, price, side, closed=True, remainder=(None, 0), cumother=0, i=0
+    ob_branch: OrderBookBranch,
+    price: float,
+    side: OrderBookSide,
+    closed: bool = True,
+    remainder: tuple[FloatNA, float] = (None, 0),
+    cumother: FloatNA = 0,
+    i=0,
 ):
     """`remainder` is tuple containing the last iteration result."""
     op = get_stop_condition(side, closed)
@@ -203,7 +283,7 @@ def get_to_matching_price(
     cumvol = _i = 0
     calc_co = cumother is not None
     if remainder[0] is not None:
-        it = itertools.chain([remainder], it)
+        it: Iterator[OrderBookItem] = itertools.chain([remainder], it)  # type: ignore
         remainder = (None, 0)
     while True:
         try:
@@ -237,11 +317,11 @@ def get_to_matching_price(
     }
 
 
-def parse_item(x, price_key=0, amount_key=1, count_or_id_key=None):
+def parse_item(x, price_key=0, amount_key=1, count_or_id_key=None) -> OrderBookItem:
     item = [float(x[price_key]), float(x[amount_key])]
     if count_or_id_key is not None:
         item.append(int(x[count_or_id_key]))
-    return item
+    return item  # type: ignore
 
 
 def parse_branch(branch, price_key=0, amount_key=1, count_or_id_key=None):
@@ -262,7 +342,7 @@ def create_orderbook(
     price_key=0,
     amount_key=1,
     count_or_id_key=2,
-):
+) -> _OrderBook:
     datetime, timestamp = resolve_times(data, add_time)
     return {
         "symbol": data["symbol"],
@@ -280,7 +360,14 @@ def create_orderbook(
     }
 
 
-def update_branch(item, branch, side="bids", is_delta=False, round_to=None, **keys):
+def update_branch(
+    item,
+    branch: OrderBookBranch,
+    side: OrderBookSide = "bids",
+    is_delta: bool = False,
+    round_to: IntNA = None,
+    **keys,
+):
     """:param round_to: adding deltas is imprecise, new amount is rounded"""
     new_item = parse_item(item, **keys)
     rate, amount = new_item[:2]
@@ -297,7 +384,7 @@ def update_branch(item, branch, side="bids", is_delta=False, round_to=None, **ke
                 new_amount = max(0.0, prev_amount + amount)
                 if round_to is not None:
                     new_amount = round(new_amount, round_to)
-                new_item = [rate, new_amount, *new_item[2:]]
+                new_item: OrderBookItem = [rate, new_amount, *new_item[2:]]  # type: ignore
             if new_amount:
                 branch[loc] = new_item
             else:
@@ -310,7 +397,7 @@ def update_branch(item, branch, side="bids", is_delta=False, round_to=None, **ke
     return (rate, prev_amount, max(0.0, new_amount))
 
 
-def assert_integrity(ob):
+def assert_integrity(ob: OrderBook):
     ask, bid = ob["asks"], ob["bids"]
     assert all(ask[i][0] < ask[i + 1][0] for i in range(max(0, len(ask) - 1)))
     # except AssertionError: print('Contains unsorted ask: {}'.format(ask))
@@ -318,7 +405,7 @@ def assert_integrity(ob):
     # except AssertionError: print('Contains unsorted bid: {}'.format(bid))
 
 
-def infer_side(ob, price):
+def infer_side(ob: OrderBook, price: float):
     """
     Determine in which ob side the price is located
     """
@@ -332,9 +419,22 @@ def infer_side(ob, price):
         return None
 
 
-def get_bidask(ob, as_dict=False):
+@overload
+def get_bidask(
+    ob: OrderBook, as_dict: Literal[False] = False
+) -> Tuple[FloatNA, FloatNA]:
+    ...
+
+
+@overload
+def get_bidask(ob: OrderBook, as_dict: Literal[True] = True) -> dict[str, FloatNA]:
+    ...
+
+
+def get_bidask(ob: OrderBook, as_dict: bool = False):
     bid = ask = bidVolume = askVolume = None
     if ob["bids"]:
+        k = ob["bids"][0]
         bid, bidVolume = ob["bids"][0][:2]
     if ob["asks"]:
         ask, askVolume = ob["asks"][0][:2]
@@ -350,7 +450,7 @@ def get_bidask(ob, as_dict=False):
     }
 
 
-def calc_ob_mid_price(ob, na=None):
+def calc_ob_mid_price(ob: OrderBook, na=None):
     """
     :returns:
         mid price or `na` if it could not be determined
@@ -358,7 +458,7 @@ def calc_ob_mid_price(ob, na=None):
     return calc_mid_price(*get_bidask(ob), na)
 
 
-def calc_mid_price(bid, ask, na=None):
+def calc_mid_price(bid: FloatNA, ask: FloatNA, na=None):
     """
     :returns:
         mid price or `na` if it could not be determined
@@ -366,7 +466,7 @@ def calc_mid_price(bid, ask, na=None):
     bid_ = bid and not pd.isnull(bid)
     ask_ = ask and not pd.isnull(ask)
     if bid_ and ask_:
-        return (bid + ask) / 2
+        return (bid + ask) / 2  # type: ignore
     elif bid_:
         return bid
     elif ask_:
