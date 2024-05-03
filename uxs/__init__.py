@@ -39,7 +39,6 @@ import uxs.fintls as fintls
 from uxs.binance import binance
 from uxs.binancefu import binancefu
 from uxs.bitmex import bitmex
-from uxs.coindcx import coindcx
 from uxs.hitbtc import hitbtc
 from uxs.kraken import kraken
 from uxs.krakenfu import krakenfu

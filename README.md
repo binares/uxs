@@ -20,7 +20,6 @@ Supported exchanges:
 | binance      |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
 | binancefu    |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
 | bitmex       |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
-| coindcx      |   p    |      p      |     +     |    |   p   |   +    |    +    |   p   |  +   |          |
 | hitbtc       |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
 | kraken       |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |
 | krakenfu     |   +    |      p      |     +     |    |   p   |   +    |    +    |   +   |  +   |    +     |
