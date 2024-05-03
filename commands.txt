@@ -37,18 +37,18 @@ python -m uxs.test_xc bitmex ob=BTC/USD ob_limit=25 d test
 python -m uxs.test_xc bitmex tickers d
 python -m uxs.test_xc bitmex pos=ETH/USD,BTC/USD order=ETH/USD,BTC/USD d test
 python -m uxs.test_xc bitmex order+BTC/USD,limit,buy,10,12000 test
-python -m uxs.test_xc binancefu order position d
-python -m uxs.test_xc binancefu ob=BTC/USDT d
-python -m uxs.test_xc binancefu ticker=BTC/USDT,ETH/USDT m d
-python -m uxs.test_xc binancefu trades=BTC/USDT,ETH/USDT m d
-python -m uxs.test_xc binancefu ohlcv=BTC/USDT d
-python -m uxs.test_xc krakenfu ticker=XRP/BTC m u r
-python -m uxs.test_xc krakenfu ticker=fv_xrpxbt_200327
-python -m uxs.test_xc krakenfu ob=BTC/USD d
-python -m uxs.test_xc krakenfu trades=BTC/USD d
-python -m uxs.test_xc krakenfu order position test d u r s
-python -m uxs.test_xc krakenfu order+-BTC/USD,limit,buy,5,100 test d
-python -m uxs.test_xc krakenfu "order+-BTC/USD,stop,buy,5,null,{stopPrice: 2000}" test d
+python -m uxs.test_xc binancefutures order position d
+python -m uxs.test_xc binancefutures ob=BTC/USDT d
+python -m uxs.test_xc binancefutures ticker=BTC/USDT,ETH/USDT m d
+python -m uxs.test_xc binancefutures trades=BTC/USDT,ETH/USDT m d
+python -m uxs.test_xc binancefutures ohlcv=BTC/USDT d
+python -m uxs.test_xc krakenfutures ticker=XRP/BTC m u r
+python -m uxs.test_xc krakenfutures ticker=fv_xrpxbt_200327
+python -m uxs.test_xc krakenfutures ob=BTC/USD d
+python -m uxs.test_xc krakenfutures trades=BTC/USD d
+python -m uxs.test_xc krakenfutures order position test d u r s
+python -m uxs.test_xc krakenfutures order+-BTC/USD,limit,buy,5,100 test d
+python -m uxs.test_xc krakenfutures "order+-BTC/USD,stop,buy,5,null,{stopPrice: 2000}" test d
 
 python -m gen.markets southxchange recalculate symbols=BTC/USDT min_cost=12USDT
 
@@ -67,8 +67,8 @@ python -m examples.f_caching
 python -m examples.g_storing_tokens
 
 python -m uxs.ui.desk bitmex BTC/USD ETH/USD "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range
-python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{krakenfu,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 -- kucoin BTC/USDT ---- test
-python -m uxs.ui.desk binancefu BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range -- kucoin BTC/USDT ---- test
-python -m uxs.ui.desk krakenfu XRP/USD{binancefu,XRP/USDT} "amounts=XRP/USD=2000"
+python -m uxs.ui.desk binancefutures BTC/USDT{kucoin} ETH/USDT{krakenfu,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 -- kucoin BTC/USDT ---- test
+python -m uxs.ui.desk binancefutures BTC/USDT{kucoin} ETH/USDT{bitmex,ETH/USD} "amounts=BTC/USD=20 USD,ETH/USD=0.2 ETH" round_price=3 include=random,automate,amount_range -- kucoin BTC/USDT ---- test
+python -m uxs.ui.desk krakenfutures XRP/USD{binancefutures,XRP/USDT} "amounts=XRP/USD=2000"
 
 python -m uxs.ui.stoploss bitmex BTC/USD ETH/USD test

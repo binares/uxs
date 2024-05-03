@@ -7,24 +7,24 @@ E.g. binancefu extends a config passed to ccxt.binance with {'options': ...} whi
 directs the endpoints to Binance Futures (instead of the default one, Binance "spot").
 """
 
-from .binancefu import binancefu
+from .binancefutures import binancefutures
 from .bitmex import bitmex
 from .btsefu import btsefu
 from .coinbene import coinbene
 from .dragonex import dragonex
 from .hitbtc import hitbtc
-from .krakenfu import krakenfu
+from .krakenfutures import krakenfutures
 from .luno import luno
 from .poloniex import poloniex
 
 __all__ = [
-    "binancefu",
+    "binancefutures",
     "bitmex",
     "btsefu",
     "coinbene",
     "dragonex",
     "hitbtc",
-    "krakenfu",
+    "krakenfutures",
     "luno",
     "poloniex",
 ]

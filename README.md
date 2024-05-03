@@ -15,16 +15,16 @@ Latest development version:
 
 Supported exchanges:
 
-|              | ticker | all_tickers | orderbook | l3 | ohlcv | trades | balance | order | fill | position |
-|--------------|--------|-------------|-----------|----|-------|--------|---------|-------|------|----------|
-| binance      |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
-| binancefu    |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
-| bitmex       |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
-| hitbtc       |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
-| kraken       |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |
-| krakenfu     |   +    |      p      |     +     |    |   p   |   +    |    +    |   +   |  +   |    +     |
-| kucoin       |   +    |      +      |     +     |    |   p   |   +    |    +    |   o   |  o   |          |
-| poloniex     |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
+|                | ticker | all_tickers | orderbook | l3 | ohlcv | trades | balance | order | fill | position |
+|----------------|--------|-------------|-----------|----|-------|--------|---------|-------|------|----------|
+| binance        |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |          |
+| binancefutures |   +    |      +      |     +     |    |   +   |   +    |    +    |   +   |  p   |    +     |
+| bitmex         |   p    |      +      |     +     |    |   p   |   p    |    +    |   o   |  o   |    +     |
+| hitbtc         |   +    |      p      |     +     |    |   p   |   p    |    p    |   +   |  +   |          |
+| kraken         |   +    |      p      |     +     |    |   +   |   +    |         |   +   |  +   |          |
+| krakenfutures  |   +    |      p      |     +     |    |   p   |   +    |    +    |   +   |  +   |    +     |
+| kucoin         |   +    |      +      |     +     |    |   p   |   +    |    +    |   o   |  o   |          |
+| poloniex       |   p    |      +      |     +     |    |   p   |   p    |    +    |   +   |  +   |          |
 
 Note that there aren't separate subscription channels for *balance*, *order*, *fill* (your trade) and *position* - they all belong under *account*: `xs.subscribe_to_account()`. However some exchanges like bitmex require you to subscribe to each market directly for order and fill updates: `xs.subscribe_to_own_market(symbol)` (but you'll still want to also subscribe to *account*, as it contains balance and position updates). 
 

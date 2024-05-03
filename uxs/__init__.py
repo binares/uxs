@@ -37,11 +37,11 @@ import uxs.fintls as fintls
 
 
 from uxs.binance import binance
-from uxs.binancefu import binancefu
+from uxs.binancefutures import binancefutures
 from uxs.bitmex import bitmex
 from uxs.hitbtc import hitbtc
 from uxs.kraken import kraken
-from uxs.krakenfu import krakenfu
+from uxs.krakenfutures import krakenfutures
 from uxs.kucoin import kucoin
 from uxs.poloniex import poloniex
 

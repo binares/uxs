@@ -68,7 +68,7 @@ FEE_FROM_TARGET = ["binance", "luno", "poloniex"]
 COST_LIMIT_WITH_FEE = []
 PUBLIC_AUTH_REQUIRED = ["bitclave", "coinsuper"]  # for public operations
 _E_REPLACE = {
-    "binancefu": "binance",
+    "binancefutures": "binance",
     "btsefu": "btse",
     "huobi": "huobipro",
     "coinbase-pro": "coinbasepro",
