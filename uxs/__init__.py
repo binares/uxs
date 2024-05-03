@@ -41,7 +41,6 @@ from uxs.binancefu import binancefu
 from uxs.bitmex import bitmex
 from uxs.coinbene import coinbene
 from uxs.coindcx import coindcx
-from uxs.gateiofu import gateiofu
 from uxs.hitbtc import hitbtc
 from uxs.kraken import kraken
 from uxs.krakenfu import krakenfu

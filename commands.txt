@@ -49,9 +49,6 @@ python -m uxs.test_xc krakenfu trades=BTC/USD d
 python -m uxs.test_xc krakenfu order position test d u r s
 python -m uxs.test_xc krakenfu order+-BTC/USD,limit,buy,5,100 test d
 python -m uxs.test_xc krakenfu "order+-BTC/USD,stop,buy,5,null,{stopPrice: 2000}" test d
-python -m uxs.test_xc gateiofu ob=BTC/USDT d
-python -m uxs.test_xc gateiofu ob=BTC/USDT -unassign 8
-python -m uxs.test_xc gateiofu ob=BTC/USD,ETH/USD,BTC/USDT
 python -m uxs.test_xc coindcx ob=BTC/USDT trades=BTC/USDT u r c
 python -m uxs.test_xc coindcx order d
 python -m uxs.test_xc coindcx order+BTC/USDT,limit,buy,0.002,9200 d
