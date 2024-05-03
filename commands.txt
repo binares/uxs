@@ -49,11 +49,6 @@ python -m uxs.test_xc krakenfu trades=BTC/USD d
 python -m uxs.test_xc krakenfu order position test d u r s
 python -m uxs.test_xc krakenfu order+-BTC/USD,limit,buy,5,100 test d
 python -m uxs.test_xc krakenfu "order+-BTC/USD,stop,buy,5,null,{stopPrice: 2000}" test d
-python -m uxs.test_xc luno l3=ETH/BTC d
-python -m uxs.test_xc luno ob=ETH/BTC u r d
-python -m uxs.test_xc luno trades=ETH/BTC d verbose
-python -m uxs.test_xc luno order
-python -m uxs.test_xc luno order+XRP/BTC,limit,buy,0.002,9200 d
 
 python -m gen.markets southxchange recalculate symbols=BTC/USDT min_cost=12USDT
 
