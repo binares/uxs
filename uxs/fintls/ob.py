@@ -422,13 +422,11 @@ def infer_side(ob: OrderBook, price: float):
 @overload
 def get_bidask(
     ob: OrderBook, as_dict: Literal[False] = False
-) -> Tuple[FloatNA, FloatNA]:
-    ...
+) -> Tuple[FloatNA, FloatNA]: ...
 
 
 @overload
-def get_bidask(ob: OrderBook, as_dict: Literal[True] = True) -> dict[str, FloatNA]:
-    ...
+def get_bidask(ob: OrderBook, as_dict: Literal[True] = True) -> dict[str, FloatNA]: ...
 
 
 def get_bidask(ob: OrderBook, as_dict: bool = False):

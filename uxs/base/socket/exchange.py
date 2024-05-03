@@ -394,6 +394,7 @@ class ExchangeSocket(WSClient):
         "assert_integrity": False,
         # whether or not bid and ask of ticker if modified on orderbook update
         "sends_bidAsk": False,
+        "has_3rd_item": False,  # whether id/timestamp is in [price, amount, id/timestamp]
     }
 
     l3 = dict(ob)
@@ -2518,10 +2519,10 @@ class ExchangeSocket(WSClient):
                         o["symbol"],
                     )
                     if subs and self._is_time(method, _id(*_args)):
-                        coros[
-                            (method, o["id"], o["symbol"])
-                        ] = self.poll_fetch_and_activate(
-                            subs, method, _args, _id(*_args)
+                        coros[(method, o["id"], o["symbol"])] = (
+                            self.poll_fetch_and_activate(
+                                subs, method, _args, _id(*_args)
+                            )
                         )
             elif self.has_got(method, "symbolRequired"):
                 symbols = unique(
@@ -3241,9 +3242,11 @@ class ExchangeSocket(WSClient):
                 "type": new_type,
                 "side": new_side,
                 "amount": args[2] if len(args) > 2 and args[2] is not None else None,
-                "price": args[3]
-                if len(args) > 3
-                else (o_prev.get("price") if new_type != "market" else None),
+                "price": (
+                    args[3]
+                    if len(args) > 3
+                    else (o_prev.get("price") if new_type != "market" else None)
+                ),
                 "timestamp": None,
             }
             immediate_fill = None

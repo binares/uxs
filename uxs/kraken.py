@@ -268,6 +268,7 @@ class kraken(ExchangeSocket):
         # This is set to 10 because its the exchange's default
         "default_limit": 10,
         "limits": [10, 25, 100, 500, 1000],
+        "has_3rd_item": True,
     }
     order = {
         "cancel_automatically": "if-not-subbed-to-account",
@@ -664,7 +665,7 @@ class kraken(ExchangeSocket):
             amount = float(amount)
             ts = int(float(ts) * 1000)
             timestamp = max(timestamp, ts) if timestamp is not None else ts
-            return [price, amount]
+            return [price, amount, timestamp]
 
         symbol = self.convert_symbol(r[-1], 0)
 

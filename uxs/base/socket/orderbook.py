@@ -106,7 +106,9 @@ class OrderbookMaintainer:
         return f
 
     def build_ob(self, ob):
-        return create_orderbook(ob)
+        return create_orderbook(
+            ob, count_or_id_key=2 if self.xs.ob["has_3rd_item"] else None
+        )
 
     async def _fetch_and_create(self, symbol):
         try:
